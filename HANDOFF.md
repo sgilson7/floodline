@@ -144,6 +144,13 @@ this is the index.
 * **macroquad's bundle needs `var register_plugin;` declared before it loads.**
   It assigns to an undeclared global under `"use strict"`. Already in
   `index.html`; do not tidy it away.
+* **A locally built page and the deployed page have different build hashes**,
+  and design §8 says mismatched builds cannot join. The hash is the sha256 of
+  the wasm, and CI's rustc is not the same version as yours, so the same source
+  produces a different binary. This is correct and is the guard doing its job —
+  but when phase 4 tries a local tab against the deployed one they will refuse
+  each other, and the reason will not be obvious at the time. Test two tabs on
+  the *same* build.
 
 ## How the tests are meant to be used
 
