@@ -31,6 +31,18 @@
   <canvas id="glcanvas" tabindex="1"></canvas>
 
   <script>window.FLOODLINE_BUILD = "__BUILD__";</script>
+  <!--
+    Declared before anything else, because mq_js_bundle.js needs it to exist.
+    macroquad's bundle carries an inlined websocket plugin that does
+    `register_plugin = function (e) { ... }` against a global it never declares,
+    and the bundle runs under "use strict" — so on every single page load it
+    threw `ReferenceError: register_plugin is not defined` before any of our own
+    scripts had a chance to declare one. The websocket plugin is not something
+    this game uses, so nothing visibly broke; what it cost was an uncaught error
+    on every load, sitting in the console ready to be mistaken for the cause of
+    whatever goes wrong next. One `var` buys a clean console.
+  -->
+  <script>var register_plugin;</script>
   <script src="config.js"></script>
   <script src="mq_js_bundle.js"></script>
   <!-- Both plugins register themselves and must be in place before load(). -->

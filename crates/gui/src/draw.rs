@@ -1,0 +1,276 @@
+//! Everything on the screen, drawn with primitives.
+
+use crate::palette;
+use crate::screen::{LOGICAL_H, LOGICAL_W, PANEL_W};
+use macroquad::prelude::*;
+use sim::{PlayerId, World};
+
+/// A map cell is eight logical pixels (plan phase 5), so 128 cells is 1024 —
+/// which fits the canvas beside a 366-pixel panel with room to breathe.
+pub const CELL: f32 = 8.0;
+pub const MAP_X: f32 = 12.0;
+pub const MAP_Y: f32 = 12.0;
+
+/// Where the map sits on the canvas. Used by input in phase 5; kept here
+/// beside the drawing so the two cannot disagree about where a cell is.
+#[allow(dead_code)]
+pub fn map_rect() -> Rect {
+    Rect::new(MAP_X, MAP_Y, sim::MAP_W as f32 * CELL, sim::MAP_H as f32 * CELL)
+}
+
+/// The cell under a point in logical coordinates, if any.
+#[allow(dead_code)]
+pub fn cell_at(x: f32, y: f32) -> Option<(i32, i32)> {
+    let r = map_rect();
+    if !r.contains(vec2(x, y)) {
+        return None;
+    }
+    Some((((x - r.x) / CELL) as i32, ((y - r.y) / CELL) as i32))
+}
+
+pub fn world(w: &World, me: PlayerId, selected: &[sim::CitizenId]) {
+    ground(w);
+    water(w);
+    buildings(w);
+    citizens(w, selected);
+    pings(w);
+    let _ = me;
+}
+
+fn ground(w: &World) {
+    let relief = *w.map.height.iter().max().unwrap_or(&1) as i32;
+    for y in 0..sim::MAP_H {
+        for x in 0..sim::MAP_W {
+            let i = sim::Map::idx(x, y);
+            draw_rectangle(
+                MAP_X + x as f32 * CELL,
+                MAP_Y + y as f32 * CELL,
+                CELL,
+                CELL,
+                palette::ground(w.map.ground[i], w.map.height[i], relief),
+            );
+        }
+    }
+}
+
+fn water(w: &World) {
+    if w.water.volume() == 0 {
+        return;
+    }
+    for y in 0..sim::MAP_H {
+        for x in 0..sim::MAP_W {
+            let d = w.water.depth[sim::Map::idx(x, y)];
+            if d == 0 {
+                continue;
+            }
+            draw_rectangle(
+                MAP_X + x as f32 * CELL,
+                MAP_Y + y as f32 * CELL,
+                CELL,
+                CELL,
+                palette::water(d),
+            );
+        }
+    }
+}
+
+fn buildings(w: &World) {
+    for b in &w.buildings {
+        if b.state == sim::building::BuildState::Rubble {
+            continue;
+        }
+        let (bw, bh) = b.kind.size();
+        let x = MAP_X + b.x as f32 * CELL;
+        let y = MAP_Y + b.y as f32 * CELL;
+        let (pw, ph) = (bw as f32 * CELL, bh as f32 * CELL);
+        let colour = palette::player(b.owner);
+
+        if b.standing_now() {
+            draw_rectangle(x, y, pw, ph, colour);
+            draw_rectangle_lines(x, y, pw, ph, 1.0, palette::BACKDROP);
+        } else {
+            // A site is an outline: you can see what is coming and that it is
+            // not there yet.
+            draw_rectangle(x, y, pw, ph, Color { a: 0.20, ..colour });
+            draw_rectangle_lines(x, y, pw, ph, 1.0, colour);
+        }
+
+        let g = palette::glyph(b.kind);
+        if !g.is_empty() && pw >= CELL * 2.0 {
+            let m = measure_text(g, None, 13, 1.0);
+            draw_text(
+                g,
+                x + (pw - m.width) / 2.0,
+                y + (ph + m.height) / 2.0,
+                13.0,
+                palette::BACKDROP,
+            );
+        }
+    }
+}
+
+/// A circle with two lines for legs (design §1), and a ring in the owner's
+/// colour when selected.
+fn citizens(w: &World, selected: &[sim::CitizenId]) {
+    for c in &w.citizens {
+        if !c.alive() {
+            continue;
+        }
+        let px = MAP_X + c.pos.x.raw() as f32 / 256.0 * CELL;
+        let py = MAP_Y + c.pos.y.raw() as f32 / 256.0 * CELL;
+        let colour = palette::player(c.owner);
+
+        if selected.contains(&c.id) {
+            draw_circle_lines(px, py, 5.0, 1.0, palette::INK);
+        }
+        draw_circle(px, py, 2.0, colour);
+        draw_line(px, py + 1.5, px - 1.5, py + 4.0, 1.0, colour);
+        draw_line(px, py + 1.5, px + 1.5, py + 4.0, 1.0, colour);
+
+        // Somebody in trouble is worth seeing from across the map.
+        if c.swept {
+            draw_circle_lines(px, py, 4.0, 1.0, palette::ALARM);
+        }
+    }
+}
+
+fn pings(w: &World) {
+    for p in &w.pings {
+        let age = w.tick.saturating_sub(p.at) as f32
+            / sim::balance::PING_LIFETIME.max(1) as f32;
+        let r = 4.0 + 14.0 * age;
+        draw_circle_lines(
+            MAP_X + p.x as f32 * CELL + CELL / 2.0,
+            MAP_Y + p.y as f32 * CELL + CELL / 2.0,
+            r,
+            2.0,
+            Color { a: 1.0 - age, ..palette::player(p.by) },
+        );
+    }
+}
+
+/// The side panel: what a player needs to know without looking away from the
+/// map (plan phase 5).
+pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: &[u32]) {
+    let x = LOGICAL_W - PANEL_W;
+    draw_rectangle(x, 0.0, PANEL_W, LOGICAL_H, palette::PANEL);
+    draw_line(x, 0.0, x, LOGICAL_H, 1.0, palette::RULE);
+
+    let left = x + 18.0;
+    let mut y = 44.0;
+    let line = |text: &str, size: u16, colour: Color, y: &mut f32| {
+        draw_text(text, left, *y, size as f32, colour);
+        *y += size as f32 + 8.0;
+    };
+
+    line("FLOODLINE", 28, palette::INK, &mut y);
+    y += 6.0;
+
+    let omen = match w.omen() {
+        sim::Omen::Quiet => "all quiet",
+        sim::Omen::Uneasy => "the elders are uneasy",
+        sim::Omen::Impact => "THE WATER IS HERE",
+        sim::Omen::Aftermath => "it is over",
+    };
+    let omen_colour = match w.omen() {
+        sim::Omen::Impact => palette::ALARM,
+        sim::Omen::Uneasy => palette::WARNING,
+        _ => palette::FAINT,
+    };
+    line(
+        &format!("age {} of {}   day {} of {}", w.age(), sim::balance::MAX_AGE,
+                 w.day_of_age(), sim::balance::DAYS_PER_AGE),
+        18, palette::INK, &mut y,
+    );
+    line(omen, 18, omen_colour, &mut y);
+    y += 10.0;
+
+    let goods = w.treasury(me);
+    line(
+        &format!("food {}   wood {}   stone {}", goods.food, goods.wood, goods.stone),
+        18, palette::INK, &mut y,
+    );
+    y += 14.0;
+
+    line("CITIES", 15, palette::FAINT, &mut y);
+    for &p in &w.players {
+        let alive = w.population(p);
+        let mine = if p == me { " (you)" } else { "" };
+        let gone = if w.dropped.contains(&p) { " — gone" } else { "" };
+        draw_rectangle(left, y - 10.0, 10.0, 10.0, palette::player(p));
+        draw_text(
+            &format!("city {}{}: {} souls{}", p.0, mine, alive, gone),
+            left + 18.0,
+            y,
+            17.0,
+            if alive == 0 { palette::FAINT } else { palette::INK },
+        );
+        y += 24.0;
+    }
+
+    y += 14.0;
+    let (text, colour) = match status {
+        net::Status::Lobby => ("in the lobby — press SPACE to start".to_owned(), palette::WARNING),
+        net::Status::Playing => ("playing".to_owned(), palette::FAINT),
+        net::Status::WaitingOn(who) => (
+            format!("waiting on {}", who.iter().map(|p| format!("city {}", p.0))
+                .collect::<Vec<_>>().join(", ")),
+            palette::WARNING,
+        ),
+        net::Status::Desync { with, tick } => (
+            format!("DESYNC with city {} at tick {tick}", with.0), palette::ALARM,
+        ),
+        net::Status::Ended(reason) => (reason.clone(), palette::ALARM),
+    };
+    line(&text, 17, colour, &mut y);
+
+    // The bottom of the panel is for the things you only look at when
+    // something is wrong.
+    let mut y = LOGICAL_H - 74.0;
+    line(&format!("tick {}", w.tick), 15, palette::FAINT, &mut y);
+    line(&format!("peers at {ticks:?}"), 15, palette::FAINT, &mut y);
+    line(&format!("build {build}   seed {}", w.seed), 15, palette::FAINT, &mut y);
+}
+
+/// The score screen (design §4).
+pub fn score(w: &World) {
+    let s = w.score();
+    let panel = Rect::new(LOGICAL_W / 2.0 - 320.0, LOGICAL_H / 2.0 - 200.0, 640.0, 400.0);
+    draw_rectangle(panel.x, panel.y, panel.w, panel.h, Color { a: 0.96, ..palette::PANEL });
+    draw_rectangle_lines(panel.x, panel.y, panel.w, panel.h, 2.0, palette::RULE);
+
+    let left = panel.x + 40.0;
+    let mut y = panel.y + 64.0;
+    let line = |text: &str, size: u16, colour: Color, y: &mut f32| {
+        draw_text(text, left, *y, size as f32, colour);
+        *y += size as f32 + 12.0;
+    };
+
+    let ending = match w.ending {
+        Some(sim::Ending::AgesRanOut) => "The map stood.",
+        Some(sim::Ending::LastCityFell) => "The last city fell.",
+        None => "",
+    };
+    line(ending, 32, palette::INK, &mut y);
+    line(&format!("{} ages survived, over {} days", s.ages_survived, s.days), 20,
+         palette::INK, &mut y);
+    y += 10.0;
+
+    for c in &s.cities {
+        draw_rectangle(left, y - 12.0, 12.0, 12.0, palette::player(c.player));
+        draw_text(
+            &format!(
+                "city {}: {} at its height, {} left — {}",
+                c.player.0, c.peak_population, c.final_population,
+                if c.survived { "standing" } else { "gone" }
+            ),
+            left + 22.0, y, 18.0,
+            if c.survived { palette::INK } else { palette::FAINT },
+        );
+        y += 26.0;
+    }
+
+    y += 16.0;
+    line(&format!("seed {} — the same map again, if you want it", s.seed), 16,
+         palette::FAINT, &mut y);
+}

@@ -9,7 +9,7 @@
 
 use net::lockstep::{DROP_AFTER_TICKS, WAIT_WARN_TICKS};
 use net::loopback::{Conditions, Loopback, LoopbackPeer, HOST};
-use net::{Lockstep, Peer, PeerId, Status};
+use net::{Lockstep, PeerId, Status};
 use sim::building::Kind;
 use sim::{Command, PlayerId};
 use std::collections::BTreeMap;
@@ -116,9 +116,7 @@ impl Game {
         self.steps.iter().map(|s| s.tick()).collect()
     }
 
-    fn checksums(&self) -> Vec<u64> {
-        self.steps.iter().map(|s| s.world.checksum()).collect()
-    }
+
 
     /// Found a city for player `who`, entirely through commands.
     ///

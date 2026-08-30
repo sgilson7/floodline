@@ -735,3 +735,38 @@ own passing tests, and it took a three-player networked game running for two
 in-game ages to surface it. The city tests founded cities by fiat, with the
 materials already delivered; only a game that had to build one from a hearth
 ever produced an odd-sized load.
+
+---
+
+## 2026-08-30 — `var register_plugin;` before macroquad's bundle
+
+Every page load threw `ReferenceError: register_plugin is not defined` before
+any of our own scripts ran. It is macroquad's, not ours: `mq_js_bundle.js`
+carries an inlined websocket plugin that does `register_plugin = function (e)
+{ … }` against a global it never declares, and the bundle runs under
+`"use strict"`, where assigning to an undeclared name throws.
+
+Nothing visibly broke — the game does not use macroquad's websockets — and it
+went unnoticed until a headless browser was pointed at the page and asked what
+was in its console. That is the cost of it: an uncaught error on every single
+load, sitting there ready to be mistaken for the cause of whatever goes wrong
+next, in a phase whose whole job is going to be debugging a WebRTC handshake.
+Declaring the global before the bundle loads is one line and buys a console
+where anything that appears is worth reading.
+
+---
+
+## 2026-08-30 — Phase 3's done-condition, and the GUI it needed
+
+The plan wants the native GUI running a two-player loopback game, and offers "a
+blank canvas that logs ticks" as enough. It got the real renderer instead —
+terrain shaded by height, water whose opacity is its depth, buildings as
+rectangles with a glyph, citizens as a circle with two legs, and the side panel
+— because phase 5 has to build it anyway and a blank canvas would have proved
+only that the lockstep does not crash.
+
+It proved more than that. A screenshot of the browser build shows two cities on
+a generated map with the shallows in the low corner, both eight strong, and the
+panel reading `peers at [230, 229]` — the host one tick ahead of the joiner,
+which is exactly what a star with a wire in it should look like and is not
+something a passing test would have shown anybody.

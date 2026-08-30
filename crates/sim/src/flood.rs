@@ -14,7 +14,6 @@ use crate::building::{BuildState, BuildingId};
 use crate::citizen::State;
 use crate::fx::{Fx, V2};
 use crate::map::Map;
-use crate::nav;
 use crate::world::World;
 
 impl World {

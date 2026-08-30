@@ -6,6 +6,9 @@
 //! input handling as their own modules beside them.
 
 mod buildid;
+mod draw;
+mod game;
+mod palette;
 mod screen;
 
 use macroquad::prelude::*;
@@ -32,33 +35,34 @@ async fn main() {
 
     let build = buildid::build_hash();
 
+    // Two players in one process, wired as a star through `net::Loopback`.
+    // Design §7: native builds are for development. Single player is the same
+    // lockstep with one peer, so there is no second path through any of this.
+    let mut game = game::Local::new(0x_F100_D11E, 2, &build);
+    let selected: Vec<sim::CitizenId> = Vec::new();
+
     loop {
         // Clear the whole window, letterbox bars included, then move into
         // logical space for everything after.
         set_default_camera();
-        clear_background(Color::from_rgba(8, 8, 12, 255));
+        clear_background(palette::BACKDROP);
         let view = screen::Viewport::current();
         set_camera(&view.camera());
-        clear_background(BLACK);
+        clear_background(palette::BACKDROP);
 
-        let title = "FLOODLINE";
-        let size = 72;
-        let m = measure_text(title, None, size, 1.0);
-        draw_text(
-            title,
-            (screen::LOGICAL_W - m.width) / 2.0,
-            screen::LOGICAL_H / 2.0,
-            size as f32,
-            Color::from_rgba(120, 170, 220, 255),
-        );
+        if game.in_lobby() && is_key_pressed(KeyCode::Space) {
+            game.start();
+        }
+        if !game.in_lobby() {
+            game.advance();
+        }
 
-        draw_text(
-            &format!("build {build}"),
-            16.0,
-            screen::LOGICAL_H - 16.0,
-            20.0,
-            Color::from_rgba(90, 90, 110, 255),
-        );
+        let me = game.me();
+        draw::world(game.world(), me, &selected);
+        draw::panel(game.world(), me, game.status(), &build, &game.ticks());
+        if game.world().finished().is_some() {
+            draw::score(game.world());
+        }
 
         next_frame().await
     }

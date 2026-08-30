@@ -395,7 +395,7 @@ fn a_city_in_the_path(with_a_dike: bool) -> u32 {
         // fine thing for a *game* to be tight about and a hopeless thing to
         // hang a test on. The two arms meet at the
         // corner, so a cell already taken is skipped rather than placed twice.
-        let mut wall = |w: &mut World, x: i32, y: i32| {
+        let wall = |w: &mut World, x: i32, y: i32| {
             if w.can_place(PlayerId(0), Kind::Dike, x, y).is_err() {
                 return;
             }
