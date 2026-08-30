@@ -1,0 +1,10 @@
+# Undefined symbols in a wasm build are imports, not errors.
+#
+# `extern "C" { fn fl_build_hash() -> JsObject; }` and sapp-jsutils' own `js_*`
+# externs are supplied by the page at instantiation time, not by anything the
+# linker can see. Rust 1.98's lld stopped inferring that and started failing the
+# link with "undefined symbol: fl_build_hash"; the flag says explicitly what the
+# older toolchain assumed. Without it the browser build works on some stable
+# releases and not others, which is the worst version of a build problem.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=--import-undefined"]

@@ -196,3 +196,32 @@ has to cross the boundary eventually. Making it cross in phase 0 means the
 deployment rather than first exercised under a WebRTC handshake. Native builds
 have no page to read, so they report the short git hash baked in at compile
 time, or `dev` outside a checkout.
+
+---
+
+## 2026-08-30 — wasm undefined symbols are imports, and must be said so
+
+The first Pages deploy failed to link:
+
+    rust-lld: error: undefined symbol: fl_build_hash
+    rust-lld: error: undefined symbol: js_string_length
+
+on a build that linked cleanly on the machine it was written on. The
+difference was the toolchain: rustc 1.95 locally, 1.98 on `dtolnay/rust-
+toolchain@stable`. `fl_build_hash` and sapp-jsutils' `js_*` externs are
+supplied by the page at instantiation time and there is nothing for the linker
+to resolve them against; 1.95's lld inferred that they were imports, 1.98's
+does not. Reproduced locally with `cargo +1.98.0` before fixing, rather than
+guessing at a red CI run.
+
+The fix is `.cargo/config.toml` telling lld what the older toolchain assumed:
+
+    [target.wasm32-unknown-unknown]
+    rustflags = ["-C", "link-arg=--import-undefined"]
+
+Verified on both toolchains, and the wasm still declares all six imports.
+Notably this is *not* a workflow fix: the workflow was right and the build was
+wrong, and it would have been wrong on every developer machine with a current
+stable. CI is deliberately left on `stable` rather than pinned to a version
+that agrees with any one laptop — running ahead is how it caught this, and a
+pin would only have deferred the same failure to the first person who upgraded.
