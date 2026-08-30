@@ -10,5 +10,7 @@
 #![forbid(unsafe_code)]
 
 pub mod fx;
+pub mod rng;
 
 pub use fx::{Fx, Turns, V2};
+pub use rng::Rng;
