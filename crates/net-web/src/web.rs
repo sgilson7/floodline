@@ -133,7 +133,7 @@ impl Peer for WebPeer {
             _ => {
                 let mut text = String::new();
                 ev.field("text").to_string(&mut text);
-                Some(Event::Error(text))
+                Some(Event::Error { text, try_a_code: ev.field_u32("code") != 0 })
             }
         }
     }

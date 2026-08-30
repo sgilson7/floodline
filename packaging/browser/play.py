@@ -101,7 +101,7 @@ with sync_playwright() as p:
 
     # --- selection and orders ------------------------------------------------
     # "choose all", then right-click a far corner: they should set off.
-    click(PANEL_L + 250, 644)
+    click(PANEL_L + 250, 686)
     page.wait_for_timeout(300)
     page.mouse.click(*cell_px(70, 70), button="right")
     page.wait_for_timeout(2500)
@@ -120,18 +120,26 @@ with sync_playwright() as p:
     check(now != was, f"a cottage site appeared at (40,40): {was} -> {now}")
 
     # --- a road --------------------------------------------------------------
-    # Aimed along row 30 but scored over rows 26 to 36: `lay_road` takes the
-    # cheapest path and will go round a wet cell rather than through it.
-    was = shot("play-3-cottage")
-    page.keyboard.press("KeyR")
-    click(MAP_X + 30 * CELL + 4, MAP_Y + 30 * CELL + 4)
-    page.wait_for_timeout(250)
-    click(MAP_X + 50 * CELL + 4, MAP_Y + 30 * CELL + 4)
-    page.wait_for_timeout(700)
-    now = shot("play-4-road")
-    n = changed(was, now, MAP_X + 30 * CELL, MAP_Y + 26 * CELL,
-                MAP_X + 50 * CELL, MAP_Y + 36 * CELL)
-    check(n > 40, f"a road was laid between (30,30) and (50,30): {n} pixels changed")
+    # Short, near the cottage that just went down, and retried along a few
+    # lines: rock is impassable and a road cannot cross it, so a fixed pair of
+    # cells is a coin toss about the map rather than a test of the road tool.
+    # ("no way through" is the right answer when it happens - see the message
+    # under the map.)
+    laid = 0
+    for row in (44, 36, 48, 32):
+        was = shot("play-3-cottage")
+        page.keyboard.press("KeyR")
+        click(MAP_X + 38 * CELL + 4, MAP_Y + row * CELL + 4)
+        page.wait_for_timeout(250)
+        click(MAP_X + 50 * CELL + 4, MAP_Y + row * CELL + 4)
+        page.wait_for_timeout(700)
+        now = shot("play-4-road")
+        laid = changed(was, now, MAP_X + 38 * CELL, MAP_Y + (row - 4) * CELL,
+                       MAP_X + 50 * CELL, MAP_Y + (row + 4) * CELL)
+        if laid > 40:
+            print(f"  road along row {row}")
+            break
+    check(laid > 40, f"a road was laid near the cottage: {laid} pixels changed")
 
     # --- pointing ------------------------------------------------------------
     was = shot("play-4-road")
@@ -145,7 +153,7 @@ with sync_playwright() as p:
 
     # --- the trade dialog ----------------------------------------------------
     # Card at (340, 260) 620x420; the rows are input.rs's running total.
-    click(PANEL_L + 165, 714)                # "propose a trade"
+    click(PANEL_L + 165, 756)                # "propose a trade"
     page.wait_for_timeout(400)
     opened = shot("play-6-trade")
     check(at(opened, 650.0, 500.0) != at(before, 650.0, 500.0), "the trade dialog opened")
@@ -164,7 +172,7 @@ with sync_playwright() as p:
     # A dike on the hearth is illegal, and `Lockstep::issue` checks locally, so
     # the sentence appears under the map on this frame rather than nothing
     # happening three ticks later.
-    page.keyboard.press("Digit5")
+    page.keyboard.press("Digit7")   # dike
     click(MAP_X + 40 * CELL + 4, MAP_Y + 40 * CELL + 4)   # onto the cottage site
     page.wait_for_timeout(300)
     refused = shot("play-9-refused")

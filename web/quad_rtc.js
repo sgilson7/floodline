@@ -49,6 +49,20 @@
 
   // The one session this page has, or null.
   var S = null;
+
+  // What the Copy button would put on the clipboard, or null when the cursor
+  // is not over one.
+  //
+  // It lives here, and the copying happens in the canvas's own click handler,
+  // because *when* matters: a browser only lets a page write to the clipboard
+  // while a user gesture is still live, and macroquad reads a click in the
+  // animation frame after the browser delivered it. By then the gesture has
+  // expired, so `navigator.clipboard.writeText` was rejected — and its
+  // rejection arrives as a failed promise, which `try`/`catch` cannot see, so
+  // the old fallback never ran either and the button did nothing and said
+  // nothing. Rust arms this while the cursor is over the button; the listener
+  // below fires inside the real click, where writing is allowed.
+  var COPY_ARMED = null;
   // Which session that is. Rust hands it back when it closes one, so a stale
   // handle cannot close a live session — see `close(gen)`.
   var GENERATION = 0;
@@ -61,8 +75,13 @@
     if (s) s.queue.push(ev);
   }
 
-  function fail(s, text) {
-    push(s, { k: K_ERROR, text: text });
+  // `code` says whether a pasted code would get round this. Signalling that
+  // never answered: yes, that is exactly what the pasted path is for. A
+  // connection that could not be opened once the two ends had found each
+  // other: *no* — the pasted path needs the same direct link and will fail in
+  // the same place. Telling somebody to try it then sends them round a loop.
+  function fail(s, text, code) {
+    push(s, { k: K_ERROR, text: text, code: code ? 1 : 0 });
   }
 
   // ---- links ---------------------------------------------------------------
@@ -105,7 +124,7 @@
       try {
         rel.send(new Uint8Array([s.isHost ? ROLE_HOST : ROLE_JOINER]));
       } catch (e) {
-        fail(s, "could not greet a peer: " + e);
+        fail(s, "could not greet a peer: " + e, false);
       }
     };
     rel.onmessage = function (e) {
@@ -226,19 +245,31 @@
             name,
             {
               onJoinError: function (d) {
-                fail(
-                  s,
-                  "could not reach " +
-                    (d && d.peerId ? "a player" : "the room") +
-                    ": " +
-                    (d && d.error ? d.error : "unknown") +
-                    " - one of you may be behind a strict NAT. Try Join by code."
-                );
+                // Trystero raises this for three different things and they
+                // want three different answers.
+                if (d && d.peerId) {
+                  fail(
+                    s,
+                    "found the other player, but could not open a direct " +
+                      "connection to them. On one network that usually means the " +
+                      "router keeps its own clients apart; across the internet it " +
+                      "means a strict NAT. A pasted code will not help - it needs " +
+                      "the same direct link. A TURN server in config.js is the fix.",
+                    false
+                  );
+                } else {
+                  fail(
+                    s,
+                    "could not join the room: " +
+                      (d && d.error ? d.error : "the relays did not answer"),
+                    true
+                  );
+                }
               },
             }
           );
         } catch (e) {
-          fail(s, "could not join the room: " + e);
+          fail(s, "could not join the room: " + e, true);
           return;
         }
         if (s.closed) {
@@ -250,7 +281,7 @@
         room.onPeerJoin = function (pid) {
           var pc = room.getPeers()[pid];
           if (!pc) {
-            fail(s, "a peer arrived with no connection");
+            fail(s, "a peer arrived with no connection", false);
             return;
           }
           var link = attach(s, pc, s.nextId++, false);
@@ -280,7 +311,9 @@
               s,
               "no signalling relay answered in " +
                 Math.round(wait / 1000) +
-                "s - the relays may be blocked from this network. Try Join by code."
+                "s - they may be blocked from this network. A pasted code needs " +
+                "none of them.",
+              true
             );
           }
         }, wait);
@@ -292,7 +325,8 @@
         fail(
           s,
           "the signalling library did not load - this page may be incompletely " +
-            "deployed. Hosting by pasted code needs nothing but this tab."
+            "deployed. Hosting by pasted code needs nothing but this tab.",
+          true
         );
       }
     );
@@ -541,7 +575,7 @@
       startTrystero(s);
     } else if (isHost) {
       makeOffer(s).catch(function (e) {
-        fail(s, "could not make an invitation: " + e);
+        fail(s, "could not make an invitation: " + e, false);
       });
     }
     return s;
@@ -582,10 +616,49 @@
       ch.send(bytes);
       return true;
     } catch (e) {
-      fail(S, "could not send to a peer: " + e);
+      fail(S, "could not send to a peer: " + e, false);
       return false;
     }
   }
+
+  // Copy in the gesture, not in the frame after it. See `COPY_ARMED`.
+  window.addEventListener("DOMContentLoaded", function () {
+    var canvas = document.getElementById("glcanvas");
+    if (!canvas) return;
+    canvas.addEventListener("click", function (e) {
+      var armed = COPY_ARMED;
+      if (!armed) return;
+      // Inside the button Rust drew, in the page's own pixels.
+      if (e.offsetX < armed.x || e.offsetX > armed.x + armed.w ||
+          e.offsetY < armed.y || e.offsetY > armed.y + armed.h) {
+        return;
+      }
+      var text = armed.text;
+      var wrote = false;
+      try {
+        var box = document.createElement("textarea");
+        box.value = text;
+        box.setAttribute("readonly", "");
+        box.style.position = "fixed";
+        box.style.top = "0";
+        box.style.opacity = "0";
+        document.body.appendChild(box);
+        box.focus();
+        box.select();
+        box.setSelectionRange(0, text.length);
+        wrote = document.execCommand("copy");
+        document.body.removeChild(box);
+        canvas.focus();
+      } catch (e) {
+        /* fall through to the async one */
+      }
+      if (!wrote && navigator.clipboard) {
+        navigator.clipboard.writeText(text).catch(function (e) {
+          console.error("floodline: could not copy - press ctrl-C instead. " + e);
+        });
+      }
+    });
+  });
 
   // A tab that is going away says so, in the only way there is: closing the
   // connections, which puts an SCTP shutdown on the wire and fires `onclose`
@@ -625,7 +698,7 @@
       if (!S) return false;
       var s = S;
       codeRemote(s, String(blob).trim()).catch(function (e) {
-        fail(s, String(e && e.message ? e.message : e));
+        fail(s, String(e && e.message ? e.message : e), false);
       });
       return true;
     },
@@ -675,26 +748,10 @@
     // milliseconds after the click, which is inside Chrome's five-second
     // transient activation window — but not inside Safari's stricter one, so
     // the old execCommand path stays as the fallback rather than as history.
-    importObject.env.fl_copy = function (text) {
+    // Arm or disarm the Copy button. An empty string disarms.
+    importObject.env.fl_arm_copy = function (text, x, y, w, h) {
       var s = consume_js_object(text);
-      try {
-        navigator.clipboard.writeText(s);
-        return;
-      } catch (e) {
-        /* fall through */
-      }
-      try {
-        var box = document.createElement("textarea");
-        box.value = s;
-        box.style.position = "fixed";
-        box.style.opacity = "0";
-        document.body.appendChild(box);
-        box.select();
-        document.execCommand("copy");
-        document.body.removeChild(box);
-      } catch (e2) {
-        console.error("could not copy: " + e2);
-      }
+      COPY_ARMED = s && s.length ? { text: s, x: x, y: y, w: w, h: h } : null;
     };
 
     importObject.env.rtc_host = function (room, mode) {
@@ -724,7 +781,7 @@
   // `quad_rtc_crate_version()` and console.errors if it disagrees with this
   // number. That is the guard that catches a deployed page whose JS plugin and
   // whose Rust side have drifted apart — the failure that would otherwise
-  // present as "the handshake just hangs". Three since `rtc_host`, `rtc_join`
-  // and `rtc_close` started passing a session generation.
-  miniquad_add_plugin({ register_plugin: register_plugin, version: 3, name: "quad_rtc" });
+  // present as "the handshake just hangs". Five since `fl_copy` became
+  // `fl_arm_copy`.
+  miniquad_add_plugin({ register_plugin: register_plugin, version: 5, name: "quad_rtc" });
 })();

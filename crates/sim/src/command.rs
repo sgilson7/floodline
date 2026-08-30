@@ -179,6 +179,8 @@ pub fn kind_key(k: Kind) -> &'static str {
         Kind::Hearth => "hearth",
         Kind::Cottage => "cottage",
         Kind::Farm => "farm",
+        Kind::Forester => "forester",
+        Kind::Quarry => "quarry",
         Kind::Granary => "granary",
         Kind::Stockpile => "stockpile",
         Kind::Dike => "dike",

@@ -83,7 +83,8 @@ impl World {
         }
     }
 
-    /// Farms turn farmer-ticks into food.
+    /// Producers turn worker-ticks into goods: a farm into food, a forester's
+    /// hut into wood, a quarry into stone.
     pub(crate) fn produce(&mut self) {
         for b in 0..self.buildings.len() {
             let building = &self.buildings[b];
@@ -98,9 +99,10 @@ impl World {
                 continue;
             }
             let b = &mut self.buildings[b];
+            let per = b.kind.ticks_per_unit();
             b.work += hands;
-            while b.work >= FARM_TICKS_PER_UNIT && b.kind.has_room_for(good, &b.store) {
-                b.work -= FARM_TICKS_PER_UNIT;
+            while b.work >= per && b.kind.has_room_for(good, &b.store) {
+                b.work -= per;
                 b.store.add(good, 1);
             }
         }
@@ -168,7 +170,12 @@ impl World {
     /// doing nothing.
     fn find_work(&mut self, i: usize) {
         match self.citizens[i].job {
-            Some(Job::Farmer) | Some(Job::Builder) => {
+            // Everything that is not hauling: a producer stands at its
+            // building, a builder walks to sites.
+            Some(Job::Farmer)
+            | Some(Job::Forester)
+            | Some(Job::Quarrier)
+            | Some(Job::Builder) => {
                 if let Some(b) = self.citizens[i].workplace {
                     if self.buildings[b.0 as usize].state != BuildState::Rubble {
                         self.citizens[i].errand = Some(Errand::ToWork(b));
@@ -489,10 +496,10 @@ impl World {
                     self.citizens[i].state = State::Idle;
                 }
             }
-            (Some(Job::Farmer), BuildState::Standing) => {
+            (Some(job), BuildState::Standing) if job.produces() => {
                 let b = &mut self.buildings[at.0 as usize];
                 if !b.workers.contains(&CitizenId(i as u16)) {
-                    if b.workers.len() < b.kind.slots_for(Job::Farmer) {
+                    if b.workers.len() < b.kind.slots_for(job) {
                         b.workers.push(CitizenId(i as u16));
                     } else {
                         // Somebody took the last slot while this one walked.

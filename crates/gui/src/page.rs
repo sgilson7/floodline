@@ -13,7 +13,7 @@ mod imp {
     extern "C" {
         fn fl_url_room() -> JsObject;
         fn fl_share_link(room: JsObject) -> JsObject;
-        fn fl_copy(text: JsObject);
+        fn fl_arm_copy(text: JsObject, x: u32, y: u32, w: u32, h: u32);
     }
 
     fn read(obj: JsObject) -> String {
@@ -37,11 +37,32 @@ mod imp {
         read(unsafe { fl_share_link(JsObject::string(room)) })
     }
 
+    /// Tell the page what the Copy button under the cursor would copy, or
+    /// nothing when the cursor is elsewhere.
+    ///
+    /// Armed on hover rather than done on the click, because a browser only
+    /// lets a page write to the clipboard while a user gesture is live and
+    /// macroquad reads a click in the *next* animation frame, by which time it
+    /// is not. The plugin does the copying inside the canvas's own click
+    /// handler; this is how it knows what to write.
+    pub fn arm_copy(text: Option<&str>, rect: (f32, f32, f32, f32)) {
+        let (x, y, w, h) = rect;
+        unsafe {
+            fl_arm_copy(
+                JsObject::string(text.unwrap_or("")),
+                x.max(0.0) as u32,
+                y.max(0.0) as u32,
+                w.max(0.0) as u32,
+                h.max(0.0) as u32,
+            )
+        };
+    }
+
+    /// What ctrl-C will produce. miniquad serves this from the page's own
+    /// `copy` event, which is always a real gesture — so the keyboard works
+    /// even where the button is refused.
     pub fn copy(text: &str) {
-        // Also handed to miniquad, so that a player who ignores the button and
-        // presses ctrl-C gets the same string.
         macroquad::miniquad::window::clipboard_set(text);
-        unsafe { fl_copy(JsObject::string(text)) };
     }
 }
 
@@ -58,9 +79,12 @@ mod imp {
     pub fn copy(text: &str) {
         macroquad::miniquad::window::clipboard_set(text);
     }
+
+    /// Nothing to arm: a desktop clipboard has no rule about gestures.
+    pub fn arm_copy(_text: Option<&str>, _rect: (f32, f32, f32, f32)) {}
 }
 
-pub use imp::{copy, share_link, url_room};
+pub use imp::{arm_copy, copy, share_link, url_room};
 
 /// What the player last pasted, or `None`.
 ///

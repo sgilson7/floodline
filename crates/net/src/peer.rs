@@ -31,7 +31,14 @@ pub enum Event {
     /// The transport could not do what was asked. Carries something a person
     /// can read, because design §9.3 and phase 6 want failures that say what
     /// to do about them.
-    Error(String),
+    ///
+    /// `try_a_code` is whether a *different introduction* would get round it.
+    /// Relays that never answered: yes, that is what design §9.1's pasted path
+    /// is for. A connection that could not be opened once the two ends had
+    /// already found each other: no — the pasted path needs the same direct
+    /// link and fails in the same place. Saying "try Join by code" to that one
+    /// sends a player round a loop, which is what it did.
+    Error { text: String, try_a_code: bool },
 }
 
 /// A connection to the other players.

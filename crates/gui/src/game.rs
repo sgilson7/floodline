@@ -142,8 +142,8 @@ impl Session {
 
     /// What the transport has complained about while still in the lobby.
     /// Advice, not a verdict — see `Lockstep::trouble`.
-    pub fn trouble(&self) -> Option<&str> {
-        self.step().trouble.as_deref()
+    pub fn trouble(&self) -> Option<&net::Trouble> {
+        self.step().trouble.as_ref()
     }
 
     /// Whether this peer is still waiting for the host to press Start.

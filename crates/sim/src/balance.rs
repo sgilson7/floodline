@@ -280,6 +280,27 @@ pub const FOOD_PER_UNIT: u16 = 100;
 /// farm and some room to grow, rather than a city where everybody farms.
 pub const FARM_TICKS_PER_UNIT: u32 = 32;
 
+/// Worker-ticks per unit of wood and of stone.
+///
+/// Measured against what a city actually spends rather than picked. Two
+/// workers at sixty-four ticks a unit make about thirty-seven wood a day,
+/// which is a cottage and a bit; at ninety-six, about twenty-five stone, which
+/// is two and a half dike levels. Six days of an age is then roughly two
+/// buildings or fifteen dike cells from one hut and one quarry, with two of
+/// your eight standing at each — so the shortage is real, the answer to it is
+/// real, and manning both of them is most of a city.
+///
+/// `tests/city.rs::a_forester_and_a_quarry_pay_for_a_building_in_a_day` holds
+/// the arithmetic to what the game actually does.
+pub const FOREST_TICKS_PER_UNIT: u32 = 64;
+pub const QUARRY_TICKS_PER_UNIT: u32 = 96;
+
+/// How much a forester's hut or a quarry holds before its workers stop,
+/// waiting for a hauler. Larger than a farm's because wood and stone are
+/// carried in bursts to whatever is being built rather than trickling to a
+/// granary every day.
+pub const PRODUCER_BUFFER: u16 = 100;
+
 /// How much a farm holds before its farmers stop, waiting for a hauler. Small
 /// on purpose: a farm that could stockpile a week of food would make haulers
 /// optional, and watching the food move is the point.

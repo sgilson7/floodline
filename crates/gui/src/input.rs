@@ -39,12 +39,14 @@ pub enum Tool {
 /// them and the order the number keys pick them. `Hearth` is not among them:
 /// the run starts with the only one a city gets. `Road` and `Bridge` are laid
 /// by the road tool, which routes and bridges by itself (design §6).
-const BUILDABLE: [(Kind, &str, KeyCode); 5] = [
+const BUILDABLE: [(Kind, &str, KeyCode); 7] = [
     (Kind::Cottage, "cottage", KeyCode::Key1),
     (Kind::Farm, "farm", KeyCode::Key2),
     (Kind::Granary, "granary", KeyCode::Key3),
-    (Kind::Stockpile, "stockpile", KeyCode::Key4),
-    (Kind::Dike, "dike", KeyCode::Key5),
+    (Kind::Forester, "forester", KeyCode::Key4),
+    (Kind::Quarry, "quarry", KeyCode::Key5),
+    (Kind::Stockpile, "stockpile", KeyCode::Key6),
+    (Kind::Dike, "dike", KeyCode::Key7),
 ];
 
 /// A trade being composed. Design §6: a standing daily exchange, proposed by
@@ -469,10 +471,10 @@ impl Input {
             w.citizens.iter().filter(|c| c.alive() && f(c, b.id)).count()
         };
         Some(match b.kind {
-            Kind::Farm => format!(
+            k if sim::citizen::Job::at(k).is_some() => format!(
                 "{name}: {} of {} working",
                 here(|c, id| c.workplace == Some(id)),
-                Kind::Farm.slots_for(sim::citizen::Job::Farmer)
+                k.job_slots()
             ),
             Kind::Cottage => format!(
                 "{name}: {} of {} beds taken",
@@ -674,6 +676,8 @@ fn kind_name(k: Kind) -> &'static str {
         Kind::Hearth => "hearth",
         Kind::Cottage => "cottage",
         Kind::Farm => "farm",
+        Kind::Forester => "forester",
+        Kind::Quarry => "quarry",
         Kind::Granary => "granary",
         Kind::Stockpile => "stockpile",
         Kind::Dike => "dike",

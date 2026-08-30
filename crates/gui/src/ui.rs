@@ -30,6 +30,10 @@ pub struct Ui {
     pub released: bool,
     /// Modifier for the shortcuts a lobby needs: ctrl-V, ctrl-C.
     pub ctrl: bool,
+    /// Where the logical canvas sits on the real one, so a rectangle can be
+    /// handed to the page in the pixels the page uses. Only the clipboard
+    /// needs this; everything else stays in logical coordinates.
+    letterbox: (f32, f32, f32),
 }
 
 impl Ui {
@@ -45,7 +49,18 @@ impl Ui {
                 || is_key_down(KeyCode::RightControl)
                 || is_key_down(KeyCode::LeftSuper)
                 || is_key_down(KeyCode::RightSuper),
+            letterbox: (view.x, view.y, view.scale),
         }
+    }
+
+    /// A logical rectangle in the page's own pixels.
+    ///
+    /// No device pixel ratio, and that is deliberate: a DOM event's
+    /// `offsetX`/`offsetY` are CSS pixels, the same ones `screen_width` and
+    /// the mouse are in. See the note on `screen::Viewport`.
+    pub fn to_page(&self, r: Rect) -> (f32, f32, f32, f32) {
+        let (ox, oy, scale) = self.letterbox;
+        (ox + r.x * scale, oy + r.y * scale, r.w * scale, r.h * scale)
     }
 
     pub fn over(&self, r: Rect) -> bool {

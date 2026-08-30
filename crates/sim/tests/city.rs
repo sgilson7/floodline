@@ -423,3 +423,129 @@ fn nobody_takes_a_job_that_was_not_given_to_them() {
     );
     assert_eq!(w.treasury(me).food, 0, "an unmanned farm produced food");
 }
+
+#[test]
+fn a_forester_and_a_quarry_pay_for_a_building_in_a_day() {
+    // The numbers in `balance::FOREST_TICKS_PER_UNIT` and
+    // `QUARRY_TICKS_PER_UNIT`, held to what the game actually does.
+    //
+    // Until these two buildings existed nothing in the MVP made wood or stone
+    // at all: a city started with two hundred wood, which is about five
+    // buildings, and that was the whole run. "How do I get more wood" had no
+    // answer on the build menu.
+    use sim::building::{Good, Kind};
+    use sim::command::Command;
+    use sim::nav::Nav;
+    use sim::world::World;
+    use sim::PlayerId;
+
+    let me = PlayerId(0);
+    let day_of = |kind: Kind, good: Good| -> u16 {
+        let mut w = World::new(31, 2);
+        let mut nav = Nav::new();
+        let (hx, hy) = w.map.hearth_sites[0];
+        let mut placed = None;
+        'ring: for r in 3..40i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (x, y) = (hx + dx, hy + dy);
+                    if w.can_place(me, kind, x, y).is_ok() {
+                        w.apply(me, &Command::Place { kind, x: x as u8, y: y as u8 }).unwrap();
+                        placed = Some(w.buildings.last().unwrap().id);
+                        break 'ring;
+                    }
+                }
+            }
+        }
+        let id = placed.unwrap_or_else(|| panic!("nowhere for a {kind:?} on seed 31"));
+        // Built and manned, then left alone for a day. Hunger is held off:
+        // this is a question about output, not about whether the same eight
+        // people can also feed themselves.
+        for g in Good::ALL {
+            let want = w.buildings[id.0 as usize].outstanding().get(g);
+            if want > 0 {
+                w.deliver_to(id, g, want);
+            }
+        }
+        assert!(w.build_at(id, kind.build_ticks()));
+        let all: Vec<sim::CitizenId> =
+            w.citizens.iter().filter(|c| c.owner == me).map(|c| c.id).collect();
+        let room = w.will_take(me, id, &all);
+        assert_eq!(room, kind.job_slots(), "{kind:?} did not offer its slots");
+        let take: Vec<sim::CitizenId> = all.into_iter().take(room).collect();
+        w.apply(me, &Command::Assign { citizens: take, building: id }).unwrap();
+
+        let before = w.treasury(me).get(good) + w.buildings[id.0 as usize].store.get(good);
+        for _ in 0..sim::balance::TICKS_PER_DAY {
+            for c in &mut w.citizens {
+                c.food = sim::balance::NEED_FULL;
+                c.rest = sim::balance::NEED_FULL;
+            }
+            w.tick(&mut nav, &[]);
+        }
+        let after = w.treasury(me).get(good) + w.buildings[id.0 as usize].store.get(good);
+        after - before
+    };
+
+    let wood = day_of(Kind::Forester, Good::Wood);
+    let stone = day_of(Kind::Quarry, Good::Stone);
+    println!("  a day's work: {wood} wood, {stone} stone");
+
+    // A cottage is 30 wood and a farm 40, so a day of two foresters should be
+    // about a building; a dike level is 10 stone, so a day of two quarriers
+    // should be a couple of dike cells at two levels. Bounded on both sides:
+    // too little and the shortage never ends, too much and there is no
+    // shortage to end.
+    assert!(
+        (25..=55).contains(&wood),
+        "a day of two foresters made {wood} wood; a cottage is {}",
+        Kind::Cottage.cost().wood
+    );
+    assert!(
+        (15..=40).contains(&stone),
+        "a day of two quarriers made {stone} stone; a dike level is {}",
+        Kind::Dike.cost().stone
+    );
+}
+
+#[test]
+fn a_quarry_needs_rock_beside_it_and_a_forester_does_not() {
+    // The one rule in the game that looks at what is next to a footprint
+    // rather than under it, and the reason rock is on the map for.
+    use sim::building::Kind;
+    use sim::map::{Ground, MAP_H, MAP_W};
+    use sim::world::World;
+    use sim::PlayerId;
+
+    let w = World::new(31, 2);
+    let me = PlayerId(0);
+    let mut refused_for_rock = 0;
+    let mut allowed = 0;
+    for y in (2..MAP_H - 3).step_by(3) {
+        for x in (2..MAP_W - 3).step_by(3) {
+            match w.can_place(me, Kind::Quarry, x, y) {
+                Ok(()) => {
+                    let (bw, bh) = Kind::Quarry.size();
+                    let near = (y - 1..=y + bh).any(|cy| {
+                        (x - 1..=x + bw).any(|cx| w.map.ground_at(cx, cy) == Ground::Rock)
+                    });
+                    assert!(near, "a quarry was allowed at ({x},{y}) with no rock beside it");
+                    allowed += 1;
+                }
+                Err(sim::world::RuleError::NoRockHere) => refused_for_rock += 1,
+                Err(_) => {}
+            }
+        }
+    }
+    assert!(allowed > 0, "there is nowhere on this map to put a quarry");
+    assert!(refused_for_rock > allowed, "the rule is not asking for much");
+
+    // A forester's hut goes anywhere a building goes.
+    let anywhere = (2..MAP_H - 3).step_by(3).any(|y| {
+        (2..MAP_W - 3).step_by(3).any(|x| w.can_place(me, Kind::Forester, x, y).is_ok())
+    });
+    assert!(anywhere, "a forester's hut could not be placed at all");
+}

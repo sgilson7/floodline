@@ -268,16 +268,31 @@ fn whats_wrong(w: &World, me: PlayerId) -> Option<&'static str> {
     if !standing(Kind::Farm) {
         return Some("no farm: nothing is growing any food");
     }
-    let farmers = w
-        .citizens
-        .iter()
-        .filter(|c| c.owner == me && c.alive() && c.job == Some(sim::citizen::Job::Farmer))
-        .count();
-    if farmers == 0 {
+    let working_at = |k: Kind| {
+        w.citizens.iter().any(|c| {
+            c.owner == me && c.alive() && c.job == sim::citizen::Job::at(k)
+        })
+    };
+    if !working_at(Kind::Farm) {
         return Some("nobody is farming: right-click the farm to put them to work");
     }
     if w.treasury(me).food == 0 {
         return Some("the granary is empty");
+    }
+    // Food is in hand; now the two things that run out and used to have no
+    // answer at all.
+    let goods = w.treasury(me);
+    if goods.wood < Kind::Cottage.cost().wood && !standing(Kind::Forester) {
+        return Some("low on wood: a forester's hut (4) is the only way to make more");
+    }
+    if goods.stone < Kind::Dike.cost().stone * 4 && !standing(Kind::Quarry) {
+        return Some("low on stone: a quarry (5) needs rock beside it");
+    }
+    if standing(Kind::Forester) && !working_at(Kind::Forester) {
+        return Some("nobody is cutting wood");
+    }
+    if standing(Kind::Quarry) && !working_at(Kind::Quarry) {
+        return Some("nobody is working the quarry");
     }
     None
 }

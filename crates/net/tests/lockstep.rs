@@ -611,10 +611,15 @@ fn a_transport_complaint_in_the_lobby_is_advice_and_not_the_end() {
         connected: Vec::new(),
     };
     let mut joiner = Lockstep::join(BUILD);
-    wire.inbox.push_back(net::Event::Error("no relay answered — try a pasted code".into()));
+    wire.inbox.push_back(net::Event::Error {
+        text: "no relay answered".into(),
+        try_a_code: true,
+    });
     joiner.advance(&mut wire);
     assert!(joiner.in_lobby(), "a warning threw the player out of the lobby");
-    assert_eq!(joiner.trouble.as_deref(), Some("no relay answered — try a pasted code"));
+    let said = joiner.trouble.clone().expect("said nothing");
+    assert_eq!(said.text, "no relay answered");
+    assert!(said.try_a_code, "the way out of it was not offered");
 
     let mut host = Lockstep::host(31, 2, BUILD);
     host.start();
@@ -623,7 +628,10 @@ fn a_transport_complaint_in_the_lobby_is_advice_and_not_the_end() {
         sent: Vec::new(),
         connected: Vec::new(),
     };
-    wire.inbox.push_back(net::Event::Error("the connection failed".into()));
+    wire.inbox.push_back(net::Event::Error {
+        text: "the connection failed".into(),
+        try_a_code: false,
+    });
     host.advance(&mut wire);
     assert_eq!(host.status, Status::Ended("the connection failed".into()));
 }
@@ -764,7 +772,8 @@ fn a_host_that_connects_and_says_nothing_is_reported_rather_than_waited_on_for_e
         joiner.advance(&mut wire);
     }
     let said = joiner.trouble.clone().expect("never said anything about the silence");
-    assert!(said.contains("not answering"), "{said}");
+    assert!(said.text.contains("not answering"), "{}", said.text);
+    assert!(said.try_a_code, "a code is exactly what gets round an abandoned lobby");
     assert!(joiner.in_lobby(), "it is a warning, not the end");
 }
 

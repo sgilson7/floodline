@@ -72,6 +72,8 @@ pub enum RuleError {
     NoSuchPartner,
     /// Already agreed.
     AlreadyAccepted,
+    /// A quarry with no rock beside it.
+    NoRockHere,
 }
 
 impl RuleError {
@@ -103,6 +105,7 @@ impl RuleError {
             RuleError::NotYourRoad => "that road does not reach you",
             RuleError::NoSuchPartner => "there is no such city",
             RuleError::AlreadyAccepted => "already agreed",
+            RuleError::NoRockHere => "a quarry needs rock beside it",
         }
     }
 }
@@ -280,6 +283,9 @@ impl World {
         if !Building::ground_suits(kind, &self.map, x, y) {
             return Err(RuleError::WrongGround);
         }
+        if !Building::neighbours_suit(kind, &self.map, x, y) {
+            return Err(RuleError::NoRockHere);
+        }
         for (cx, cy) in Building::footprint(kind, x, y) {
             if self.occupancy[Map::idx(cx, cy)].is_some() {
                 return Err(RuleError::Occupied);
@@ -312,8 +318,11 @@ impl World {
         }
         let job = match b.state {
             BuildState::Site => Job::Builder,
-            BuildState::Standing if b.kind == Kind::Farm => Job::Farmer,
-            BuildState::Standing if b.kind.is_store() => Job::Hauler,
+            BuildState::Standing => match Job::at(b.kind) {
+                Some(j) => j,
+                None if b.kind.is_store() => Job::Hauler,
+                None => return 0,
+            },
             _ => return 0,
         };
         let slots = b.kind.slots_for(job);
@@ -1022,8 +1031,11 @@ impl World {
         let job = match b.state {
             // Anything half-built wants builders, whatever it is going to be.
             BuildState::Site => Job::Builder,
-            BuildState::Standing if b.kind == Kind::Farm => Job::Farmer,
-            BuildState::Standing if b.kind.is_store() => Job::Hauler,
+            BuildState::Standing => match Job::at(b.kind) {
+                Some(j) => j,
+                None if b.kind.is_store() => Job::Hauler,
+                None => return Err(RuleError::NoJobThere),
+            },
             _ => return Err(RuleError::NoJobThere),
         };
 

@@ -20,13 +20,13 @@ mod imp {
     /// console if they disagree. It is the guard against a deployed page whose
     /// JS plugin and whose Rust side have drifted apart — the phase 3 failure
     /// that would otherwise present as "the handshake just hangs". Bump both
-    /// numbers together whenever the plugin's imports change. Three since
-    /// `rtc_host`, `rtc_join` and `rtc_close` started passing a session
-    /// generation, so that dropping a finished session cannot close the one
-    /// that replaced it.
+    /// numbers together whenever the plugin's imports change. Four since
+    /// an error event started saying whether a pasted code would get round it,
+    /// on top of the session generation `rtc_host`, `rtc_join` and `rtc_close`
+    /// pass so a finished session cannot close the one that replaced it.
     #[no_mangle]
     pub extern "C" fn quad_rtc_crate_version() -> u32 {
-        3
+        5
     }
 
     extern "C" {

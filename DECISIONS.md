@@ -1381,3 +1381,90 @@ minute comes back owing thousands, and simulating them all freezes the page for
 seconds and then does it again. Dropping that backlog is right for the peer
 that fell behind, because lockstep will not let it run ahead of anybody
 regardless — the host is waiting on its turns either way.
+
+---
+
+## 2026-08-30 — Wood and stone have a source, and rock is what the quarry is for
+
+Design §3.3 lists a Forester's hut and a Quarry among the buildings that
+"produce food / wood / stone"; the plan deferred both, and the result was that
+*nothing in the game made wood or stone at all*. A city started with two
+hundred wood — a farm, a granary and two cottages, near enough exactly — and
+that was the whole run. The first question a player asked was "how do I get
+more wood", and the answer was that there was none.
+
+**Forester's hut**, thirty wood, two slots, sixty-four worker-ticks a unit.
+**Quarry**, forty wood, two slots, ninety-six. Both cost wood and no stone, so
+a city that has spent its stone on dikes can still dig itself out — and a
+forester's hut has to be affordable beside a farm and a granary out of the
+founding two hundred, or the one building that ends the wood shortage is the
+one the shortage stops you building.
+
+Measured rather than guessed, in `a_forester_and_a_quarry_pay_for_a_building_in_a_day`:
+a day of two foresters is **37 wood** — a cottage and a bit — and a day of two
+quarriers is **24 stone**, two and a half dike levels. Six days of an age is
+then roughly two buildings or fifteen dike cells from one hut and one quarry,
+with two of your eight standing at each. The shortage is real, the answer to it
+is real, and manning both is most of a city.
+
+**A quarry needs rock beside it**, and that is the only rule in the game that
+asks what is *next to* a footprint rather than under it. Rock was decoration
+before: every map has some, none of it is buildable, none of it is passable,
+and nothing wanted it. Now the building that ends the stone shortage has to go
+somewhere particular, which is a decision about the map rather than another
+slot on the build menu.
+
+`Job` gained `Forester` and `Quarrier` rather than reusing `Farmer`, because
+design §3.2 names them separately and the panel says which one somebody is.
+`Kind::ticks_per_unit` replaced the single `FARM_TICKS_PER_UNIT` at the one
+place production happens.
+
+---
+
+## 2026-08-30 — Copying happens in the click, not in the frame after it
+
+The Copy button on the pasted-code screen did nothing. Not "sometimes" — never,
+and silently, on the one screen whose entire content is a string you have to
+get to somebody else.
+
+`navigator.clipboard.writeText` is only allowed while a user gesture is live.
+macroquad reads a click in the *animation frame after* the browser delivered
+it, by which time it is not, so the write was refused — and it is refused by
+returning a rejected promise, which `try`/`catch` cannot see. So the code
+`return`ed as though it had worked and the `execCommand` fallback beneath it
+never ran. Both halves of that are worth remembering for anything else that has
+to happen "when the player clicks".
+
+The plugin now copies inside the canvas's own `click` listener, where the
+gesture is live. Rust arms it each frame with the text *and the button's
+rectangle in page pixels*, and the listener checks the click against that
+rectangle. Hovering was tried as the signal first and is too slow: a click can
+arrive before a frame has been drawn with the cursor over the button, which is
+exactly what a fast click is.
+
+`page::copy` still hands the string to miniquad as well, because ctrl-C goes
+through the page's own `copy` event — a real gesture, always allowed — so the
+keyboard works even where the button is refused. The screen says so.
+
+Tested with clipboard *writing denied*, which is the case the fallback is for.
+
+---
+
+## 2026-08-30 — "Try Join by code" was the wrong advice for half the failures
+
+Trystero's `onJoinError` fires for three different things and the lobby
+answered all of them with "one of you may be behind a strict NAT. Try Join by
+code." Two of those are wrong.
+
+A pasted code replaces the *introduction*. It does not replace the connection:
+both paths end in the same `RTCPeerConnection` and the same ICE negotiation. So
+when two peers have already found each other and cannot open a direct link —
+which is what a strict NAT, or a router keeping its own clients apart, actually
+looks like — a pasted code fails in exactly the same place. Sending somebody
+there is sending them round a loop, and it did.
+
+`Event::Error` now carries `try_a_code`, the plugin sets it per failure, and
+the lobby only offers the button when a different introduction would help. The
+messages say which of the three happened. And the button keeps what the player
+was doing: it used to turn a *joiner* into the host of a brand new empty room,
+which is not a way out of anything.

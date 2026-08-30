@@ -37,6 +37,15 @@ pub const MAX_PLAYERS: usize = 6;
 /// short enough to be an answer rather than a hang.
 const SILENCE_FRAMES: u32 = 500;
 
+/// Something the transport wants a player to know, and what to do about it.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Trouble {
+    pub text: String,
+    /// Whether being introduced a different way would help. See
+    /// `Event::Error`.
+    pub try_a_code: bool,
+}
+
 /// What the game is doing, for the panel to show.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Status {
@@ -121,7 +130,7 @@ pub struct Lockstep {
     roster: Vec<PlayerId>,
 
     /// The last thing the transport complained about while nothing had gone
-    /// irrecoverably wrong.
+    /// irrecoverably wrong, and whether a pasted code would get round it.
     ///
     /// Separate from `Status::Ended` because most of what a transport has to
     /// say in a lobby is advice rather than a verdict — "no relay has answered
@@ -130,7 +139,7 @@ pub struct Lockstep {
     /// would throw them out of the room they are waiting in. Once a run has
     /// started there is no such thing as advice: a transport error there means
     /// the game is over, and it still sets `Ended`.
-    pub trouble: Option<String>,
+    pub trouble: Option<Trouble>,
 }
 
 impl Lockstep {
@@ -317,11 +326,12 @@ impl Lockstep {
         }
         self.unanswered += 1;
         if self.unanswered == SILENCE_FRAMES {
-            self.trouble = Some(
-                "connected to the host, but it is not answering. It may have left its \
-                 lobby - ask for a fresh room code, or try Join by code."
+            self.trouble = Some(Trouble {
+                text: "connected to the host, but it is not answering. It may have left \
+                       its lobby - ask for a fresh room code, or swap to a pasted code."
                     .to_owned(),
-            );
+                try_a_code: true,
+            });
         }
     }
 
@@ -332,9 +342,9 @@ impl Lockstep {
             match ev {
                 Event::Peer(who) => self.greet(who, peer),
                 Event::Left(who) => self.peer_left(who, peer),
-                Event::Error(text) => {
+                Event::Error { text, try_a_code } => {
                     if self.status == Status::Lobby {
-                        self.trouble = Some(text);
+                        self.trouble = Some(Trouble { text, try_a_code });
                     } else {
                         self.status = Status::Ended(text);
                     }

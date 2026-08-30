@@ -31,7 +31,29 @@ pub struct PlayerId(pub u8);
 pub enum Job {
     Hauler,
     Farmer,
+    Forester,
+    Quarrier,
     Builder,
+}
+
+impl Job {
+    /// The job done at a building that makes something, or `None` if it makes
+    /// nothing. Design §3.2 names these separately rather than calling them
+    /// all "worker", and the panel says which one somebody is.
+    pub fn at(kind: crate::building::Kind) -> Option<Job> {
+        use crate::building::Kind;
+        match kind {
+            Kind::Farm => Some(Job::Farmer),
+            Kind::Forester => Some(Job::Forester),
+            Kind::Quarry => Some(Job::Quarrier),
+            _ => None,
+        }
+    }
+
+    /// Whether this job stands at one building and turns time into goods.
+    pub fn produces(self) -> bool {
+        matches!(self, Job::Farmer | Job::Forester | Job::Quarrier)
+    }
 }
 
 /// The errand a citizen is part-way through.

@@ -400,7 +400,7 @@ fn every_refusal_says_something_a_player_can_read() {
     let all = [
         NotYours, OffMap, Occupied, WrongGround, OneHearthOnly, NoSuchBuilding, NoSuchCitizen,
         NotStanding, TooHigh, NoJobThere, Full, NotACottage, NoSuchCell, NoRoute, NoSuchRoad,
-        NoSuchTrade, NotYourRoad, NoSuchPartner, AlreadyAccepted,
+        NoSuchTrade, NotYourRoad, NoSuchPartner, AlreadyAccepted, NoRockHere,
     ];
     let mut seen: Vec<&str> = Vec::new();
     for e in &all {

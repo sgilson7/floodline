@@ -50,6 +50,11 @@ say "assign.py"
 "$VENV/bin/python" "$ROOT/packaging/browser/assign.py" \
   "http://localhost:$PORT/index.html" || fail=1
 
+# The Copy button, with clipboard writing denied - the case the fallback is for.
+say "clipboard.py"
+"$VENV/bin/python" "$ROOT/packaging/browser/clipboard.py" \
+  "http://localhost:$PORT/index.html" || fail=1
+
 # A room that can be joined more than once, and a lobby that lets go of it.
 say "rejoin.py"
 "$VENV/bin/python" "$ROOT/packaging/browser/rejoin.py" \

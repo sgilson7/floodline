@@ -20,14 +20,14 @@ pub enum Lobby {
     /// Host or join, and by which path.
     Start { mode: Mode, seats: u32, room: Field, notice: String },
     /// Hosting, waiting for people. `Session` is live from this point.
-    Hosting { mode: Mode, room: String, reply: Field },
+    Hosting { mode: Mode, room: String, reply: Field, copied: f64 },
     /// Joining. In `Mode::Code` the field holds the host's invitation until it
     /// is applied, and after that the reply to send back.
     ///
     /// Only ever reached in the browser: a native build has no transport to
     /// join with, by design §7, so `open_join` refuses there instead.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    Joining { mode: Mode, room: String, offer: Field, sent: bool },
+    Joining { mode: Mode, room: String, offer: Field, sent: bool, copied: f64 },
 }
 
 /// What the frame decided. `main` owns the session, so the lobby asks.
@@ -181,7 +181,7 @@ impl Lobby {
     // ---- hosting ------------------------------------------------------------
 
     fn hosting_screen(&mut self, ui: &Ui, session: Option<&mut Session>, build: &str) -> Act {
-        let Lobby::Hosting { mode, room, reply } = self else {
+        let Lobby::Hosting { mode, room, reply, copied } = self else {
             return Act::Nothing;
         };
         let Some(session) = session else {
@@ -201,13 +201,20 @@ impl Lobby {
                     ui::centred(&link, y, 16.0, palette::FAINT);
                 }
                 y += 34.0;
-                if ui.button(Rect::new(cx - 110.0, y, 220.0, 42.0), "copy the link", true) {
-                    page::copy(if link.is_empty() { room } else { &link });
+                let what = if link.is_empty() { room.clone() } else { link.clone() };
+                let button = Rect::new(cx - 110.0, y, 220.0, 42.0);
+                arm(ui, button, &what);
+                if ui.button(button, "copy the link", true) {
+                    page::copy(&what);
+                    *copied = get_time();
                 }
-                y += 70.0;
+                y += 46.0;
+                copied_note(*copied, y);
+                y += 24.0;
             }
             Mode::Code => {
-                y = blob_exchange(ui, session, reply, y, "1. send them this invitation",
+                y = blob_exchange(ui, session, reply, copied, y,
+                                  "1. send them this invitation",
                                   "2. paste their reply here");
             }
         }
@@ -228,7 +235,7 @@ impl Lobby {
         if let net::Status::Ended(reason) = session.status() {
             return Act::Cancel(reason.clone());
         }
-        if let Some(act) = trouble(ui, session, *mode, build) {
+        if let Some(act) = trouble(ui, session, *mode, true, room, seats(session), build) {
             return act;
         }
 
@@ -249,7 +256,7 @@ impl Lobby {
     // ---- joining ------------------------------------------------------------
 
     fn joining_screen(&mut self, ui: &Ui, session: Option<&mut Session>, build: &str) -> Act {
-        let Lobby::Joining { mode, room, offer, sent } = self else {
+        let Lobby::Joining { mode, room, offer, sent, copied } = self else {
             return Act::Nothing;
         };
         let Some(session) = session else {
@@ -292,8 +299,8 @@ impl Lobby {
                     }
                     y += 70.0;
                 } else {
-                    y = blob_exchange(ui, session, offer, y, "send this reply back to the host",
-                                      "");
+                    y = blob_exchange(ui, session, offer, copied, y,
+                                      "send this reply back to the host", "");
                 }
             }
         }
@@ -301,7 +308,7 @@ impl Lobby {
         if let net::Status::Ended(reason) = session.status() {
             return Act::Cancel(reason.clone());
         }
-        if let Some(act) = trouble(ui, session, *mode, build) {
+        if let Some(act) = trouble(ui, session, *mode, false, room, 2, build) {
             return act;
         }
         if session.welcomed() {
@@ -327,6 +334,11 @@ impl Lobby {
 
 use crate::screen::{LOGICAL_H, LOGICAL_W};
 
+/// How many cities this world was made with, so re-hosting keeps them.
+fn seats(session: &Session) -> u32 {
+    session.world().players.len() as u32
+}
+
 /// What the transport is unhappy about, and the way out of it.
 ///
 /// Phase 6: "if Trystero reports no relay connection within 15 s, the lobby
@@ -334,16 +346,37 @@ use crate::screen::{LOGICAL_H, LOGICAL_W};
 /// says so; this is the offer. It is a button rather than an automatic switch
 /// because switching would abandon a room code the host has already sent
 /// somebody, and the relays are often only slow.
-fn trouble(ui: &Ui, session: &mut Session, mode: Mode, build: &str) -> Option<Act> {
-    let text = session.trouble()?.to_owned();
-    let lines = ui::wrapped_words(&text, 84);
+fn trouble(
+    ui: &Ui,
+    session: &mut Session,
+    mode: Mode,
+    hosting: bool,
+    room: &str,
+    seats: u32,
+    build: &str,
+) -> Option<Act> {
+    let said = session.trouble()?.clone();
+    let lines = ui::wrapped_words(&said.text, 84);
     for (i, line) in lines.iter().enumerate() {
-        ui::centred(line, LOGICAL_H - 216.0 + i as f32 * 22.0, 17.0, palette::ALARM);
+        ui::centred(line, LOGICAL_H - 238.0 + i as f32 * 22.0, 17.0, palette::ALARM);
     }
-    if mode == Mode::Relay {
-        let r = Rect::new(LOGICAL_W / 2.0 - 170.0, LOGICAL_H - 174.0, 340.0, 40.0);
-        if ui.button(r, "host by pasted code instead", true) {
-            return Some(open_host(room_code(), Mode::Code, 2, build));
+    // Only when a different introduction would actually help. The button used
+    // to be offered for every complaint, including "we found each other and
+    // could not connect" — for which the pasted path fails in exactly the same
+    // place, because it needs the same direct link. That advice sent a player
+    // round a loop.
+    if mode == Mode::Relay && said.try_a_code {
+        let r = Rect::new(LOGICAL_W / 2.0 - 190.0, LOGICAL_H - 168.0, 380.0, 40.0);
+        // And it keeps what the player was doing. Offering a *joiner* a way to
+        // become the host of a brand new empty room is not a way out of
+        // anything.
+        let label = if hosting { "host by pasted code instead" } else { "join by pasted code instead" };
+        if ui.button(r, label, true) {
+            return Some(if hosting {
+                open_host(room.to_owned(), Mode::Code, seats, build)
+            } else {
+                open_join(String::new(), Mode::Code, build)
+            });
         }
     }
     None
@@ -354,6 +387,7 @@ fn blob_exchange(
     ui: &Ui,
     session: &mut Session,
     reply: &mut Field,
+    copied: &mut f64,
     mut y: f32,
     give: &str,
     ask: &str,
@@ -384,12 +418,19 @@ fn blob_exchange(
         }
     }
     y += 88.0;
-    if ui.button(Rect::new(cx - 110.0, y, 220.0, 40.0), "copy", blob.is_some()) {
+    let button = Rect::new(cx - 110.0, y, 220.0, 40.0);
+    if let Some(text) = &blob {
+        arm(ui, button, text);
+    }
+    if ui.button(button, "copy", blob.is_some()) {
         if let Some(text) = &blob {
             page::copy(text);
+            *copied = get_time();
         }
     }
-    y += 58.0;
+    y += 44.0;
+    copied_note(*copied, y);
+    y += 22.0;
 
     if !ask.is_empty() {
         ui::centred(ask, y, 19.0, palette::FAINT);
@@ -406,6 +447,37 @@ fn blob_exchange(
         y += 58.0;
     }
     y
+}
+
+/// Hand the page what this button would copy, and where it is.
+///
+/// Not on the click: a browser only lets a page write to the clipboard while a
+/// user gesture is live, and macroquad reads a click in the animation frame
+/// *after* the browser delivered it, by which time it is not. So the plugin
+/// does the copying in the canvas's own click handler, and needs to know both
+/// what to write and which part of the canvas means "copy". Hovering was tried
+/// as the signal and is too slow: a click can arrive before a frame has been
+/// drawn with the cursor over the button.
+fn arm(ui: &Ui, button: Rect, text: &str) {
+    page::arm_copy(Some(text), ui.to_page(button));
+}
+
+/// "copied", for a couple of seconds after the button was pressed.
+///
+/// The button used to do nothing visible whether it had worked or not, and for
+/// a while it did nothing at all: `navigator.clipboard.writeText` hands back a
+/// promise, a rejection is not something `try`/`catch` sees, and the fallback
+/// never ran. On the one screen whose entire content is a string you have to
+/// get to somebody else, that is the worst place in the game to be silent.
+fn copied_note(at: f64, y: f32) {
+    let age = get_time() - at;
+    if at <= 0.0 || age > 2.5 {
+        // The hint stands in for it, because the keyboard always works and
+        // the button is at the mercy of the browser's clipboard permissions.
+        ui::centred("or select nothing and press ctrl-C", y, 14.0, palette::FAINT);
+        return;
+    }
+    ui::centred("copied", y, 15.0, palette::GOOD);
 }
 
 /// Said once rather than in two places that could disagree.
@@ -430,7 +502,7 @@ fn open_host(room: String, mode: Mode, seats: u32, build: &str) -> Act {
     // which is the two-player game phase 3 was proved on.
     #[cfg(not(target_arch = "wasm32"))]
     let session = Session::local(seed, seats, build);
-    Act::Open(session, Lobby::Hosting { mode, room, reply: Field::default() })
+    Act::Open(session, Lobby::Hosting { mode, room, reply: Field::default(), copied: 0.0 })
 }
 
 fn open_join(room: String, mode: Mode, build: &str) -> Act {
@@ -439,7 +511,7 @@ fn open_join(room: String, mode: Mode, build: &str) -> Act {
         let session = Session::Web(crate::game::Web::join(&room, mode, build));
         Act::Open(
             session,
-            Lobby::Joining { mode, room, offer: Field::default(), sent: false },
+            Lobby::Joining { mode, room, offer: Field::default(), sent: false, copied: 0.0 },
         )
     }
     #[cfg(not(target_arch = "wasm32"))]

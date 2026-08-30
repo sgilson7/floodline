@@ -126,6 +126,11 @@ pub enum Kind {
     Hearth,
     Cottage,
     Farm,
+    /// Design §3.3's forester's hut: the only way to make wood.
+    Forester,
+    /// Design §3.3's quarry: the only way to make stone, and it has to be cut
+    /// out of something, so it wants rock beside it.
+    Quarry,
     Granary,
     Stockpile,
     Dike,
@@ -136,10 +141,12 @@ pub enum Kind {
 impl Kind {
     /// Everything the MVP builds. Design §3.3 also lists Fishery, Forester's
     /// hut, Quarry, Guildhall, Tavern and Watchtower; the plan defers all six.
-    pub const ALL: [Kind; 8] = [
+    pub const ALL: [Kind; 10] = [
         Kind::Hearth,
         Kind::Cottage,
         Kind::Farm,
+        Kind::Forester,
+        Kind::Quarry,
         Kind::Granary,
         Kind::Stockpile,
         Kind::Dike,
@@ -152,6 +159,7 @@ impl Kind {
         match self {
             Kind::Hearth => (HEARTH_SIZE, HEARTH_SIZE),
             Kind::Farm => (3, 3),
+            Kind::Forester | Kind::Quarry => (2, 2),
             Kind::Cottage | Kind::Granary | Kind::Stockpile => (2, 2),
             Kind::Dike | Kind::Road | Kind::Bridge => (1, 1),
         }
@@ -164,6 +172,13 @@ impl Kind {
             Kind::Hearth => Goods::NONE,
             Kind::Cottage => Goods::wood(30),
             Kind::Farm => Goods::of(0, 40, 10),
+            // Both cost wood and no stone, so a city that has spent its stone
+            // on dikes can still dig itself out. A forester's hut has to be
+            // affordable out of the founding two hundred alongside a farm and
+            // a granary, or the one building that ends the wood shortage is
+            // the one the shortage stops you building.
+            Kind::Forester => Goods::wood(30),
+            Kind::Quarry => Goods::wood(40),
             Kind::Granary => Goods::wood(50),
             // Free — it is a patch of ground somebody agreed to keep tidy.
             Kind::Stockpile => Goods::NONE,
@@ -188,6 +203,8 @@ impl Kind {
             Kind::Hearth => 0,
             Kind::Cottage => 200,
             Kind::Farm => 300,
+            Kind::Forester => 180,
+            Kind::Quarry => 220,
             Kind::Granary => 250,
             Kind::Stockpile => 60,
             Kind::Dike => 150,
@@ -198,9 +215,13 @@ impl Kind {
 
     pub fn material(self) -> Material {
         match self {
-            Kind::Cottage | Kind::Farm | Kind::Granary | Kind::Stockpile | Kind::Bridge => {
-                Material::Wood
-            }
+            Kind::Cottage
+            | Kind::Farm
+            | Kind::Forester
+            | Kind::Quarry
+            | Kind::Granary
+            | Kind::Stockpile
+            | Kind::Bridge => Material::Wood,
             Kind::Hearth | Kind::Dike | Kind::Road => Material::Stone,
         }
     }
@@ -211,6 +232,8 @@ impl Kind {
             Kind::Hearth => 400,
             Kind::Cottage => 200,
             Kind::Farm => 200,
+            Kind::Forester => 180,
+            Kind::Quarry => 220,
             Kind::Granary => 250,
             Kind::Stockpile => 150,
             Kind::Dike => 400,
@@ -237,6 +260,7 @@ impl Kind {
             Kind::Granary => 5,
             Kind::Cottage => 4,
             Kind::Farm => 3,
+            Kind::Forester | Kind::Quarry => 3,
             Kind::Stockpile => 2,
             Kind::Bridge => 1,
             // A dike shelters nobody by being a building; it does it by
@@ -279,6 +303,10 @@ impl Kind {
     pub fn job_slots(self) -> usize {
         match self {
             Kind::Farm => 3,
+            // Two rather than three: wood and stone are wanted in bursts, and
+            // a city that can put half its people on timber is a city that
+            // forgets to eat.
+            Kind::Forester | Kind::Quarry => 2,
             Kind::Granary | Kind::Stockpile | Kind::Hearth => 2,
             _ => 0,
         }
@@ -304,8 +332,10 @@ impl Kind {
             Kind::Hearth => Goods::of(0, 900, 900),
             Kind::Granary => Goods::of(500, 0, 0),
             Kind::Stockpile => Goods::of(0, 500, 500),
-            // Not a store — an output buffer. See `is_store`.
+            // Not stores — output buffers. See `is_store`.
             Kind::Farm => Goods::of(FARM_BUFFER, 0, 0),
+            Kind::Forester => Goods::of(0, PRODUCER_BUFFER, 0),
+            Kind::Quarry => Goods::of(0, 0, PRODUCER_BUFFER),
             _ => Goods::NONE,
         }
     }
@@ -325,7 +355,20 @@ impl Kind {
     pub fn produces(self) -> Option<Good> {
         match self {
             Kind::Farm => Some(Good::Food),
+            Kind::Forester => Some(Good::Wood),
+            Kind::Quarry => Some(Good::Stone),
             _ => None,
+        }
+    }
+
+    /// Worker-ticks per unit made. See `balance` for where the numbers come
+    /// from; a building that makes nothing never asks.
+    pub fn ticks_per_unit(self) -> u32 {
+        match self {
+            Kind::Farm => FARM_TICKS_PER_UNIT,
+            Kind::Forester => FOREST_TICKS_PER_UNIT,
+            Kind::Quarry => QUARRY_TICKS_PER_UNIT,
+            _ => u32::MAX,
         }
     }
 
@@ -344,8 +387,8 @@ impl Kind {
     pub fn slots_for(self, job: crate::citizen::Job) -> usize {
         use crate::citizen::Job;
         match job {
-            Job::Farmer => {
-                if self == Kind::Farm {
+            job if job.produces() => {
+                if Job::at(self) == Some(job) {
                     self.job_slots()
                 } else {
                     0
@@ -353,6 +396,10 @@ impl Kind {
             }
             Job::Builder => BUILDER_SLOTS,
             Job::Hauler => usize::MAX,
+            // Unreachable: every other job produces. Written out rather than
+            // left to a wildcard so a new job has to come here and say what it
+            // means.
+            Job::Farmer | Job::Forester | Job::Quarrier => 0,
         }
     }
 
@@ -570,6 +617,30 @@ impl Building {
     /// Whether every cell of the footprint is ground this kind will stand on.
     pub fn ground_suits(kind: Kind, map: &Map, x: i32, y: i32) -> bool {
         Building::footprint(kind, x, y).all(|(cx, cy)| kind.accepts(map.ground_at(cx, cy)))
+    }
+
+    /// A quarry has to be cut out of something.
+    ///
+    /// The only rule in the game that asks what is *next to* a footprint
+    /// rather than under it, and it is here because rock was decoration
+    /// otherwise: every map has some (`ROCK_PERCENT`), none of it is
+    /// buildable, none of it is passable, and until now nothing wanted it.
+    /// Now the one building that ends the stone shortage has to be put
+    /// somewhere particular, which is a decision about the map rather than
+    /// another slot on the build menu.
+    pub fn neighbours_suit(kind: Kind, map: &Map, x: i32, y: i32) -> bool {
+        if kind != Kind::Quarry {
+            return true;
+        }
+        let (w, h) = kind.size();
+        for cy in y - 1..=y + h {
+            for cx in x - 1..=x + w {
+                if map.ground_at(cx, cy) == Ground::Rock {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
