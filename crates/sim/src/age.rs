@@ -88,6 +88,21 @@ pub enum Omen {
     Aftermath,
 }
 
+/// Why a run stopped.
+///
+/// Not decoration: it is what decides whether the last age counts. A city that
+/// drowned half way through age three survived two ages; a city that was still
+/// standing when age three ran out survived three. Both end in age three with
+/// the same tick on the clock, so the reason has to be remembered rather than
+/// inferred.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Ending {
+    /// Every city is gone. Design §4: "It is allowed to be sudden."
+    LastCityFell,
+    /// The map outlasted its ages — the MVP stops after age `MAX_AGE`.
+    AgesRanOut,
+}
+
 /// One city's line on the score screen.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct CityScore {
@@ -103,6 +118,8 @@ pub struct Score {
     /// Shown so the same map can be replayed, and argued about.
     pub seed: u64,
     pub ages_survived: u32,
+    /// `None` while the run is still going.
+    pub ending: Option<Ending>,
     pub days: u32,
     pub cities: Vec<CityScore>,
     /// Whether anybody was still standing at the end.
@@ -174,8 +191,15 @@ impl World {
 
         Score {
             seed: self.seed,
-            // A city that dies during age 3 survived two ages, not three.
-            ages_survived: self.age.saturating_sub(1),
+            // Ages *completed*. Mid-run and after a collapse that is one fewer
+            // than the age on the clock, because the current age is not over.
+            // When the ages themselves ran out, the last one was finished and
+            // counts — which is the whole reason `Ending` is recorded.
+            ages_survived: match self.ending {
+                Some(Ending::AgesRanOut) => self.age,
+                _ => self.age.saturating_sub(1),
+            },
+            ending: self.ending,
             days: self.tick / TICKS_PER_DAY + 1,
             anyone_left: cities.iter().any(|c| c.survived),
             cities,
@@ -198,6 +222,7 @@ impl World {
         // (design §4).
         if self.players.iter().all(|&p| self.population(p) == 0) {
             self.finished = Some(self.tick);
+            self.ending = Some(Ending::LastCityFell);
             return;
         }
 
@@ -207,6 +232,7 @@ impl World {
                 // The MVP's run ends after age 3 whether or not anybody is
                 // left standing.
                 self.finished = Some(self.tick);
+                self.ending = Some(Ending::AgesRanOut);
                 return;
             }
             self.age += 1;

@@ -25,7 +25,7 @@ pub mod world;
 
 pub use building::{Building, BuildingId, Good, Goods, Kind};
 pub use citizen::{Citizen, CitizenId, Job, PlayerId, State};
-pub use age::{Disaster, Omen, Score};
+pub use age::{Disaster, Ending, Omen, Score};
 pub use command::Command;
 pub use road::{Road, RoadId, Trade, TradeId};
 pub use fx::{Fx, Turns, V2};

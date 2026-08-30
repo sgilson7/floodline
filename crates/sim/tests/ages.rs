@@ -4,7 +4,7 @@
 //! `TICKS_PER_DAY` or `DAYS_PER_AGE` — which design §11 explicitly leaves open
 //! — changes the game without breaking the tests that describe it.
 
-use sim::age::{DisasterKind, Omen};
+use sim::age::{DisasterKind, Ending, Omen};
 use sim::balance::*;
 use sim::citizen::PlayerId;
 use sim::nav::Nav;
@@ -192,6 +192,14 @@ fn ages_follow_one_another_and_the_run_ends_after_the_last() {
     assert!(w.finished().is_none(), "ended early");
     run_fed(&mut w, age_ticks);
     assert!(w.finished().is_some(), "the run did not end after the last age");
+    assert_eq!(w.ending, Some(Ending::AgesRanOut));
+
+    // A city still standing when the ages ran out survived every one of them.
+    // Counting completed ages as `age - 1` is right for a collapse mid-age and
+    // wrong here, which is why the ending is recorded rather than inferred.
+    let s = w.score();
+    assert_eq!(s.ages_survived, MAX_AGE, "outlasting the ages was scored short");
+    assert!(s.anyone_left);
 }
 
 #[test]
@@ -218,9 +226,15 @@ fn the_run_ends_when_the_last_city_falls() {
     run_to(&mut w, TICKS_PER_DAY * DAYS_PER_AGE * MAX_AGE);
 
     assert!(w.finished().is_some(), "everybody starved and the run went on");
+    assert_eq!(w.ending, Some(Ending::LastCityFell));
     assert_eq!(w.population(PlayerId(0)), 0);
     assert_eq!(w.population(PlayerId(1)), 0);
     assert!(w.age() < MAX_AGE, "it should have ended before the ages ran out");
+
+    // Dying part-way through an age means that age was not survived.
+    let s = w.score();
+    assert_eq!(s.ages_survived, w.age() - 1, "a collapse mid-age was scored long");
+    assert!(!s.anyone_left);
 }
 
 #[test]
@@ -229,6 +243,7 @@ fn the_score_says_what_happened() {
     let start = w.score();
     assert_eq!(start.seed, 31, "the seed is shown so the map can be replayed");
     assert_eq!(start.ages_survived, 0, "nothing survived yet");
+    assert_eq!(start.ending, None, "the run is not over");
     assert_eq!(start.cities.len(), 2);
     for c in &start.cities {
         assert_eq!(c.peak_population, FOUNDING_CITIZENS);

@@ -5,7 +5,7 @@
 //! "`gui` never constructs a `World` change except by handing a `Command` to
 //! the lockstep" — is why the mutating methods are the short list they are.
 
-use crate::age::{Disaster, DisasterKind};
+use crate::age::{Disaster, DisasterKind, Ending};
 use crate::balance::*;
 use crate::building::{BuildState, Building, BuildingId, Good, Goods, Kind};
 use crate::citizen::{Citizen, CitizenId, Errand, Job, PlayerId, State};
@@ -107,6 +107,9 @@ pub struct World {
     pub disaster: Disaster,
     /// The tick the run ended, if it has.
     pub finished: Option<u32>,
+    /// Why it ended. See `age::Ending` — it is what decides whether the last
+    /// age counts on the score screen.
+    pub ending: Option<Ending>,
     /// The most citizens each city has ever had, for the score screen.
     pub peak_population: Vec<u32>,
     /// Roads that have been laid, in the order they were laid.
@@ -169,6 +172,7 @@ impl World {
             age_start_tick: 0,
             disaster: Disaster { kind: DisasterKind::Flood, sources: Vec::new(), height: 0 },
             finished: None,
+            ending: None,
             peak_population: vec![0; players as usize],
             roads: Vec::new(),
             trades: Vec::new(),

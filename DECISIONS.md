@@ -463,3 +463,21 @@ so they moved together rather than being left to rot:
 
 Phase 5's playtesting is where these get answered with a stopwatch instead of
 arithmetic. They are all in `balance.rs` for exactly that reason.
+
+---
+
+## 2026-08-30 — Why a run ended is recorded, not inferred
+
+The score counts *completed* ages, and "completed" is not something the clock
+can answer on its own. A city that drowned half way through age three survived
+two ages; a city still standing when age three ran out survived three. Both end
+in age three, at the same tick, and the first version scored them the same —
+`age - 1`, which is right for the collapse and short by one for the survivor.
+
+Nothing caught it, because item 9's tests only ever ran a run into the ground.
+It was found by looking at the output of a scripted game rather than at an
+assertion, which is the argument for having something to look at.
+
+`Ending` is now stored when the run stops, and the score reads it. It is also
+better on the screen: "the last city fell" and "you outlasted the ages" are
+different endings and should not print the same line.
