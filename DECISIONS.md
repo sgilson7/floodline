@@ -1210,14 +1210,45 @@ measurements that a person should be asked about:
   the last age, so losing there is losing at the end rather than being denied a
   choice — but a run that always ends the same way is a run with no ending
   worth reaching.
-* **Stone runs out and there is no Quarry.** A city starts with 120 stone,
-  a dike costs 40 per level, and nothing in the MVP produces any. That is three
-  cells of bank, which cannot protect a city; the probe's wall is built by
-  fiat. Either the starting stone is far too low or the flood defence a player
-  can actually afford is "move people", not "build a wall". The plan defers the
-  Quarry and this is the argument for undeferring it.
+* ~~**Stone runs out and there is no Quarry.**~~ Answered, in the same
+  session. The measurement said a wall that changes the outcome is about
+  thirty-four cells, which at the old price of forty stone a level was 2 720
+  stone against a purse of 120 — one twentieth of one wall. A dike now costs
+  ten a level and a city starts with 720, so a player gets **one good wall in a
+  run** and has to choose where to put it and how high to build it. The probe's
+  `dike` strategy now *orders* its wall through `Command::Place` and lets the
+  same eight people haul and build it out of the same stone: thirty-three cells
+  for four hundred stone, up before the age-one flood, and the builders on it
+  are builders who are not farming. That trade is the decision, and it now
+  exists. Nothing still produces stone, which is what makes the one wall a
+  choice rather than a chore.
 * **A day is two minutes and a run is thirty-six.** §11 already suspects that
   is too long for an evening. Nothing here can tell.
 
 They are three specific questions rather than "is it fun", which is the most
 useful shape the answer could have had without a player.
+
+---
+
+## 2026-08-30 — A dike costs ten a level, and a city starts with 720 stone
+
+Measured, and the measurement is in `balance::STARTING_STONE`. The short
+version: a wall that changes the outcome of a run is about thirty-four cells
+long, the old price put that at 2 720 stone at two levels, and a city started
+with 120. The flood answer the whole design turns on could not be afforded at
+one twentieth scale, and nobody had checked because every test that involves a
+dike delivers its stone by fiat — including the one that proves dikes work.
+
+Ten a level and a purse of 720 buys seventy-two dike-levels: thirty-six cells
+at two levels, or eighteen at four. Nothing in the MVP produces stone, so that
+is the whole run's worth, and the probe now builds its wall through
+`Command::Place` like a player would — thirty-three cells for four hundred
+stone, finished before the age-one flood, with the builders on it not farming
+while they do it. Both halves of that show up in the runs: the dike strategy
+keeps more people through ages one and two than growing does, and the strategy
+that builds a wall *and* runs uphill sometimes does worse than either, because
+it spent the same eight people on both.
+
+The tests that asserted "forty" now ask `Kind::Dike.cost()` instead. What they
+were for is that a dike pays per level and starts holding water back only when
+it stands, and neither of those is a fact about the number.

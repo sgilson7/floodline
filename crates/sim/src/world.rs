@@ -1578,15 +1578,19 @@ mod tests {
         let id = w.place(PlayerId(0), Kind::Dike, x, y).unwrap();
         assert_eq!(w.effective_height(x, y), base, "a site holds nothing back");
 
-        w.deliver_to(id, Good::Stone, 40);
+        // The price is a balance constant and has moved once already; what is
+        // under test is when a dike starts holding water back, not what a
+        // level costs.
+        let per = Kind::Dike.cost().stone;
+        w.deliver_to(id, Good::Stone, per);
         w.build_at(id, Kind::Dike.build_ticks());
         assert_eq!(w.effective_height(x, y), base + DIKE_HEIGHT_PER_LEVEL);
 
         // Raising it puts it back under construction until the stone arrives.
         w.raise_dike(PlayerId(0), id).unwrap();
         assert_eq!(w.effective_height(x, y), base, "and it is a site again while it grows");
-        assert_eq!(w.buildings[id.0 as usize].outstanding(), Goods::stone(40));
-        w.deliver_to(id, Good::Stone, 40);
+        assert_eq!(w.buildings[id.0 as usize].outstanding(), Goods::stone(per));
+        w.deliver_to(id, Good::Stone, per);
         w.build_at(id, Kind::Dike.build_ticks());
         assert_eq!(w.effective_height(x, y), base + DIKE_HEIGHT_PER_LEVEL * 2);
 

@@ -167,7 +167,11 @@ impl Kind {
             Kind::Granary => Goods::wood(50),
             // Free — it is a patch of ground somebody agreed to keep tidy.
             Kind::Stockpile => Goods::NONE,
-            Kind::Dike => Goods::stone(40),
+            // Ten a level, not forty. A wall that changes the outcome of a
+            // run is about thirty-four cells long — measured, in
+            // `tests/playtest.rs` — and at forty a level that is 2 720 stone
+            // against a purse of 120. See `balance::STARTING_STONE`.
+            Kind::Dike => Goods::stone(10),
             // Design and plan both leave the cost of a road unstated. Time
             // only: a road is packed earth, and the thing it actually costs
             // is builders who could have been doing something else while the
@@ -721,13 +725,18 @@ mod tests {
 
     #[test]
     fn a_dike_pays_per_level() {
+        // Written against `Kind::Dike.cost()` rather than against the number
+        // it happens to be: what is under test is that a dike pays per level,
+        // and the price itself is a balance constant that has already moved
+        // once (see `balance::STARTING_STONE`).
+        let per = Kind::Dike.cost().stone;
         let mut b = Building::site(BuildingId(0), PlayerId(0), Kind::Dike, 3, 3);
-        assert_eq!(b.total_cost(), Goods::stone(40));
+        assert_eq!(b.total_cost(), Goods::stone(per));
         b.level = 3;
-        assert_eq!(b.total_cost(), Goods::stone(120));
+        assert_eq!(b.total_cost(), Goods::stone(per * 3));
         assert_eq!(b.ground_bonus(), 0, "a site holds nothing back");
 
-        b.deliver(Good::Stone, 120);
+        b.deliver(Good::Stone, per * 3);
         b.build(Kind::Dike.build_ticks());
         assert_eq!(b.state, BuildState::Standing);
         assert_eq!(b.ground_bonus(), DIKE_HEIGHT_PER_LEVEL * 3);

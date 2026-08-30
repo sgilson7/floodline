@@ -21,10 +21,10 @@
 //!     cargo test -p sim --release --test playtest -- --ignored --nocapture
 
 use sim::balance::*;
-use sim::building::{Good, Kind};
+use sim::building::Kind;
 use sim::citizen::{CitizenId, PlayerId};
 use sim::command::Command;
-use sim::map::{Corner, Map, MAP_H, MAP_W};
+use sim::map::{Map, MAP_H, MAP_W};
 use sim::nav::Nav;
 use sim::world::World;
 
@@ -71,8 +71,10 @@ struct Report {
     from_the_corner: i32,
     /// Buildings standing at the end of each age.
     standing: Vec<usize>,
-    /// How many dike cells were actually built.
+    /// How many dike cells were actually built, and what they would have cost
+    /// a player who had to pay for them.
     wall: usize,
+    wall_cost: u16,
     /// Water at the hearth itself, deepest in each age.
     at_the_fire: Vec<u16>,
     /// Stone in hand on the day the water came.
@@ -110,17 +112,10 @@ fn deepest_near(w: &World, hx: i32, hy: i32) -> u16 {
     deepest
 }
 
-/// A step from the hearth towards the corner the water comes out of.
-fn towards(corner: Corner, hx: i32, hy: i32) -> (i32, i32) {
-    let (cx, cy) = corner.cell();
-    ((cx - hx).signum(), (cy - hy).signum())
-}
-
 fn play(seed: u64, play: Play) -> Report {
     let mut w = World::new(seed, 2);
     let mut nav = Nav::new();
     let (hx, hy) = w.map.hearth_sites[0];
-    let (dx, dy) = towards(w.map.low_corner, hx, hy);
 
     let mut report = Report {
         seed,
@@ -131,6 +126,7 @@ fn play(seed: u64, play: Play) -> Report {
             + (hy - w.map.low_corner.cell().1).abs(),
         standing: Vec::new(),
         wall: 0,
+        wall_cost: 0,
         at_the_fire: Vec::new(),
         stone_on_the_day: Vec::new(),
         ages: 0,
@@ -150,6 +146,7 @@ fn play(seed: u64, play: Play) -> Report {
     let mut placed = 0usize;
     let mut last_day = u32::MAX;
     let mut diked = false;
+    let mut raised = false;
     let mut fled = false;
     let mut returned = false;
     let mut deepest_this_age = 0u16;
@@ -179,18 +176,15 @@ fn play(seed: u64, play: Play) -> Report {
             assign_to_farms(&mut w);
         }
 
-        // The dike goes up once, early, and by hand rather than by hauling —
-        // this file is measuring whether a wall in the right place changes the
-        // outcome, and "could eight people have built one in six days" is the
-        // separate question `build_ticks` answers.
-        if (play == Play::Dike || play == Play::Both) && !diked && day >= 1 {
+        // The wall is ordered on the second day, after the farm and the
+        // granary, and raised a level on the fourth if there is stone left.
+        if (play == Play::Dike || play == Play::Both) && !diked && day >= 2 {
             diked = true;
-            build_a_wall(&mut w, hx, hy, dx, dy);
-            report.wall = w
-                .buildings
-                .iter()
-                .filter(|b| b.owner == ME && b.kind == Kind::Dike)
-                .count();
+            report.wall = order_a_wall(&mut w, hx, hy);
+        }
+        if (play == Play::Dike || play == Play::Both) && diked && day == 4 && !raised {
+            raised = true;
+            raise_the_wall(&mut w);
         }
 
         // Uphill, on the omen. It arrives a day before the water (design §4)
@@ -240,6 +234,12 @@ fn play(seed: u64, play: Play) -> Report {
         at_the_fire = at_the_fire.max(w.water.depth_at(hx, hy));
         if w.day_of_age() == World::IMPACT_DAY && report.stone_on_the_day.len() < w.age() as usize {
             report.stone_on_the_day.push(w.treasury(ME).stone);
+            report.wall_cost = w
+                .buildings
+                .iter()
+                .filter(|b| b.owner == ME && b.kind == Kind::Dike && b.standing_now())
+                .map(|b| b.level as u16 * Kind::Dike.cost().stone)
+                .sum();
         }
         if w.age() != age_before || w.finished().is_some() {
             report.alive.push(w.population(ME));
@@ -250,6 +250,8 @@ fn play(seed: u64, play: Play) -> Report {
                 w.buildings.iter().filter(|b| b.owner == ME && b.standing_now()).count(),
             );
             deepest_this_age = 0;
+            // A new age, a new chance to raise what is standing.
+            raised = false;
             fled = false;
         }
     }
@@ -291,7 +293,8 @@ fn assign_to_farms(w: &mut World) {
     }
 }
 
-/// A wall along the shore, between the city and the water, at full height.
+/// A wall along the shore, between the city and the water — *ordered*, not
+/// conjured.
 ///
 /// Parallel to the line the water arrives on rather than an L around the
 /// hearth: the flood comes off one corner and spreads along the low ground, so
@@ -299,33 +302,44 @@ fn assign_to_farms(w: &mut World) {
 /// bank across its path. An L of fourteen cells was the first attempt and the
 /// water simply went round it, which is a fact about that wall and not about
 /// dikes.
-fn build_a_wall(w: &mut World, hx: i32, hy: i32, _dx: i32, _dy: i32) {
+///
+/// Every cell goes down as a `Place` and is hauled and built by the same eight
+/// people who are farming, out of the same stone the city started with. The
+/// first version of this built the wall by fiat, which was the right way to
+/// find out whether a wall in the right place changes the outcome and no way
+/// at all to find out whether anybody could have one.
+fn order_a_wall(w: &mut World, hx: i32, hy: i32) -> usize {
     let (cx, cy) = w.map.low_corner.cell();
     let (sx, sy) = ((MAP_W / 2 - cx).signum(), (MAP_H / 2 - cy).signum());
     let out = (hx - cx).abs() + (hy - cy).abs() - 10;
     let mid = (hx - cx).abs();
-    let mut wall = |x: i32, y: i32| {
-        if w.can_place(ME, Kind::Dike, x, y).is_err() {
-            return;
-        }
-        let Ok(id) = w.place(ME, Kind::Dike, x, y) else { return };
-        for _ in 0..DIKE_MAX_LEVEL {
-            let want = w.buildings[id.0 as usize].outstanding().stone;
-            w.deliver_to(id, Good::Stone, want);
-            w.build_at(id, Kind::Dike.build_ticks());
-            if w.buildings[id.0 as usize].level < DIKE_MAX_LEVEL {
-                let _ = w.raise_dike(ME, id);
-            }
-        }
-    };
-    // Every cell ten Manhattan cells nearer the water than the hearth is, for
-    // twenty-five cells either side of it along the shore.
+    let mut placed = 0;
     for k in -25..=25 {
         let along = mid + k;
         if along < 0 || along > out {
             continue;
         }
-        wall(cx + sx * along, cy + sy * (out - along));
+        let (x, y) = (cx + sx * along, cy + sy * (out - along));
+        if w.apply(ME, &Command::Place { kind: Kind::Dike, x: x as u8, y: y as u8 }).is_ok() {
+            placed += 1;
+        }
+    }
+    placed
+}
+
+/// Raise every finished dike a level, while there is stone for it.
+fn raise_the_wall(w: &mut World) {
+    let standing: Vec<sim::BuildingId> = w
+        .buildings
+        .iter()
+        .filter(|b| b.owner == ME && b.kind == Kind::Dike && b.standing_now())
+        .map(|b| b.id)
+        .collect();
+    for dike in standing {
+        if w.treasury(ME).stone < Kind::Dike.cost().stone {
+            return;
+        }
+        let _ = w.apply(ME, &Command::RaiseDike { dike });
     }
 }
 
@@ -354,14 +368,14 @@ fn three_full_runs_of_each_strategy() {
     const SEEDS: [u64; 3] = [31, 1_000_003, 0xF100_D11E];
     println!();
     println!(
-        "  seed        play   ages  alive by age   at the hearth     in the quarter     wall  out"
+        "  seed        play   ages  alive by age   at the hearth     in the quarter      wall   stone  out"
     );
     let mut reports = Vec::new();
     for seed in SEEDS {
         for p in Play::ALL {
             let r = play(seed, p);
             println!(
-                "  {:<11} {:<6} {:>4}   {:<13} {:<17} {:<17} {:>5} {:>4}",
+                "  {:<11} {:<6} {:>4}   {:<13} {:<17} {:<17} {:>5} {:>6} {:>4}",
                 r.seed,
                 r.play.name(),
                 r.ages,
@@ -369,6 +383,7 @@ fn three_full_runs_of_each_strategy() {
                 format!("{:?}", r.at_the_fire),
                 format!("{:?}", r.soaked),
                 r.wall,
+                r.wall_cost,
                 r.from_the_corner,
             );
             reports.push(r);
@@ -379,6 +394,14 @@ fn three_full_runs_of_each_strategy() {
     let total = |p: Play| -> u32 {
         reports.iter().filter(|r| r.play == p).map(|r| r.alive.last().copied().unwrap_or(0)).sum()
     };
+    let paid: Vec<u16> = reports.iter().filter(|r| r.wall_cost > 0).map(|r| r.wall_cost).collect();
+    if let Some(&most) = paid.iter().max() {
+        println!(
+            "  the tallest wall anybody got built by the age-one flood cost {most} stone \
+             of the {STARTING_STONE} a city starts with, and nothing in the MVP makes more."
+        );
+        println!();
+    }
     println!("  survivors across all seeds:");
     for p in Play::ALL {
         println!("    {:<6} {}", p.name(), total(p));

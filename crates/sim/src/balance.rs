@@ -213,11 +213,24 @@ pub const HEARTH_SIZE: i32 = 3;
 /// costs stone, and surviving the flood behind a Dike is the entire point of
 /// the vertical slice. So a city starts with stone as well. See DECISIONS.md.
 ///
-/// Sized to cover roughly four Cottages and a Granary, plus three levels of
-/// Dike, with nothing spare. A player who spends it all on housing has made a
-/// choice about the flood, which is the choice the game is about.
+/// **The stone was twenty times too little and nobody had checked.** It was
+/// 120, "roughly four Cottages and a Granary plus three levels of Dike", which
+/// is one dike cell built three levels high. `tests/playtest.rs` measures what
+/// a wall has to be to change the outcome of a run — about thirty-four cells
+/// along the shore — and at the old price that is 2 720 stone at two levels
+/// and 5 440 at four. A city could afford one twentieth of one, so the flood
+/// answer the whole design turns on could not be built at all, and the probe
+/// had to put its wall up by fiat to measure anything.
+///
+/// So the price came down and the purse went up, to the point where a player
+/// gets **one good wall in a run**: 720 stone buys seventy-two dike-levels,
+/// which is thirty-six cells at two levels — a bank long enough to matter — or
+/// eighteen cells at four. Nothing produces stone, so that is the whole run's
+/// worth of it, and where to put it and how high to build it is the decision
+/// the flood is asking. Farms cost ten stone each, which is a real bite out of
+/// the same purse and is meant to be.
 pub const STARTING_WOOD: u16 = 200;
-pub const STARTING_STONE: u16 = 120;
+pub const STARTING_STONE: u16 = 720;
 
 /// How much of its materials a demolished or ruined building gives back
 /// (design §3.3: "rubble returns a fraction of its materials"), as a percent.
