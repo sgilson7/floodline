@@ -599,3 +599,31 @@ fn a_joiner_says_hello_when_the_host_appears_and_not_before() {
     }
     assert_eq!(wire.sent.len(), 1, "Hello was said more than once");
 }
+
+#[test]
+fn a_transport_complaint_in_the_lobby_is_advice_and_not_the_end() {
+    // "No relay has answered in fifteen seconds" is a sentence a host wants to
+    // read while still hosting. The same words once the run is going mean the
+    // connection is gone, and that is the end.
+    let mut wire = LateHost {
+        inbox: std::collections::VecDeque::new(),
+        sent: Vec::new(),
+        connected: Vec::new(),
+    };
+    let mut joiner = Lockstep::join(BUILD);
+    wire.inbox.push_back(net::Event::Error("no relay answered — try a pasted code".into()));
+    joiner.advance(&mut wire);
+    assert!(joiner.in_lobby(), "a warning threw the player out of the lobby");
+    assert_eq!(joiner.trouble.as_deref(), Some("no relay answered — try a pasted code"));
+
+    let mut host = Lockstep::host(31, 2, BUILD);
+    host.start();
+    let mut wire = LateHost {
+        inbox: std::collections::VecDeque::new(),
+        sent: Vec::new(),
+        connected: Vec::new(),
+    };
+    wire.inbox.push_back(net::Event::Error("the connection failed".into()));
+    host.advance(&mut wire);
+    assert_eq!(host.status, Status::Ended("the connection failed".into()));
+}

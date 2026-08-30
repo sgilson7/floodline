@@ -196,7 +196,7 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
     for &p in &w.players {
         let alive = w.population(p);
         let mine = if p == me { " (you)" } else { "" };
-        let gone = if w.dropped.contains(&p) { " — gone" } else { "" };
+        let gone = if w.dropped.contains(&p) { " - gone" } else { "" };
         draw_rectangle(left, y - 10.0, 10.0, 10.0, palette::player(p));
         draw_text(
             &format!("city {}{}: {} souls{}", p.0, mine, alive, gone),
@@ -210,7 +210,7 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
 
     y += 14.0;
     let (text, colour) = match status {
-        net::Status::Lobby => ("in the lobby — press SPACE to start".to_owned(), palette::WARNING),
+        net::Status::Lobby => ("in the lobby - press SPACE to start".to_owned(), palette::WARNING),
         net::Status::Playing => ("playing".to_owned(), palette::FAINT),
         net::Status::WaitingOn(who) => (
             format!("waiting on {}", who.iter().map(|p| format!("city {}", p.0))
@@ -262,7 +262,7 @@ pub fn score(w: &World) {
         draw_rectangle(left, y - 12.0, 12.0, 12.0, palette::player(c.player));
         draw_text(
             &format!(
-                "city {}: {} at its height, {} left — {}",
+                "city {}: {} at its height, {} left - {}",
                 c.player.0, c.peak_population, c.final_population,
                 if c.survived { "standing" } else { "gone" }
             ),
@@ -273,7 +273,7 @@ pub fn score(w: &World) {
     }
 
     y += 16.0;
-    line(&format!("seed {} — the same map again, if you want it", s.seed), 16,
+    line(&format!("seed {} - the same map again, if you want it", s.seed), 16,
          palette::FAINT, &mut y);
     // The plan's "New run". There is no button because there is nothing for a
     // button to do that the lobby does not already do better: a new run is a

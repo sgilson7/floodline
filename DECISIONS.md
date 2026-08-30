@@ -1026,3 +1026,47 @@ instead. In the three-tab run, the second joiner's host is peer **id 2** — it
 met the other joiner first, ignored it, and took the host when it arrived.
 First-is-the-host would have wired two joiners together and left the host
 waiting, and it would have happened only with three players and only sometimes.
+
+---
+
+## 2026-08-30 — macroquad's font is ASCII, and it does not say so
+
+Three em dashes and two ellipses shipped in the lobby as hollow boxes, one of
+them in the middle of the sentence that tells a player what to do when the
+relays are down. macroquad's built-in font has no glyph for them and no
+fallback: it draws the box and carries on.
+
+It was invisible in review because the source is right — `"connected — waiting
+for the host"` is what anybody would write — and it is only wrong at the
+moment of drawing. It was invisible in the tests because nothing asserts on
+letters. It was found by looking closely at a screenshot taken for another
+reason entirely, which is not a process.
+
+So `gui` lints its own sources: every string literal outside a comment must be
+ASCII. It is a heuristic rather than a Rust parser and it errs towards
+complaining, which is the right direction for a lint about typography. Strings
+that reach the screen from `net` and `sim` — `Refusal::to_message` and
+`RuleError::to_message` — are checked in their own crates' tests instead, since
+the lint reads only `gui`'s files, and the plugin's messages were fixed by
+hand. The prose in comments and in this file keeps its typography; nobody draws
+a comment.
+
+---
+
+## 2026-08-30 — A relay that has not answered yet is not the end of the game
+
+`Event::Error` set `Status::Ended`, which is right once a run is going — the
+transport has failed and there is no game any more — and wrong in a lobby,
+where most of what a transport has to say is advice. "No signalling relay
+answered in fifteen seconds, try a pasted code" would have thrown the host out
+of the room they were waiting in, discarding a room code they had already sent
+to somebody, on the strength of a warning that is often just slowness.
+
+`Lockstep::trouble` carries it instead while the status is `Lobby`, and the
+lobby prints it and offers the other path as a button. A button rather than the
+plan's "offers *by code* automatically", because switching automatically would
+silently invalidate the code the host is at that moment reading down a phone.
+
+The failure was reproduced rather than imagined: a Playwright context that
+aborts every `wss://` request and names a signalling bundle that does not
+exist, which is what a blocked network looks like from inside the page.

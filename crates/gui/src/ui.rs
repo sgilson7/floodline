@@ -181,6 +181,22 @@ pub fn centred(text: &str, y: f32, size: f32, colour: Color) {
     draw_text(text, (crate::screen::LOGICAL_W - m.width) / 2.0, y, size, colour);
 }
 
+/// Wrap prose on spaces. For sentences a person reads, unlike `wrapped`,
+/// which chops a base64 blob wherever it likes because nobody reads one.
+pub fn wrapped_words(text: &str, cols: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for word in text.split_whitespace() {
+        match out.last_mut() {
+            Some(line) if line.chars().count() + 1 + word.chars().count() <= cols => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => out.push(word.to_owned()),
+        }
+    }
+    out
+}
+
 /// Wrap a long string into lines of at most `cols` characters, for the blobs.
 pub fn wrapped(text: &str, cols: usize) -> Vec<String> {
     text.as_bytes()
@@ -199,4 +215,75 @@ pub fn centred_in(r: Rect, text: &str, size: f32, colour: Color) {
         size,
         colour,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    /// Nothing the game draws may leave ASCII.
+    ///
+    /// macroquad's built-in font has no em dash, no ellipsis and no curly
+    /// quotes, and it does not fall back — it draws a hollow box. Three of
+    /// them shipped in the lobby before a screenshot was looked at closely
+    /// enough, including one in the middle of the sentence that tells a player
+    /// what to do when the relays are down. The rule is only about strings the
+    /// game puts on screen, so comments and doc comments are skipped; this is
+    /// a lint with a heuristic in it, not a Rust parser, and it errs towards
+    /// complaining.
+    #[test]
+    fn nothing_the_game_draws_is_outside_ascii() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut bad: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(&dir).expect("gui has a src directory") {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (n, line) in text.lines().enumerate() {
+                let code = line.trim_start();
+                if code.starts_with("//") || code.starts_with('*') {
+                    continue;
+                }
+                for literal in string_literals(line) {
+                    if !literal.is_ascii() {
+                        bad.push(format!(
+                            "{}:{}: {literal}",
+                            path.file_name().unwrap().to_string_lossy(),
+                            n + 1
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "macroquad's font draws a hollow box for these:\n  {}",
+            bad.join("\n  ")
+        );
+    }
+
+    /// Every `"…"` on a line, escapes respected and nothing else understood.
+    fn string_literals(line: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut chars = line.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c != '"' {
+                continue;
+            }
+            let mut literal = String::new();
+            while let Some(c) = chars.next() {
+                match c {
+                    '\\' => {
+                        chars.next();
+                    }
+                    '"' => break,
+                    _ => literal.push(c),
+                }
+            }
+            out.push(literal);
+        }
+        out
+    }
 }

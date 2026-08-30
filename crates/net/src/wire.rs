@@ -164,5 +164,16 @@ mod tests {
         let text = r.to_message();
         assert!(text.contains("aaa") && text.contains("bbb"));
         assert!(text.contains("Reload"), "it should say what to do: {text}");
+        // These are drawn by `gui`, whose font is ASCII and draws a hollow box
+        // for anything else. Checked here because `gui`'s own lint reads only
+        // `gui`'s sources.
+        for r in [
+            Refusal::BuildMismatch { theirs: "a".into(), ours: "b".into() },
+            Refusal::ProtoMismatch { theirs: 1, ours: 2 },
+            Refusal::GameFull,
+            Refusal::TooLate,
+        ] {
+            assert!(r.to_message().is_ascii(), "{r:?}: {:?}", r.to_message());
+        }
     }
 }

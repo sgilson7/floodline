@@ -96,6 +96,18 @@ pub struct Lockstep {
 
     /// Joiner: a `Hello` is still owed to whichever peer turns up first.
     greet: bool,
+
+    /// The last thing the transport complained about while nothing had gone
+    /// irrecoverably wrong.
+    ///
+    /// Separate from `Status::Ended` because most of what a transport has to
+    /// say in a lobby is advice rather than a verdict — "no relay has answered
+    /// in fifteen seconds, try the other path" is a sentence a host wants to
+    /// read *while still hosting*, and treating it as the end of the game
+    /// would throw them out of the room they are waiting in. Once a run has
+    /// started there is no such thing as advice: a transport error there means
+    /// the game is over, and it still sets `Ended`.
+    pub trouble: Option<String>,
 }
 
 impl Lockstep {
@@ -121,6 +133,7 @@ impl Lockstep {
             active_from: BTreeMap::new(),
             next_player: 1,
             greet: false,
+            trouble: None,
             world,
         }
     }
@@ -230,7 +243,13 @@ impl Lockstep {
             match ev {
                 Event::Peer(who) => self.greet(who, peer),
                 Event::Left(who) => self.peer_left(who, peer),
-                Event::Error(text) => self.status = Status::Ended(text),
+                Event::Error(text) => {
+                    if self.status == Status::Lobby {
+                        self.trouble = Some(text);
+                    } else {
+                        self.status = Status::Ended(text);
+                    }
+                }
                 Event::Msg { from, bytes, .. } => match decode(&bytes) {
                     Some(m) => self.handle(from, m, peer),
                     // Undecodable bytes are a different build talking. Saying

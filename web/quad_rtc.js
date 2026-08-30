@@ -229,7 +229,7 @@
                     (d && d.peerId ? "a player" : "the room") +
                     ": " +
                     (d && d.error ? d.error : "unknown") +
-                    " — one of you may be behind a strict NAT. Try Join by code."
+                    " - one of you may be behind a strict NAT. Try Join by code."
                 );
               },
             }
@@ -277,13 +277,20 @@
               s,
               "no signalling relay answered in " +
                 Math.round(wait / 1000) +
-                "s — the relays may be blocked from this network. Try Join by code."
+                "s - the relays may be blocked from this network. Try Join by code."
             );
           }
         }, wait);
       },
       function (e) {
-        fail(s, "could not load the signalling library (" + e + ") — try Join by code.");
+        // The detail goes to the console and the advice goes on screen. A
+        // player cannot act on a module specifier and the lobby has one line.
+        console.error("floodline: the signalling bundle would not load", e);
+        fail(
+          s,
+          "the signalling library did not load - this page may be incompletely " +
+            "deployed. Hosting by pasted code needs nothing but this tab."
+        );
       }
     );
   }
@@ -383,14 +390,14 @@
     if (s.isHost) {
       if (kind === "O") {
         return Promise.reject(
-          new Error("that is an invitation, not a reply — you are the host; paste what the other player sent back")
+          new Error("that is an invitation, not a reply - you are the host; paste what the other player sent back")
         );
       }
       return takeAnswer(s, blob);
     }
     if (kind === "A") {
       return Promise.reject(
-        new Error("that is a reply, not an invitation — paste the code the host gave you")
+        new Error("that is a reply, not an invitation - paste the code the host gave you")
       );
     }
     return takeOffer(s, blob);

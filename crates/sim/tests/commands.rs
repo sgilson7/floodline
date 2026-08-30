@@ -406,6 +406,10 @@ fn every_refusal_says_something_a_player_can_read() {
     for e in &all {
         let text = e.to_message();
         assert!(!text.is_empty(), "{e:?} has nothing to say");
+        // macroquad's built-in font is ASCII and draws a hollow box for
+        // anything else; `gui` lints its own strings for this and cannot see
+        // these, which are drawn under the map exactly the same way.
+        assert!(text.is_ascii(), "{e:?} is outside ASCII and will draw boxes: {text:?}");
         assert!(
             text.chars().next().unwrap().is_lowercase(),
             "{e:?} reads like a heading, not a line under the cursor: {text:?}"

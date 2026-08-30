@@ -140,6 +140,12 @@ impl Session {
         self.step().me
     }
 
+    /// What the transport has complained about while still in the lobby.
+    /// Advice, not a verdict — see `Lockstep::trouble`.
+    pub fn trouble(&self) -> Option<&str> {
+        self.step().trouble.as_deref()
+    }
+
     /// Whether this peer is still waiting for the host to press Start.
     pub fn in_lobby(&self) -> bool {
         self.step().in_lobby()

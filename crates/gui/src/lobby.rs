@@ -99,8 +99,8 @@ impl Lobby {
         y += 54.0;
         ui::centred(
             match mode {
-                Mode::Relay => "found through public relays — nothing of ours runs anywhere",
-                Mode::Code => "one code pasted each way — needs nobody's relays at all",
+                Mode::Relay => "found through public relays - nothing of ours runs anywhere",
+                Mode::Code => "one code pasted each way - needs nobody's relays at all",
             },
             y + 16.0,
             17.0,
@@ -209,6 +209,9 @@ impl Lobby {
         if let net::Status::Ended(reason) = session.status() {
             return Act::Cancel(reason.clone());
         }
+        if let Some(act) = trouble(ui, session, *mode, build) {
+            return act;
+        }
 
         // Start is not gated on a second player. The plan says two to six, and
         // the design says single player is the lockstep with one peer — so
@@ -241,7 +244,7 @@ impl Lobby {
                 ui::centred(&format!("room {room}"), y, 30.0, palette::WARNING);
                 y += 50.0;
                 ui::centred(
-                    "looking for the host on the public relays…",
+                    "looking for the host on the public relays...",
                     y,
                     19.0,
                     palette::FAINT,
@@ -271,12 +274,14 @@ impl Lobby {
             }
         }
 
-        match session.status() {
-            net::Status::Ended(reason) => return Act::Cancel(reason.clone()),
-            _ => {}
+        if let net::Status::Ended(reason) = session.status() {
+            return Act::Cancel(reason.clone());
+        }
+        if let Some(act) = trouble(ui, session, *mode, build) {
+            return act;
         }
         if session.connected() > 1 || !session.in_lobby() {
-            ui::centred("connected — waiting for the host to start", y, 20.0, palette::INK);
+            ui::centred("connected - waiting for the host to start", y, 20.0, palette::INK);
         }
         y += 46.0;
         if ui.button(Rect::new(cx - 110.0, y, 220.0, 40.0), "back", true) {
@@ -288,6 +293,28 @@ impl Lobby {
 }
 
 use crate::screen::{LOGICAL_H, LOGICAL_W};
+
+/// What the transport is unhappy about, and the way out of it.
+///
+/// Phase 6: "if Trystero reports no relay connection within 15 s, the lobby
+/// offers *by code* automatically". The plugin does the fifteen seconds and
+/// says so; this is the offer. It is a button rather than an automatic switch
+/// because switching would abandon a room code the host has already sent
+/// somebody, and the relays are often only slow.
+fn trouble(ui: &Ui, session: &mut Session, mode: Mode, build: &str) -> Option<Act> {
+    let text = session.trouble()?.to_owned();
+    let lines = ui::wrapped_words(&text, 84);
+    for (i, line) in lines.iter().enumerate() {
+        ui::centred(line, LOGICAL_H - 216.0 + i as f32 * 22.0, 17.0, palette::ALARM);
+    }
+    if mode == Mode::Relay {
+        let r = Rect::new(LOGICAL_W / 2.0 - 170.0, LOGICAL_H - 174.0, 340.0, 40.0);
+        if ui.button(r, "host by pasted code instead", true) {
+            return Some(open_host(room_code(), Mode::Code, 2, build));
+        }
+    }
+    None
+}
 
 /// The blob to send and, if `ask` is non-empty, a box for the one coming back.
 fn blob_exchange(
@@ -315,7 +342,7 @@ fn blob_exchange(
         }
         None => {
             draw_text(
-                "gathering…",
+                "gathering...",
                 box_rect.x + 10.0,
                 box_rect.y + 44.0,
                 19.0,
@@ -349,7 +376,7 @@ fn blob_exchange(
 }
 
 /// Said once rather than in two places that could disagree.
-const PASTE_HINT: &str = "press ctrl-V here — \u{2318}V on a Mac";
+const PASTE_HINT: &str = "press ctrl-V here, or cmd-V on a Mac";
 
 /// A blob is four hundred characters and the box is one line.
 fn shortened(text: &str) -> String {
@@ -357,7 +384,7 @@ fn shortened(text: &str) -> String {
         text.to_owned()
     } else {
         let head: String = text.chars().take(70).collect();
-        format!("{head}… ({} characters)", text.chars().count())
+        format!("{head}... ({} characters)", text.chars().count())
     }
 }
 
@@ -385,7 +412,7 @@ fn open_join(room: String, mode: Mode, build: &str) -> Act {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (room, mode, build);
-        Act::Cancel("there is nothing to join from a native build — it has no transport, by design. Host instead.".to_owned())
+        Act::Cancel("there is nothing to join from a native build - it has no transport, by design. Host instead.".to_owned())
     }
 }
 
