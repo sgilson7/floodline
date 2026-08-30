@@ -9,8 +9,11 @@
 
 #![forbid(unsafe_code)]
 
+pub mod balance;
 pub mod fx;
+pub mod map;
 pub mod rng;
 
 pub use fx::{Fx, Turns, V2};
+pub use map::{Corner, Ground, Map, MAP_H, MAP_W};
 pub use rng::Rng;
