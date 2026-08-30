@@ -11,10 +11,13 @@
 //! and needs — and the scripted `Command` stream covering every variant
 //! arrives with `Command` in item 7.
 
-use sim::balance::TICKS_PER_DAY;
+use sim::balance::{FOUNDING_CITIZENS, TICKS_PER_DAY};
 use sim::building::{Good, Kind};
 use sim::citizen::{Job, PlayerId};
+use sim::citizen::CitizenId;
+use sim::command::Command;
 use sim::nav::{Dest, Nav};
+use sim::BuildingId;
 use sim::World;
 
 /// The full length the plan asks for. Ten thousand ticks is fifty in-game
@@ -44,8 +47,8 @@ fn two_worlds_from_one_seed_stay_identical_for_ten_thousand_ticks() {
             assert_eq!(a.checksum(), b.checksum(), "seed {seed}: differed before tick 1");
 
             for t in 1..=TICKS {
-                a.tick(&mut na);
-                b.tick(&mut nb);
+                a.tick(&mut na, &[]);
+                b.tick(&mut nb, &[]);
 
                 // Everything a tick can touch. The map and the occupancy grid
                 // are written when the world is built and then only by a
@@ -257,7 +260,7 @@ fn a_scripted_game_runs_the_same_twice() {
                     let _ = w.demolish(PlayerId(1), id);
                 }
             }
-            w.tick(&mut nav);
+            w.tick(&mut nav, &[]);
             if t % 200 == 0 {
                 marks.push(w.checksum());
             }
@@ -292,10 +295,10 @@ fn a_fresh_nav_cache_navigates_like_a_warm_one() {
     let mut cold = warm.clone();
 
     for _ in 0..300 {
-        warm.tick(&mut nav);
+        warm.tick(&mut nav, &[]);
         // A brand new cache every single tick, as if the peer had just been
         // handed a snapshot.
-        cold.tick(&mut Nav::new());
+        cold.tick(&mut Nav::new(), &[]);
     }
     assert_eq!(warm.checksum(), cold.checksum());
     assert_eq!(warm, cold);
@@ -355,7 +358,7 @@ fn a_city_at_work_runs_the_same_twice() {
 
         let mut marks = vec![w.checksum()];
         for t in 0..(TICKS_PER_DAY * 2) {
-            w.tick(&mut nav);
+            w.tick(&mut nav, &[]);
             if t % 100 == 0 {
                 marks.push(w.checksum());
             }
@@ -371,4 +374,157 @@ fn a_city_at_work_runs_the_same_twice() {
         let distinct: std::collections::BTreeSet<u64> = a.iter().copied().collect();
         assert!(distinct.len() > 3, "seed {seed}: nothing happened: {a:?}");
     }
+}
+
+
+/// The plan's item 10 in full: a scripted command stream covering every
+/// `Command` variant, replayed twice, byte for byte.
+///
+/// The script is written as transcript lines rather than as constructed
+/// values, because that is the form the `bot` crate will read in phase 4 — so
+/// this test exercises `Command::parse` on the way in and would notice a
+/// variant that could be built but not written down.
+#[test]
+fn a_scripted_command_stream_covering_every_variant_replays() {
+    // Where things go is decided once, from a world built the same way both
+    // times, so the script itself is a constant.
+    let layout = {
+        let w = World::new(31, 2);
+        let mut spots = Vec::new();
+        let (hx, hy) = w.map.hearth_sites[0];
+        for kind in [Kind::Farm, Kind::Granary, Kind::Cottage, Kind::Dike] {
+            'place: for r in 3..40i32 {
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        if dx.abs() != r && dy.abs() != r {
+                            continue;
+                        }
+                        if w.can_place(PlayerId(0), kind, hx + dx, hy + dy).is_ok()
+                            && !spots.iter().any(|&(_, sx, sy): &(Kind, i32, i32)| {
+                                (sx - (hx + dx)).abs() < 4 && (sy - (hy + dy)).abs() < 4
+                            })
+                        {
+                            spots.push((kind, hx + dx, hy + dy));
+                            break 'place;
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(spots.len(), 4, "could not lay out the script's buildings");
+        spots
+    };
+
+    // Ids are assigned in placement order after the two hearths.
+    let farm = BuildingId(2);
+    let granary = BuildingId(3);
+    let cottage = BuildingId(4);
+    let dike = BuildingId(5);
+
+    let script: Vec<(u32, PlayerId, String)> = vec![
+        (1, PlayerId(0), format!("place farm {} {}", layout[0].1, layout[0].2)),
+        (1, PlayerId(0), format!("place granary {} {}", layout[1].1, layout[1].2)),
+        (2, PlayerId(0), format!("place cottage {} {}", layout[2].1, layout[2].2)),
+        (2, PlayerId(0), format!("place dike {} {}", layout[3].1, layout[3].2)),
+        // Builders on the dike, so it is standing by the time the script
+        // tries to raise it. A construction site only makes progress when
+        // somebody is assigned to it — hauling brings the stone, building
+        // spends it — which is what the first draft of this script got wrong.
+        (3, PlayerId(0), format!("assign #0,#1 @{}", dike.0)),
+        (4, PlayerId(0), format!("assign #2 @{}", cottage.0)),
+        (5, PlayerId(0), "move #3,#4 64 64".to_owned()),
+        (6, PlayerId(0), "ping 64 64".to_owned()),
+        (7, PlayerId(1), "ping 10 10".to_owned()),
+        (40, PlayerId(0), format!("home #5 @{}", cottage.0)),
+        (60, PlayerId(0), "unassign #2".to_owned()),
+        (100, PlayerId(0), "pause".to_owned()),
+        (100, PlayerId(1), "pause".to_owned()),
+        (140, PlayerId(0), "resume".to_owned()),
+        (140, PlayerId(1), "resume".to_owned()),
+        (200, PlayerId(0), format!("demolish @{}", granary.0)),
+        (300, PlayerId(0), format!("assign #6,#7 @{}", farm.0)),
+        (320, PlayerId(0), "unassign #7".to_owned()),
+        (700, PlayerId(0), format!("raise @{}", dike.0)),
+    ];
+
+    // Every variant really is in there.
+    {
+        let verbs: std::collections::BTreeSet<&str> =
+            script.iter().map(|(_, _, l)| l.split_whitespace().next().unwrap()).collect();
+        assert_eq!(
+            verbs.len(),
+            10,
+            "the script covers {} of the ten command variants: {verbs:?}",
+            verbs.len()
+        );
+    }
+
+    let run = || -> Vec<u64> {
+        let mut w = World::new(31, 2);
+        let mut nav = Nav::new();
+        let mut marks = Vec::new();
+
+        for t in 0..1500u32 {
+            let now: Vec<(PlayerId, Command)> = script
+                .iter()
+                .filter(|(at, _, _)| *at == t)
+                .map(|(_, p, line)| {
+                    (*p, Command::parse(line).unwrap_or_else(|| panic!("bad script line {line:?}")))
+                })
+                .collect();
+            w.tick(&mut nav, &now);
+            if t % 100 == 0 {
+                marks.push(w.checksum());
+            }
+        }
+        marks.push(w.checksum());
+        marks
+    };
+
+    let a = run();
+    let b = run();
+    assert_eq!(a, b, "a scripted game did not replay");
+
+    let distinct: std::collections::BTreeSet<u64> = a.iter().copied().collect();
+    assert!(distinct.len() > 8, "the script barely changed anything: {a:?}");
+
+    // And the script actually did what it said, so a future edit that
+    // silently stops placing anything is noticed.
+    //
+    // Sampled part-way through as well as at the end, because this script
+    // builds no farm and demolishes its granary: there is no food in this
+    // world, and by tick 850 the whole city has starved. That is the rules
+    // working — a command naming a dead citizen is refused, and dying clears
+    // the job it held — but it means every assertion about a citizen has to
+    // be made while there is one.
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+    let mut mid = None;
+    for t in 0..1500u32 {
+        let now: Vec<(PlayerId, Command)> = script
+            .iter()
+            .filter(|(at, _, _)| *at == t)
+            .map(|(_, p, l)| (*p, Command::parse(l).unwrap()))
+            .collect();
+        w.tick(&mut nav, &now);
+        if t == 400 {
+            mid = Some(w.clone());
+        }
+    }
+
+    let mid = mid.unwrap();
+    assert_eq!(mid.population(PlayerId(0)), FOUNDING_CITIZENS, "somebody died early");
+    // A site wants builders whatever it is going to become, so assigning to
+    // the unbuilt farm made builders rather than farmers. The rule working.
+    assert_eq!(mid.citizens[6].workplace, Some(farm), "the assignment did not take");
+    assert_eq!(mid.citizens[6].job, Some(Job::Builder));
+    assert_eq!(mid.citizens[7].job, None, "#7 was unassigned again");
+    assert_eq!(mid.citizens[2].job, None, "#2 was unassigned");
+    assert!(mid.pings.is_empty(), "pings from tick 6 were never pruned");
+
+    assert_eq!(w.buildings.len(), 6, "not everything was placed");
+    assert!(w.buildings[dike.0 as usize].level > 1, "the dike was never raised");
+    assert_eq!(w.buildings[farm.0 as usize].kind, Kind::Farm, "ids drifted");
+    assert_eq!(w.population(PlayerId(0)), 0, "a city with no food somehow survived");
+    let _ = (CitizenId(0), granary);
 }

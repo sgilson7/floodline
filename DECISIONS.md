@@ -345,3 +345,41 @@ for the nearest place to put food and found the farm it was standing in, so the
 harvest never moved. `is_store` (Hearth, Granary, Stockpile) and `produces`
 (Farm) are now separate questions, and `stores` means "will take delivery",
 which is the thing a hauler actually needs to know.
+
+---
+
+## 2026-08-30 — `Road`, `AcceptRoad`, `Trade` and `AcceptTrade` wait for item 8
+
+The plan's item 7 says "`Command` (design §7, minus `Lend`)", which reads as
+all nine remaining variants at once. Four of them are not there yet: the two
+road commands and the two trade commands arrive with their mechanics in item 8,
+which is the item that defines `RoadId`, `TradeId` and what a joined road is.
+
+The alternative was to define them now with handlers that return an error or do
+nothing, and that is worse than leaving them out. Item 10 asks the determinism
+test for "a scripted command stream covering every `Command` variant", and a
+variant that parses and does nothing would satisfy that requirement while
+testing precisely nothing — the covering assertion would go green and stay
+green when the real handler landed. A variant that does not exist cannot be
+covered by accident.
+
+Two variants exist that design §7 does not list. `RaiseDike` is the command for
+design §3.3's dikes growing a level at a time, which the §7 sketch has no way
+to express. `Demolish` is in §7 and also does the clearing of rubble, since
+rubble keeps its footprint until somebody moves it.
+
+---
+
+## 2026-08-30 — Commands are all-or-nothing
+
+`MoveTo` naming eight of your citizens and one of mine does nothing at all,
+rather than moving the eight. Every check a command needs happens before any of
+its effects.
+
+The reason is the lockstep rather than fairness. A partly-applied command is a
+command whose outcome depends on the order the checks ran in, and two peers
+that disagree about how much of a rejected command took effect have diverged in
+a way the checksum will catch a tick later and nobody will be able to explain.
+`a_rejected_command_leaves_the_world_byte_identical` is the test, and it
+compares checksums rather than fields so it cannot miss a corner of the world
+that a hand-written comparison would forget.

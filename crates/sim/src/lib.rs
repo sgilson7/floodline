@@ -12,6 +12,7 @@
 pub mod balance;
 pub mod building;
 pub mod citizen;
+pub mod command;
 pub mod fx;
 pub mod jobs;
 pub mod map;
@@ -22,6 +23,7 @@ pub mod world;
 
 pub use building::{Building, BuildingId, Good, Goods, Kind};
 pub use citizen::{Citizen, CitizenId, Job, PlayerId, State};
+pub use command::Command;
 pub use fx::{Fx, Turns, V2};
 pub use map::{Corner, Ground, Map, MAP_H, MAP_W};
 pub use rng::Rng;

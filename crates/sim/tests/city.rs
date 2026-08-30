@@ -81,12 +81,12 @@ fn a_farm_with_farmers_makes_food_and_one_without_does_not() {
         .unwrap();
 
     // Nobody is there yet, so nothing is made.
-    w.tick(&mut nav);
+    w.tick(&mut nav, &[]);
     assert_eq!(w.buildings[farm.0 as usize].store.food, 0);
 
     // Give them time to walk to it and work.
     for _ in 0..400 {
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
     }
     let workers = w.buildings[farm.0 as usize].workers.len();
     assert!(workers > 0, "no farmer ever reached the farm");
@@ -112,7 +112,7 @@ fn haulers_move_the_harvest_to_the_granary() {
     // is that food gets there at all.
     let mut ever = 0u16;
     for _ in 0..TICKS_PER_DAY * 3 {
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
         ever = ever.max(w.buildings[granary.0 as usize].store.food);
     }
     assert!(ever > 0, "three days and nothing ever reached the granary");
@@ -128,7 +128,7 @@ fn a_city_with_a_farm_and_a_granary_does_not_starve() {
     // Well past the point where the founding party would have starved with
     // nothing to eat: food empties in 250 ticks and death follows 600 later.
     for _ in 0..TICKS_PER_DAY * 12 {
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
     }
 
     assert_eq!(
@@ -152,7 +152,7 @@ fn a_city_without_a_farm_starves() {
     let mut nav = Nav::new();
 
     for _ in 0..TICKS_PER_DAY * 12 {
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
     }
     assert_eq!(
         w.population(PlayerId(0)),
@@ -168,7 +168,7 @@ fn citizens_sleep_in_cottages_and_wake_rested() {
     let mut slept = false;
     let mut had_a_home = false;
     for _ in 0..TICKS_PER_DAY * 6 {
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
         for c in &w.citizens {
             if c.owner != PlayerId(0) {
                 continue;
@@ -199,7 +199,7 @@ fn a_cottage_holds_only_four() {
     let mut nav = Nav::new();
 
     for _ in 0..TICKS_PER_DAY * 4 {
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
     }
     let living_there = w.citizens.iter().filter(|c| c.home == Some(cottage)).count();
     assert!(
@@ -220,7 +220,7 @@ fn haulers_supply_a_building_site_from_the_hearth() {
     assert_eq!(w.buildings[site.0 as usize].outstanding().wood, 30);
 
     for _ in 0..TICKS_PER_DAY * 3 {
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
         if w.buildings[site.0 as usize].outstanding().is_empty() {
             break;
         }
@@ -252,7 +252,7 @@ fn builders_finish_what_haulers_supply() {
     }
 
     for _ in 0..TICKS_PER_DAY * 5 {
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
         if w.buildings[site.0 as usize].standing_now() {
             break;
         }
@@ -272,7 +272,7 @@ fn a_starving_citizen_drops_what_it_is_carrying_and_goes_to_eat() {
     // Run until somebody is both hungry and heading for the granary.
     let mut ate = false;
     for _ in 0..TICKS_PER_DAY * 6 {
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
         if w.citizens.iter().any(|c| c.state == State::Eating) {
             ate = true;
             break;
@@ -288,7 +288,7 @@ fn a_city_that_loses_its_granary_stops_eating_there() {
 
     let mut ever = 0u16;
     for _ in 0..TICKS_PER_DAY * 3 {
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
         ever = ever.max(w.buildings[granary.0 as usize].store.food);
     }
     assert!(ever > 0, "the granary was never in use, so losing it proves nothing");
@@ -297,7 +297,7 @@ fn a_city_that_loses_its_granary_stops_eating_there() {
     // to a hole in the ground.
     w.demolish(PlayerId(0), granary).unwrap();
     for _ in 0..TICKS_PER_DAY {
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
     }
     assert!(
         w.citizens.iter().all(|c| c.errand.is_none()

@@ -7,7 +7,8 @@
 
 use crate::balance::*;
 use crate::building::{BuildState, Building, BuildingId, Good, Goods, Kind};
-use crate::citizen::{Citizen, CitizenId, PlayerId, State};
+use crate::citizen::{Citizen, CitizenId, Job, PlayerId, State};
+use crate::command::Command;
 use crate::fx::V2;
 use crate::fx::Fx;
 use crate::map::Map;
@@ -15,6 +16,16 @@ use crate::names::NAMES;
 use crate::nav::{self, Dest, FlowField, Nav};
 use crate::rng::Rng;
 use serde::{Deserialize, Serialize};
+
+/// Somebody pointing at the map.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Ping {
+    pub by: PlayerId,
+    pub x: u8,
+    pub y: u8,
+    /// The tick it was made, so it can fade.
+    pub at: u32,
+}
 
 /// Why a rule said no.
 ///
@@ -40,6 +51,14 @@ pub enum RuleError {
     NotStanding,
     /// A dike cannot go above `DIKE_MAX_LEVEL`.
     TooHigh,
+    /// There is no job of any kind at that building.
+    NoJobThere,
+    /// Every slot is taken.
+    Full,
+    /// `SetHome` at something that is not a cottage.
+    NotACottage,
+    /// A coordinate outside the map.
+    NoSuchCell,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -64,6 +83,13 @@ pub struct World {
     /// so of the checksum: if it ever disagrees with the list, that is a bug
     /// worth catching on the tick it happens rather than an invisible one.
     pub occupancy: Vec<Option<BuildingId>>,
+    /// Players who have called for a pause. Design §6: it takes everyone's
+    /// `Resume` to lift, so this is a list rather than a flag.
+    pub paused_by: Vec<PlayerId>,
+    /// Recent pings, for the GUI to draw. A command rather than a chat
+    /// message so it lands on the same tick everywhere and replays with the
+    /// game; pruned each tick so it cannot grow without bound.
+    pub pings: Vec<Ping>,
     /// Bumped whenever a footprint appears or disappears.
     ///
     /// Flow fields are a cache outside `World` (see `nav`), and this is how
@@ -111,6 +137,8 @@ impl World {
             citizens,
             buildings: Vec::new(),
             occupancy: vec![None; crate::map::CELLS],
+            paused_by: Vec::new(),
+            pings: Vec::new(),
             nav_generation: 0,
             players: (0..players).map(|p| PlayerId(p as u8)).collect(),
         };
@@ -360,7 +388,25 @@ impl World {
     /// 5. **arrivals** — whoever got there does the thing they went for.
     /// 6. **production** — farms turn farmer-ticks into food, after arrivals
     ///    so that a farmer who reached the field this tick counts on it.
-    pub fn tick(&mut self, nav: &mut Nav) {
+    pub fn tick(&mut self, nav: &mut Nav, commands: &[(PlayerId, Command)]) {
+        // Commands first, and in the order given. The lockstep is what
+        // guarantees every peer sees that order identically (design §8); `sim`
+        // just has to be a function of it.
+        //
+        // A rejected command is not an error here. Every peer rejects it for
+        // the same reason on the same tick, which is the property that
+        // matters; the sender's own GUI can call `apply` itself to find out
+        // why before it ever issues one.
+        for (player, cmd) in commands {
+            let _ = self.apply(*player, cmd);
+        }
+
+        if self.paused() {
+            // Nothing moves, and the clock does not advance. Every peer agrees
+            // about that, because `paused_by` is world state like any other.
+            return;
+        }
+
         for i in 0..self.citizens.len() {
             let was_alive = self.citizens[i].alive();
             self.citizens[i].tick_needs();
@@ -373,13 +419,174 @@ impl World {
         self.resolve_arrivals();
         self.produce();
         self.tick += 1;
+        self.pings.retain(|p| self.tick.saturating_sub(p.at) < PING_LIFETIME);
     }
 
-    /// A tick without anywhere to walk to. For tests and for the phases where
-    /// nothing has a destination yet.
+    /// Whether the world is stopped.
+    pub fn paused(&self) -> bool {
+        !self.paused_by.is_empty()
+    }
+
+    // ---- the one door ------------------------------------------------------
+
+    /// Apply one command on behalf of one player.
+    ///
+    /// Design §7: this is the only way `World` changes, and every rule is
+    /// inside it — including ownership, so a peer commanding another city is
+    /// rejected identically everywhere.
+    ///
+    /// Rejection is all-or-nothing for commands that name several citizens: a
+    /// `MoveTo` listing eight of your citizens and one of mine does nothing at
+    /// all, rather than moving eight. Half-applied commands are the shape of
+    /// bug that makes two peers disagree about what a rejection meant.
+    pub fn apply(&mut self, player: PlayerId, cmd: &Command) -> Result<(), RuleError> {
+        if !self.players.contains(&player) {
+            return Err(RuleError::NotYours);
+        }
+        // Every citizen a command speaks for must belong to the player, and
+        // must be alive. Checked up front, for all variants at once.
+        for id in cmd.citizens() {
+            let c = self.citizens.get(id.0 as usize).ok_or(RuleError::NoSuchCitizen)?;
+            if c.owner != player {
+                return Err(RuleError::NotYours);
+            }
+            if !c.alive() {
+                return Err(RuleError::NoSuchCitizen);
+            }
+        }
+
+        match cmd {
+            Command::Place { kind, x, y } => {
+                self.place(player, *kind, *x as i32, *y as i32).map(|_| ())
+            }
+            Command::Demolish { building } => self.demolish(player, *building).map(|_| ()),
+            Command::RaiseDike { dike } => self.raise_dike(player, *dike),
+            Command::Assign { citizens, building } => self.assign(player, citizens, *building),
+            Command::Unassign { citizens } => {
+                for id in citizens {
+                    self.unassign_one(*id);
+                }
+                Ok(())
+            }
+            Command::MoveTo { citizens, x, y } => {
+                if !Map::contains(*x as i32, *y as i32) {
+                    return Err(RuleError::NoSuchCell);
+                }
+                for id in citizens {
+                    let c = &mut self.citizens[id.0 as usize];
+                    c.abandon();
+                    c.walk_to(Dest::Cell(*x, *y));
+                }
+                Ok(())
+            }
+            Command::SetHome { citizens, cottage } => {
+                let b = self
+                    .buildings
+                    .get(cottage.0 as usize)
+                    .ok_or(RuleError::NoSuchBuilding)?;
+                if b.owner != player {
+                    return Err(RuleError::NotYours);
+                }
+                if b.kind != Kind::Cottage {
+                    return Err(RuleError::NotACottage);
+                }
+                if !b.standing_now() {
+                    return Err(RuleError::NotStanding);
+                }
+                // Beds are finite, and the ones already spoken for by citizens
+                // not named in this command still count.
+                let outsiders = self
+                    .citizens
+                    .iter()
+                    .filter(|c| c.home == Some(*cottage) && !citizens.contains(&c.id))
+                    .count();
+                if outsiders + citizens.len() > Kind::Cottage.beds() {
+                    return Err(RuleError::Full);
+                }
+                for id in citizens {
+                    self.citizens[id.0 as usize].home = Some(*cottage);
+                }
+                Ok(())
+            }
+            Command::Ping { x, y } => {
+                if !Map::contains(*x as i32, *y as i32) {
+                    return Err(RuleError::NoSuchCell);
+                }
+                self.pings.push(Ping { by: player, x: *x, y: *y, at: self.tick });
+                Ok(())
+            }
+            Command::Pause => {
+                if !self.paused_by.contains(&player) {
+                    self.paused_by.push(player);
+                }
+                Ok(())
+            }
+            Command::Resume => {
+                self.paused_by.retain(|&p| p != player);
+                Ok(())
+            }
+        }
+    }
+
+    /// Put citizens to work at a building. Which job it is follows from what
+    /// the building is, exactly as right-clicking it would.
+    fn assign(
+        &mut self,
+        player: PlayerId,
+        citizens: &[CitizenId],
+        building: BuildingId,
+    ) -> Result<(), RuleError> {
+        let b = self.buildings.get(building.0 as usize).ok_or(RuleError::NoSuchBuilding)?;
+        if b.owner != player {
+            return Err(RuleError::NotYours);
+        }
+        let job = match b.state {
+            // Anything half-built wants builders, whatever it is going to be.
+            BuildState::Site => Job::Builder,
+            BuildState::Standing if b.kind == Kind::Farm => Job::Farmer,
+            BuildState::Standing if b.kind.is_store() => Job::Hauler,
+            _ => return Err(RuleError::NoJobThere),
+        };
+
+        // Slots are finite, and citizens already there who are not named in
+        // this command still hold theirs.
+        if job != Job::Hauler {
+            let held = self
+                .citizens
+                .iter()
+                .filter(|c| {
+                    c.alive() && c.workplace == Some(building) && !citizens.contains(&c.id)
+                })
+                .count();
+            if held + citizens.len() > b.kind.slots_for(job) {
+                return Err(RuleError::Full);
+            }
+        }
+
+        for id in citizens {
+            self.unassign_one(*id);
+            let c = &mut self.citizens[id.0 as usize];
+            c.job = Some(job);
+            // A hauler is based nowhere: it goes where the work is.
+            c.workplace = if job == Job::Hauler { None } else { Some(building) };
+        }
+        Ok(())
+    }
+
+    /// Back to hauling, and off whatever roster it was on.
+    fn unassign_one(&mut self, id: CitizenId) {
+        self.clear_from_rosters(id);
+        let c = &mut self.citizens[id.0 as usize];
+        c.job = None;
+        c.workplace = None;
+        c.abandon();
+    }
+
+    /// A tick with no commands and a throwaway cache. For tests, and for
+    /// anywhere that only wants the world to advance.
     pub fn tick_alone(&mut self) {
         let mut nav = Nav::new();
-        self.tick(&mut nav);
+        self.tick(&mut nav, &[]);
     }
 
     /// Move everyone who is going somewhere, one step along their field.
@@ -1035,7 +1242,7 @@ mod tests {
         assert_eq!(w.citizens[0].state, State::Walking);
 
         for _ in 0..400 {
-            w.tick(&mut nav);
+            w.tick(&mut nav, &[]);
             if w.citizens[0].state != State::Walking {
                 break;
             }
@@ -1053,7 +1260,7 @@ mod tests {
 
         let mut ticks = 0;
         while w.citizens[0].state == State::Walking && ticks < 1000 {
-            w.tick(&mut nav);
+            w.tick(&mut nav, &[]);
             ticks += 1;
         }
         // Eight cells at WALK_SPEED 256ths of a cell per tick, give or take
@@ -1076,7 +1283,7 @@ mod tests {
             w.citizens[0].walk_to(Dest::Cell(goal.0 as u8, goal.1 as u8));
             let mut n = 0;
             while w.citizens[0].state == State::Walking && n < 2000 {
-                w.tick(&mut nav);
+                w.tick(&mut nav, &[]);
                 n += 1;
             }
             n
@@ -1091,7 +1298,7 @@ mod tests {
         w.citizens[0].walk_to(Dest::Cell(goal.0 as u8, goal.1 as u8));
         let mut paved = 0;
         while w.citizens[0].state == State::Walking && paved < 2000 {
-            w.tick(&mut nav);
+            w.tick(&mut nav, &[]);
             paved += 1;
         }
 
@@ -1126,11 +1333,11 @@ mod tests {
             w.citizens[i].pos = V2::cell_centre(ox - 3 + (i as i32 % 3), oy - 1 + (i as i32 / 3));
             w.citizens[i].walk_to(goal);
         }
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
         assert_eq!(nav.len(), 1, "eight citizens built {} fields", nav.len());
 
         for _ in 0..400 {
-            w.tick(&mut nav);
+            w.tick(&mut nav, &[]);
         }
         for i in 0..8 {
             assert_eq!(w.citizens[i].state, State::Idle, "citizen {i} never arrived");
@@ -1151,7 +1358,7 @@ mod tests {
 
         w.citizens[0].walk_to(Dest::Building(id));
         for _ in 0..500 {
-            w.tick(&mut nav);
+            w.tick(&mut nav, &[]);
             if w.citizens[0].state != State::Walking {
                 break;
             }
@@ -1178,7 +1385,7 @@ mod tests {
 
         w.citizens[0].walk_to(Dest::Cell(rock.0 as u8, rock.1 as u8));
         for _ in 0..3000 {
-            w.tick(&mut nav);
+            w.tick(&mut nav, &[]);
             if w.citizens[0].state != State::Walking {
                 break;
             }
@@ -1203,7 +1410,7 @@ mod tests {
         let before = w.citizens[0].pos;
 
         w.citizens[0].walk_to(Dest::Cell(ox as u8, oy as u8));
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
         assert_eq!(w.citizens[0].state, State::Idle, "kept trying");
         assert_eq!(w.citizens[0].pos, before, "moved anyway");
         assert_eq!(w.citizens[0].dest, None);
@@ -1213,7 +1420,7 @@ mod tests {
     fn the_dead_do_not_walk() {
         let (mut w, mut nav, ox, oy) = walker();
         w.citizens[0].walk_to(Dest::Cell((ox + 5) as u8, oy as u8));
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
         assert_eq!(w.citizens[0].state, State::Walking);
 
         // Dying clears what only makes sense for the living, so a corpse is
@@ -1224,7 +1431,7 @@ mod tests {
 
         let before = w.citizens[0].pos;
         for _ in 0..50 {
-            w.tick(&mut nav);
+            w.tick(&mut nav, &[]);
         }
         assert_eq!(w.citizens[0].pos, before, "a corpse went for a walk");
 
@@ -1240,13 +1447,13 @@ mod tests {
         let id = w.place(PlayerId(0), Kind::Cottage, ox + 6, oy).unwrap();
         w.citizens[0].walk_to(Dest::Building(id));
         for _ in 0..10 {
-            w.tick(&mut nav);
+            w.tick(&mut nav, &[]);
         }
         assert_eq!(w.citizens[0].state, State::Walking, "should still be on its way");
 
         // The flood takes it, or the player pulls it down.
         w.demolish(PlayerId(0), id).unwrap();
-        w.tick(&mut nav);
+        w.tick(&mut nav, &[]);
         assert_eq!(w.citizens[0].state, State::Idle, "walked on to a hole in the ground");
         assert_eq!(w.citizens[0].dest, None);
     }

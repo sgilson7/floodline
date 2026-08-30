@@ -186,3 +186,8 @@ pub const SLEEP_RATE: u16 = 20;
 /// not spend its life at the granary topping up.
 pub const FED_ENOUGH: u16 = 900;
 pub const RESTED_ENOUGH: u16 = 950;
+
+/// How long a ping stays on the map, in ticks. Three seconds: long enough to
+/// look where somebody is pointing, short enough that the list of them cannot
+/// grow into the snapshot.
+pub const PING_LIFETIME: u32 = 3 * TICKS_PER_SECOND;
