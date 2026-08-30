@@ -770,3 +770,28 @@ a generated map with the shallows in the low corner, both eight strong, and the
 panel reading `peers at [230, 229]` — the host one tick ahead of the joiner,
 which is exactly what a star with a wire in it should look like and is not
 something a passing test would have shown anybody.
+
+---
+
+## 2026-08-30 — The letterbox: logical pixels in, framebuffer pixels out
+
+The deployed game drew itself into the bottom-left quarter of the browser
+window with the rest black. `screen_width()` and `mouse_position()` are in
+logical pixels — what CSS calls a pixel — and `Camera2D::viewport` is in
+framebuffer pixels, which at a device pixel ratio of two are twice as many. The
+viewport was computed from logical sizes and handed to GL unconverted, so it
+covered half the width and half the height of the real framebuffer: a quarter
+of the area, in the bottom-left, because that is where GL's viewport origin is.
+
+`Viewport` now carries `dpi` and applies it in exactly one place — the
+`Camera2D` rect — while `x`, `y` and `scale` stay logical, because that is what
+input needs. `Viewport::mouse` deliberately does *not* apply it; doing so would
+put the cursor twice as far from the corner as it really is, which is the same
+bug wearing the other shoe and will be easy to introduce when phase 5 adds
+selection.
+
+Worth saying how it was missed: the browser build had been checked, and it was
+checked at a device pixel ratio of one, where the two coordinate systems are
+the same size and the bug does not exist. It is invisible from a desktop and
+unmissable on a laptop. Anything touching the letterbox gets looked at under
+both from now on, which `packaging/` cannot enforce but a person can.

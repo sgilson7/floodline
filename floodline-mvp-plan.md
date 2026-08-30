@@ -214,6 +214,22 @@ the phase-3 lockstep and play the phase-1 scenario in two tabs.
 Fixed 1600 × 980 logical canvas with a 366 px side panel, letterboxed like
 gear-master. Map cells at 8 px. Everything drawn with primitives.
 
+* **The letterbox has two coordinate systems in it and they are not the same
+  one.** `screen_width()` and `mouse_position()` are in *logical* pixels;
+  `Camera2D::viewport` is in *framebuffer* pixels, which on any retina display
+  or browser at a device pixel ratio above one are twice as many. The first
+  version computed the viewport from logical sizes and handed it to GL
+  unconverted, which put the entire game in the bottom-left quarter of the
+  window with the rest black — a quarter of the area because the rect was
+  half-size each way, and bottom-left because that is where GL's viewport
+  origin is. Fixed for drawing; **the same trap is waiting for input**, where
+  the ratio must *not* be applied because the mouse is already logical.
+  Anything that converts between the screen and the map goes through
+  `screen::Viewport`, and nothing else may do the arithmetic itself.
+  Check any change to it at a device pixel ratio of 1 *and* 2 — a bug that only
+  appears on retina is invisible from a desktop and obvious to every player on
+  a laptop.
+
 * Map: terrain shaded by height, water as blue with alpha from depth, roads,
   building rectangles with a glyph, citizens as a circle with two lines for
   legs, owner colour ring when selected.
