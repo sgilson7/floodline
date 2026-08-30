@@ -96,6 +96,9 @@ pub struct World {
     /// so of the checksum: if it ever disagrees with the list, that is a bug
     /// worth catching on the tick it happens rather than an invisible one.
     pub occupancy: Vec<Option<BuildingId>>,
+    /// Players the game has given up on (design §8). Their city stands where
+    /// it was; nothing of theirs moves and no command of theirs is accepted.
+    pub dropped: Vec<PlayerId>,
     /// Players who have called for a pause. Design §6: it takes everyone's
     /// `Resume` to lift, so this is a list rather than a flag.
     pub paused_by: Vec<PlayerId>,
@@ -170,6 +173,7 @@ impl World {
             citizens,
             buildings: Vec::new(),
             occupancy: vec![None; crate::map::CELLS],
+            dropped: Vec::new(),
             paused_by: Vec::new(),
             age: 1,
             age_start_tick: 0,
@@ -525,6 +529,11 @@ impl World {
         if !self.players.contains(&player) {
             return Err(RuleError::NotYours);
         }
+        // A dropped player is gone: nothing they say is heard, including a
+        // command that arrived on the wire before they went quiet.
+        if self.dropped.contains(&player) && !matches!(cmd, Command::Drop { .. }) {
+            return Err(RuleError::NotYours);
+        }
         // Every citizen a command speaks for must belong to the player, and
         // must be alive. Checked up front, for all variants at once.
         for id in cmd.citizens() {
@@ -634,6 +643,23 @@ impl World {
                     return Err(RuleError::AlreadyAccepted);
                 }
                 t.accepted = true;
+                Ok(())
+            }
+            Command::Drop { player: who } => {
+                if !self.players.contains(who) {
+                    return Err(RuleError::NoSuchPartner);
+                }
+                if !self.dropped.contains(who) {
+                    self.dropped.push(*who);
+                    // Whatever they had going, they are no longer doing.
+                    for i in 0..self.citizens.len() {
+                        if self.citizens[i].owner == *who {
+                            self.citizens[i].abandon();
+                        }
+                    }
+                    // And they are not holding the game paused any more.
+                    self.paused_by.retain(|p| p != who);
+                }
                 Ok(())
             }
             Command::Pause => {

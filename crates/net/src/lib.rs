@@ -7,3 +7,13 @@
 //! `cargo test` with no browser and no network at all (design §9.6).
 
 #![forbid(unsafe_code)]
+
+pub mod lockstep;
+pub mod loopback;
+pub mod wire;
+pub mod peer;
+
+pub use loopback::{Conditions, Loopback, HOST};
+pub use peer::{Event, Peer, PeerId};
+pub use lockstep::{Lockstep, Status, DELAY};
+pub use wire::{Message, Refusal, PROTO_VERSION};

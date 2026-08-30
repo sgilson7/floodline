@@ -187,6 +187,22 @@ impl World {
         let owner = self.citizens[i].owner;
         let (x, y) = self.citizens[i].pos.cell();
 
+        // Anything already in your arms comes first.
+        //
+        // A hauler that carries twenty to a site wanting ten delivers ten and
+        // keeps the rest, and until this was here it then forgot it had them:
+        // it looked for new work, found every store empty *because the wood
+        // was in its own arms*, and stood still for the rest of the game. Three
+        // of them ended up holding sixty wood in front of a granary that needed
+        // ten, and the city starved beside a farm it had built.
+        if !self.citizens[i].carrying.is_empty() {
+            if let Some(to) = self.somewhere_for(owner, &self.citizens[i].carrying.clone(), x, y) {
+                self.citizens[i].errand = Some(Errand::Carry { to });
+                self.citizens[i].walk_to(Dest::Building(to));
+                return;
+            }
+        }
+
         if let Some((from, good, to)) = self.next_supply_run(owner, x, y) {
             self.citizens[i].errand = Some(Errand::Collect { from, good, to });
             self.citizens[i].walk_to(Dest::Building(from));
@@ -196,6 +212,45 @@ impl World {
             self.citizens[i].errand = Some(Errand::Collect { from, good, to });
             self.citizens[i].walk_to(Dest::Building(from));
         }
+    }
+
+    /// Somewhere that will take what this citizen is holding: a site that
+    /// still wants some of it, or failing that a store with room.
+    fn somewhere_for(&self, owner: PlayerId, load: &Goods, x: i32, y: i32) -> Option<BuildingId> {
+        // A site that needs it, nearest first — the load is more useful in a
+        // wall than in a pile.
+        let mut wanted: Vec<(i32, BuildingId)> = self
+            .buildings
+            .iter()
+            .filter(|b| b.owner == owner && b.state == BuildState::Site)
+            .filter(|b| {
+                let want = b.outstanding();
+                Good::ALL.iter().any(|&g| want.get(g) > 0 && load.get(g) > 0)
+            })
+            .map(|b| {
+                let (bx, by) = b.centre();
+                ((bx - x).abs() + (by - y).abs(), b.id)
+            })
+            .collect();
+        wanted.sort_unstable();
+        if let Some(&(_, id)) = wanted.first() {
+            return Some(id);
+        }
+
+        // Otherwise put it down somewhere it will keep.
+        for g in Good::ALL {
+            if load.get(g) == 0 {
+                continue;
+            }
+            let store = self.stores_for(owner, g, x, y).into_iter().find(|id| {
+                let b = &self.buildings[id.0 as usize];
+                b.kind.has_room_for(g, &b.store)
+            });
+            if store.is_some() {
+                return store;
+            }
+        }
+        None
     }
 
     /// Materials a construction site is waiting for, and a store that has

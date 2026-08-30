@@ -687,3 +687,51 @@ So a cottage pulled down by its own owner left its residents homed to a hole in
 the ground until something else happened to notice. It is a property of a
 building ceasing to exist, not of the water, and it lives in `release_from` now,
 called from both `damage_building` and `demolish`.
+
+---
+
+## 2026-08-30 — Four things the lockstep had to learn, and one bug it found
+
+Phase 3 built the star from design §8 against `net::Loopback`. Four corrections
+came out of it, all of them from tests that could never have been written
+against a browser.
+
+**A `Turn`'s checksum is tagged with the tick it describes.** Design §8 says
+`checksum_prev` is "a 64-bit FNV of `World` after tick T − 1", and that cannot
+be true: a turn for tick T is sent `DELAY` ticks early, so the sender does not
+yet know what the world will look like after T − 1. It reports the last tick it
+has actually finished, and says which. Untagged, a late joiner priming its
+pipeline sends four turns carrying the same checksum, the host reads them as
+claims about four different ticks, and throws an innocent player out for a
+desync on the tick they arrived.
+
+**Nothing happens until the host presses Start.** Design §5 puts the button in
+the lobby and it is not decoration. Without it the host simulates alone from the
+moment it exists and is fifty ticks ahead before anyone finishes connecting, so
+every joiner arrives into a game in progress and spends the run catching up.
+
+**The host waits only for players who are actually there.** A world is generated
+with a fixed number of cities and a joiner takes one of them; an unclaimed seat
+is a city standing there with nobody commanding it. Waiting for a turn from it
+stops the game before it starts.
+
+**Giving up on a silent player cannot go through the ordinary queue.** The
+`Drop` goes straight into the host's own turn for the tick being bundled, and
+the player stops being waited for at once. Queued as a normal command it
+deadlocks: commands are flushed while sending turns, turns are sent while the
+simulation moves, and the simulation is stopped waiting for the very player the
+command exists to give up on.
+
+And the bug, which was in `sim` rather than in `net`: **a hauler that had
+leftovers forgot it was holding them.** It delivered what a site wanted, kept
+the rest, then looked for new work, found every store empty — because the wood
+was in its own arms — and stood still for the rest of the game. Three of them
+ended up holding sixty wood in front of a granary that needed ten, and the city
+starved beside a farm it had built. `find_haul` now looks at what it is
+carrying before it looks for anything to fetch.
+
+That one is worth dwelling on: it is a plain single-player bug, in code with its
+own passing tests, and it took a three-player networked game running for two
+in-game ages to surface it. The city tests founded cities by fiat, with the
+materials already delivered; only a game that had to build one from a hearth
+ever produced an odd-sized load.

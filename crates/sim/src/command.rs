@@ -51,6 +51,14 @@ pub enum Command {
     /// Stop the world. Design §6: it takes everyone's `Resume` to lift.
     Pause,
     Resume,
+    /// Give up on a player who has stopped sending.
+    ///
+    /// Design §8: after thirty seconds of silence the host emits this "as a
+    /// command so it is deterministic". It is a command rather than a decision
+    /// each peer makes for itself precisely because each peer would make it at
+    /// a slightly different moment, and a world that drops somebody on tick
+    /// 4001 is a different world from one that drops them on 4002.
+    Drop { player: PlayerId },
 }
 
 impl Command {
@@ -102,6 +110,7 @@ impl Command {
             Command::Ping { x, y } => format!("ping {x} {y}"),
             Command::Pause => "pause".into(),
             Command::Resume => "resume".into(),
+            Command::Drop { player } => format!("drop !{}", player.0),
         }
     }
 
@@ -158,6 +167,7 @@ impl Command {
             ["ping", x, y] => Command::Ping { x: x.parse().ok()?, y: y.parse().ok()? },
             ["pause"] => Command::Pause,
             ["resume"] => Command::Resume,
+            ["drop", p] => Command::Drop { player: pid(p)? },
             _ => return None,
         })
     }
@@ -223,6 +233,7 @@ mod tests {
             Command::Ping { x: 64, y: 64 },
             Command::Pause,
             Command::Resume,
+            Command::Drop { player: PlayerId(1) },
         ]
     }
 
@@ -249,8 +260,8 @@ mod tests {
             .collect();
         assert_eq!(
             seen.len(),
-            14,
-            "one_of_each names {} distinct commands, not 14: {seen:?}",
+            15,
+            "one_of_each names {} distinct commands, not 15: {seen:?}",
             seen.len()
         );
     }
