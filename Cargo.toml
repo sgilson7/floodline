@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sim",
+    "crates/net",
+    "crates/net-web",
+    "crates/net-native",
+    "crates/gui",
+    "crates/bot",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.88"
+
+[workspace.dependencies]
+sim = { path = "crates/sim" }
+net = { path = "crates/net" }
+net-web = { path = "crates/net-web" }
+net-native = { path = "crates/net-native" }
+
+serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
+# Default features drag in heapless, which nothing here uses; `alloc` is what
+# `to_allocvec` needs, and `to_allocvec` is what `checksum()` hashes.
+postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
+macroquad = "0.4.16"
+sapp-jsutils = "0.1.7"
+matchbox_socket = "0.14.0"
+futures = "0.3"
+
+# Copied from perturbation-workbench, comment and all, because the reasoning is
+# the part worth keeping.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+# Deliberately NOT panic = "abort": that compiles panics down to a bare
+# `unreachable`, so a failure surfaces in the browser as
+# "Unreachable code should not be executed" with no indication of what broke.
+# A desync is exactly the bug that needs to say where it happened.
+
+# Test binaries carry line tables and nothing else.
+#
+# Line tables keep file-and-line in panic messages, which is what a failing
+# assertion actually needs; the rest of debuginfo is link time and disk for
+# nobody. When a panic needs a full backtrace with arguments and locals, ask
+# for one for that run and leave the profile alone:
+#
+#     CARGO_PROFILE_TEST_DEBUG=2 cargo test -p sim --test determinism
+[profile.test]
+debug = "line-tables-only"
