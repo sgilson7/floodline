@@ -225,3 +225,23 @@ wrong, and it would have been wrong on every developer machine with a current
 stable. CI is deliberately left on `stable` rather than pinned to a version
 that agrees with any one laptop — running ahead is how it caught this, and a
 pin would only have deferred the same failure to the first person who upgraded.
+
+---
+
+## 2026-08-30 — Overflow checks stay on in release
+
+Rust checks integer overflow in debug builds and wraps in release ones. That
+default is fine for a program running once; it is a determinism bug for this
+one. A headless `bot` peer is usually a debug native build and a browser peer
+is always a release wasm build, so an overflow anywhere in `sim` would panic on
+one and quietly wrap on the other. That is not a crash — it is a desync, and
+the hardest kind, because the two peers have stopped agreeing about arithmetic
+itself.
+
+`overflow-checks = true` in `[profile.release]` makes a mistake the same loud
+failure on every peer. The arithmetic is written not to overflow anyway — every
+`Fx` multiply and divide goes through `i64` — so this is the belt to that
+braces, and it costs a branch per operation. Phase 2 item 4 profiles `tick()`
+against a 20 ms budget at 500 citizens with the flood running; if the branch
+turns out to be the cost, that is the place to find out and this is the entry
+to revisit.

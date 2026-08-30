@@ -6,7 +6,7 @@
 //! the lockstep" — is why the mutating methods are the short list they are.
 
 use crate::balance::*;
-use crate::citizen::{Citizen, CitizenId, PlayerId, State};
+use crate::citizen::{Citizen, CitizenId, PlayerId};
 use crate::fx::V2;
 use crate::map::Map;
 use crate::names::NAMES;
@@ -117,6 +117,7 @@ pub fn fnv1a(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::citizen::State;
 
     #[test]
     fn fnv1a_matches_the_published_vectors() {
