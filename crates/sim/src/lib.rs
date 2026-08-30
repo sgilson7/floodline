@@ -14,6 +14,7 @@ pub mod balance;
 pub mod building;
 pub mod citizen;
 pub mod command;
+pub mod flood;
 pub mod fx;
 pub mod jobs;
 pub mod map;

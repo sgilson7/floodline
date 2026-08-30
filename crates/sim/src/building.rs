@@ -215,6 +215,44 @@ impl Kind {
         }
     }
 
+    /// How much water this keeps off somebody sheltering in or on it, in
+    /// terrain-height units.
+    ///
+    /// Design §5: "Anyone who reaches high ground or a rooftop (buildings
+    /// above `depth + 2` are climbable) survives." A roof is the second of the
+    /// two things that save you, and without it a city on flat lowland is a
+    /// death sentence rather than a gamble.
+    pub fn shelter(self) -> u16 {
+        match self {
+            Kind::Hearth => 6,
+            Kind::Granary => 5,
+            Kind::Cottage => 4,
+            Kind::Farm => 3,
+            Kind::Stockpile => 2,
+            Kind::Bridge => 1,
+            // A dike shelters nobody by being a building; it does it by
+            // raising the ground, which the automaton already knows about.
+            Kind::Dike | Kind::Road => 0,
+        }
+    }
+
+    /// How much flow this shrugs off before it starts taking damage.
+    ///
+    /// Per kind rather than per material, because a road is a stone thing that
+    /// is nonetheless a hand's breadth thick: design §6 wants "the flood
+    /// breaks road cells it flows over", and at a wall's resistance it never
+    /// would.
+    pub fn resist(self) -> u16 {
+        match self {
+            Kind::Road => depth(9),
+            Kind::Bridge => depth(6),
+            _ => match self.material() {
+                Material::Wood => RESIST_WOOD,
+                Material::Stone => RESIST_STONE,
+            },
+        }
+    }
+
     /// Beds. Only a Cottage has any (design §3.3).
     pub fn beds(self) -> usize {
         match self {

@@ -98,8 +98,12 @@ pub struct Citizen {
     pub state: State,
     /// Where this citizen is walking, if anywhere.
     pub dest: Option<Dest>,
-    /// Ticks spent with no food. Only counts while `Starving`.
+    /// Ticks spent with no food.
     pub starved_for: u32,
+    /// Ticks spent out of your depth. Resets the moment you find footing.
+    pub drowning_for: u32,
+    /// Carried by the water rather than walking: too deep to stand up in.
+    pub swept: bool,
 }
 
 impl Citizen {
@@ -120,6 +124,8 @@ impl Citizen {
             state: State::Idle,
             dest: None,
             starved_for: 0,
+            drowning_for: 0,
+            swept: false,
         }
     }
 
@@ -169,6 +175,7 @@ impl Citizen {
         self.workplace = None;
         self.errand = None;
         self.carrying = Goods::NONE;
+        self.swept = false;
     }
 
     /// Whether this citizen is doing something it should not be interrupted

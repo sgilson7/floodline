@@ -590,3 +590,46 @@ The earlier entry about matchbox deciding who offers by arrival order is now
 history rather than guidance: trystero owns that handshake. It stays because it
 records a real correction to design §9.2, and because the star still has to
 decide who offers if the pasted-code path is ever generalised.
+
+---
+
+## 2026-08-30 — Building resistances were measured, not guessed
+
+Plan item 2.3 asks that "wooden buildings take damage from flow, stone
+resists". The first numbers for that were two and six units of flow, picked by
+eye. A real surge turns out to produce flow speeds with a median around thirty,
+a ninetieth percentile between two hundred and two hundred and fifty, and a
+peak near three hundred and eighty at the front — so those thresholds sat below
+even the *median*, and every building in the game, stone dikes included, would
+have dissolved within seconds of the water arriving. The dike that design §5
+builds its teaching moment around would never have survived to teach it.
+
+Measured instead: wood gives way in any strong current, stone only where the
+front itself is breaking, and a road — a hand's breadth of stone rather than a
+bank of it — gets its own threshold between the two, because design §6 wants
+"the flood breaks road cells it flows over" and at a wall's resistance it never
+would.
+
+A dike doing its job sees still water piled against it and almost no flow at
+all, so it survives; a dike standing in the front does not. That seems right:
+build your dike where the water will *arrive*, not where it comes out.
+
+---
+
+## 2026-08-30 — The automaton is nowhere near the budget, and `sim` is optimised under test
+
+Plan item 2.4 asks for `tick()` under 20 ms at 500 citizens with the flood
+running, and offers to run the automaton every other tick if it is the cost.
+It is not: on native release, a dry tick is 0.04 ms and a flooding one 0.29 ms,
+so the whole automaton costs a quarter of a millisecond against a twenty
+millisecond budget. Seventy times the headroom, which is what the wasm build
+will spend some of. Nothing is halved, and `tests/profile.rs` is the
+measurement, kept ignored so it only runs when asked.
+
+Unoptimised, though, it was slow enough to matter: the suite went past two
+minutes once the flood tests existed, because sixteen thousand cells of integer
+arithmetic per tick is exactly what a debug build is worst at.
+`[profile.test.package.sim] opt-level = 2` brings it back to twelve seconds. A
+determinism test nobody runs is worse than no determinism test, because it
+looks like cover. `debug-assertions` and `overflow-checks` are independent of
+`opt-level` and stay on, so the same panics still fire.

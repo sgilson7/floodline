@@ -311,12 +311,23 @@ pub const DROWN_TICKS: u32 = 5 * TICKS_PER_SECOND;
 /// current still carries it off over a few seconds.
 pub const WATER_DRAG: i32 = 3;
 
-/// Flow a building shrugs off, by material. Above it, the excess is damage.
-/// Stone resists more than wood (design §3.4).
-pub const RESIST_WOOD: u16 = depth(2);
-pub const RESIST_STONE: u16 = depth(6);
+/// Flow a building shrugs off before the excess starts doing damage.
+///
+/// Measured rather than guessed. A real surge produces flow speeds with a
+/// median around thirty, a ninetieth percentile of two hundred to two hundred
+/// and fifty, and a peak near three hundred and eighty at the front. The first
+/// numbers here were two and six units — below even the median — which would
+/// have dissolved every building in the game, stone dikes included, within
+/// seconds of the water arriving.
+///
+/// So: wood gives way in any strong current, stone only where the front itself
+/// is breaking. A dike that is doing its job sees still water piled against it
+/// and almost no flow at all, which is design §3.4's "a building behind a dike
+/// sees zero flow and takes nothing" applied to the dike as well.
+pub const RESIST_WOOD: u16 = depth(6);
+pub const RESIST_STONE: u16 = depth(16);
 
-/// Damage per tick per sixteenth of excess flow.
+/// Damage per tick per unit of excess flow.
 pub const FLOW_DAMAGE: u16 = 1;
 
 /// The source corner is an 8 x 8 block (design §5).

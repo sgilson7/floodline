@@ -56,3 +56,17 @@ overflow-checks = true
 #     CARGO_PROFILE_TEST_DEBUG=2 cargo test -p sim --test determinism
 [profile.test]
 debug = "line-tables-only"
+
+# `sim` is optimised even under test.
+#
+# The water automaton is sixteen thousand cells of integer arithmetic every
+# tick, and the flood tests run thousands of ticks across several seeds. Left
+# unoptimised the suite took over two minutes, which is long enough that people
+# stop running it — and a determinism test nobody runs is worse than none,
+# because it looks like cover. Optimising only this one package keeps the test
+# harness itself quick to compile.
+#
+# This does not weaken anything: `debug-assertions` and `overflow-checks` are
+# independent of `opt-level` and stay on for tests, so the same panics fire.
+[profile.test.package.sim]
+opt-level = 2

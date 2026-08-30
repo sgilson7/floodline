@@ -471,6 +471,7 @@ impl World {
         self.resolve_arrivals();
         self.produce();
         self.step_water();
+        self.flood_bodies();
         self.tick += 1;
         if self.tick % TICKS_PER_DAY == 0 {
             self.trade_day();
@@ -693,7 +694,7 @@ impl World {
 
     /// One tick of water: pour in whatever the surge is pouring, then let it
     /// find its level.
-    pub(crate) fn step_water(&mut self) {
+    pub fn step_water(&mut self) {
         let sea = self.sea_surface();
         self.inject_surge();
         if self.water.volume() > 0 {
