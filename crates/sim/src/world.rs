@@ -12,10 +12,11 @@ use crate::citizen::{Citizen, CitizenId, Errand, Job, PlayerId, State};
 use crate::command::Command;
 use crate::fx::V2;
 use crate::fx::Fx;
-use crate::map::{Ground, Map};
+use crate::map::{Ground, Map, MAP_H, MAP_W};
 use crate::names::NAMES;
 use crate::nav::{self, Dest, FlowField, Nav};
 use crate::road::{self, Road, RoadId, Trade, TradeId};
+use crate::water::Water;
 use crate::rng::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -112,6 +113,8 @@ pub struct World {
     pub ending: Option<Ending>,
     /// The most citizens each city has ever had, for the score screen.
     pub peak_population: Vec<u32>,
+    /// Standing water. Design §3.1 puts a depth on every cell.
+    pub water: Water,
     /// Roads that have been laid, in the order they were laid.
     pub roads: Vec<Road>,
     /// Standing trade agreements, proposed and accepted.
@@ -174,6 +177,7 @@ impl World {
             finished: None,
             ending: None,
             peak_population: vec![0; players as usize],
+            water: Water::dry(),
             roads: Vec::new(),
             trades: Vec::new(),
             pings: Vec::new(),
@@ -466,6 +470,7 @@ impl World {
         self.walk(nav);
         self.resolve_arrivals();
         self.produce();
+        self.step_water();
         self.tick += 1;
         if self.tick % TICKS_PER_DAY == 0 {
             self.trade_day();
@@ -662,6 +667,116 @@ impl World {
         let id = RoadId(self.roads.len() as u16);
         self.roads.push(Road { id, by: player, reaches, joined: false, cells });
         Ok(id)
+    }
+
+    /// The height of every cell as the water sees it: terrain, plus whatever
+    /// a standing dike adds.
+    ///
+    /// Built fresh each tick rather than cached. Sixteen thousand lookups is
+    /// nothing next to the automaton that follows, and a cache would be one
+    /// more thing to invalidate when a dike finishes or a flood takes one.
+    pub fn ground_heights(&self) -> Vec<i32> {
+        let mut g: Vec<i32> = self.map.height.iter().map(|&h| h as i32).collect();
+        for b in &self.buildings {
+            let bonus = b.ground_bonus();
+            if bonus == 0 {
+                continue;
+            }
+            for (x, y) in b.cells() {
+                if Map::contains(x, y) {
+                    g[Map::idx(x, y)] += bonus as i32;
+                }
+            }
+        }
+        g
+    }
+
+    /// One tick of water: pour in whatever the surge is pouring, then let it
+    /// find its level.
+    pub(crate) fn step_water(&mut self) {
+        let sea = self.sea_surface();
+        self.inject_surge();
+        if self.water.volume() > 0 {
+            let ground = self.ground_heights();
+            self.water.step(&ground, sea);
+        }
+    }
+
+    /// The level of the sea beyond the edges of the map.
+    ///
+    /// Zero except during a surge, when it is the surge's own height above the
+    /// ground it is pouring onto — because a storm surge is the sea being
+    /// high, and a sea that stays at zero while a corner is held at eighteen
+    /// simply drains the flood back out beside where it came in.
+    fn sea_surface(&self) -> i32 {
+        let sources = self.surging_from();
+        if sources.is_empty() {
+            return 0;
+        }
+        let rise = depth(self.disaster.height) as i32;
+        sources
+            .iter()
+            .map(|c| {
+                let (cx, cy) = c.cell();
+                self.map.height_at(cx, cy) as i32 * DEPTH_SCALE as i32 + rise
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The surge: for `SURGE_TICKS`, hold the source corner at the age's
+    /// height and point it at the middle of the map (design §5).
+    ///
+    /// Not a scripted wave — a source strong enough that the automaton makes a
+    /// front out of it, which is the difference between water that behaves and
+    /// water that has been animated.
+    fn inject_surge(&mut self) {
+        let sources = self.surging_from();
+        if sources.is_empty() {
+            return;
+        }
+        // `Disaster::height` is design §5's surge height, in terrain units —
+        // "height 12" means twelve of the same units the map is drawn in.
+        // Water is kept in sixteenths of one, so the two have to be converted
+        // rather than compared. Left unscaled, an age-one flood poured water
+        // three quarters of a unit deep and the map barely got wet.
+        let height = depth(self.disaster.height);
+        let push = surge_push(self.disaster.height);
+        let centre = (MAP_W / 2, MAP_H / 2);
+
+        for corner in sources {
+            let (cx, cy) = corner.cell();
+            // The 8 x 8 block at that corner, stepping inward.
+            let sx = if cx == 0 { 0 } else { MAP_W - SURGE_SIZE };
+            let sy = if cy == 0 { 0 } else { MAP_H - SURGE_SIZE };
+            let (tx, ty) = ((centre.0 - cx).signum(), (centre.1 - cy).signum());
+            for y in sy..sy + SURGE_SIZE {
+                for x in sx..sx + SURGE_SIZE {
+                    self.water.raise_to(x, y, height);
+
+                    // And a shove inland, which is the whole difference
+                    // between a flood and a puddle.
+                    //
+                    // Design §5 says the source "gives them flow pointing
+                    // toward the map centre". Writing that into `flow` alone
+                    // achieves nothing — the automaton recomputes flow from
+                    // the height field every tick, so an injected direction is
+                    // overwritten before anything reads it. Held at a depth
+                    // and left to diffuse, an age-one surge covered five per
+                    // cent of the map and stopped: once its neighbours are as
+                    // deep as it is there is no gradient left to drive it.
+                    //
+                    // So the source is a pump. Water is put down one cell
+                    // inland of the block as well as in it, every tick, which
+                    // is both the volume and the direction the design asks
+                    // for. The automaton then does what it is good at: turning
+                    // a strong source into a front, pooling it in low ground
+                    // and stacking it against dikes.
+                    self.water.add(x + tx * SURGE_SIZE, y, push);
+                    self.water.add(x, y + ty * SURGE_SIZE, push);
+                }
+            }
+        }
     }
 
     /// Whether two cities have a road between them that is joined and whole.

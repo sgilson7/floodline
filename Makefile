@@ -69,7 +69,7 @@ signal:
 	  echo "  cargo install matchbox_server --version $(SIGNAL_VERSION)"; \
 	  exit 1; }
 	@echo "Signaling on ws://localhost:$(SIGNAL_PORT)/<room>?next=<players>"
-	@matchbox_server --host 0.0.0.0:$(SIGNAL_PORT)
+	@matchbox_server 0.0.0.0:$(SIGNAL_PORT)
 
 ## bot: join a room as a headless peer (make bot ROOM=x)
 bot:

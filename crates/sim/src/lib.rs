@@ -21,6 +21,7 @@ pub mod names;
 pub mod nav;
 pub mod rng;
 pub mod road;
+pub mod water;
 pub mod world;
 
 pub use building::{Building, BuildingId, Good, Goods, Kind};

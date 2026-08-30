@@ -255,3 +255,84 @@ pub const MAX_AGE: u32 = 3;
 /// about thirty seconds. The surge is not a scripted wave — it is a source
 /// strong enough that the automaton produces a front.
 pub const SURGE_TICKS: u32 = 30 * TICKS_PER_SECOND;
+
+// ---- water -----------------------------------------------------------------
+
+/// Water is measured in sixteenths of a unit of terrain height.
+///
+/// Depth and terrain have to be comparable — a surge of height 12 has to mean
+/// something against a hill of height 12 — but comparing them at terrain's own
+/// resolution does not survive integer division. Splitting a cell's outflow
+/// between four equally-lower neighbours means dividing by four, and at
+/// terrain resolution the answer is usually zero: a two-deep puddle on flat
+/// ground never moves at all, and a puddle that does move gives the remainder
+/// to whichever neighbour the loop happened to reach last, so it spreads
+/// lopsidedly. The plan asks for a puddle that "spreads symmetrically", and
+/// sixteenths are what make that true — the shares come out equal, and the few
+/// sixteenths that division loses simply stay in the cell they were in, which
+/// costs nothing and keeps the books balanced.
+pub const DEPTH_SCALE: u16 = 16;
+
+/// A depth in whole terrain-height units.
+pub const fn depth(height_units: u16) -> u16 {
+    height_units * DEPTH_SCALE
+}
+
+/// The most water one cell may pass to one neighbour in a tick.
+///
+/// The transfer rule already refuses to move more than would level the two
+/// cells, so this is not what keeps the automaton stable — it is what stops a
+/// deep column emptying into its neighbour in one tick and giving the front a
+/// hard edge. Design §5 wants a front that advances about a cell a tick and
+/// slows as it spreads, which is what a cap produces.
+pub const MAX_TRANSFER: u16 = depth(8);
+
+/// Water shallower than this is left alone: one sixteenth of a unit of
+/// terrain height, which is a damp patch.
+///
+/// It has to be this small. The floor exists to stop the automaton shuffling
+/// single sixteenths between cells that are already level, but it also decides
+/// how thin a sheet of water can get before it stops moving — and a puddle
+/// spreading on flat ground gets very thin indeed. At a quarter of a unit, a
+/// column poured in the middle of the map froze at about sixteen cells across
+/// and never reached an edge, so the map never drained: volume was conserved
+/// and the water simply stopped. The transfer rule already refuses to
+/// overshoot, so settling does not depend on this floor being generous.
+pub const PUDDLE: u16 = 1;
+
+/// Wading slows a citizen, swimming takes away its control, and long enough
+/// under drowns it (design §3.4).
+pub const WADE_DEPTH: u16 = depth(2);
+pub const SWIM_DEPTH: u16 = depth(6);
+pub const DROWN_TICKS: u32 = 5 * TICKS_PER_SECOND;
+
+/// How much of a cell's flow a citizen picks up each tick, in 256ths. A body
+/// is not a boat: it takes a fraction of the water's movement, and a strong
+/// current still carries it off over a few seconds.
+pub const WATER_DRAG: i32 = 3;
+
+/// Flow a building shrugs off, by material. Above it, the excess is damage.
+/// Stone resists more than wood (design §3.4).
+pub const RESIST_WOOD: u16 = depth(2);
+pub const RESIST_STONE: u16 = depth(6);
+
+/// Damage per tick per sixteenth of excess flow.
+pub const FLOW_DAMAGE: u16 = 1;
+
+/// The source corner is an 8 x 8 block (design §5).
+pub const SURGE_SIZE: i32 = 8;
+
+/// The shove the source gives the water, pointing at the middle of the map.
+/// It is what makes the surge a wall coming at you rather than a puddle
+/// spreading out of a corner.
+/// How hard the source pumps inland, as a fraction of the surge's own height.
+///
+/// See `World::inject_surge`. It has to scale with the height or design §4's
+/// escalation table is decoration: with a fixed pump, an age-one surge of
+/// twelve and an age-four surge of twenty-four flooded exactly the same
+/// fraction of the map, because the pump was providing all the water and the
+/// height none of it. Halved, so the pump is a shove rather than a second
+/// source.
+pub const fn surge_push(height: u16) -> u16 {
+    depth(height) / 2
+}

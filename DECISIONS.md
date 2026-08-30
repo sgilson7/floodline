@@ -481,3 +481,71 @@ assertion, which is the argument for having something to look at.
 `Ending` is now stored when the run stops, and the score reads it. It is also
 better on the screen: "the last city fell" and "you outlasted the ages" are
 different endings and should not print the same line.
+
+---
+
+## 2026-08-30 — The flood: three things the design implies but does not say
+
+Design §3.4's automaton is a page long and the numbers around it are not
+self-consistent. Three had to be settled by measurement.
+
+**Water is kept in sixteenths of a unit of terrain height.** Depth and terrain
+must be comparable — a surge of height 12 has to mean something against a hill
+of height 12 — but at terrain's own resolution the automaton does not work.
+Splitting a cell's outflow between four equally-lower neighbours means dividing
+by four, and in whole terrain units the answer is usually zero: a two-deep
+puddle on flat ground never moved at all. Worse, the obvious fix — give the
+remainder to the last neighbour so the sum comes out exact — makes the puddle
+spread lopsidedly, because "last" is whichever way the loop happens to run, and
+the plan asks specifically for a puddle that "spreads symmetrically". In
+sixteenths the shares come out equal and the few that division loses simply
+stay put, which conserves volume just as well.
+
+**The sea rises during a surge.** The source corner touches two edges of the
+map, and off-map was a bottomless drain at surface zero, so an age-one flood
+poured in and ran straight back out beside itself: eight hundred thousand
+sixteenths off the edge against forty thousand ever on the map, and a front
+that stalled thirty cells in. A storm surge *is* the sea being high, so while
+one is running the sea outside the map is at the surge's own level and the
+water has nowhere to go but inland. When it stops, the sea falls and design
+§5's step 6 — "water drains off the edges over the next day" — happens by
+itself.
+
+**The source is a pump, not a puddle.** §5 says the source "gives them flow
+pointing toward the map centre", and writing that into the flow field achieves
+nothing: the automaton recomputes flow from the height field every tick, so an
+injected direction is overwritten before anything reads it. Held at a depth and
+left to diffuse, the surge covered five per cent of the map and stopped — once
+its neighbours are as deep as it is there is no gradient left to drive it. The
+source now puts water down one cell inland as well as in itself, every tick,
+which is the volume and the direction §5 asks for.
+
+And the pump has to scale with the age's height, which is the difference
+between design §4's escalation table meaning something and being decoration:
+with a fixed pump, an age-one surge of twelve and an age-four surge of
+twenty-four flooded *identically*. Scaled, peak volume runs 1.8M, 3.5M, 5.3M
+across the three heights.
+
+---
+
+## 2026-08-30 — The front does not reach the middle of the map, and should not
+
+The plan's test for the surge is "front reaches the map centre within N ticks".
+The design's own physics will not do that and must not. Water finds its level:
+a surge twelve deep cannot climb ground that is sixty higher, and §5 depends on
+it not being able to — "anyone who reaches high ground or a rooftop survives"
+means nothing if high ground gets wet, and "build on the high corner" is the
+first counter-play the design offers.
+
+So the test is written the other way round. `the_surge_takes_the_low_country`
+asserts an age-one flood covers at least eight per cent of the map with several
+hundred cells properly deep, `the_high_corner_stays_dry` asserts it never
+reaches the far corner, and `a_bigger_surge_is_a_bigger_flood` asserts the
+escalation table escalates. That is the behaviour design §5 actually describes,
+and it is what makes a city's distance from the low corner matter — which is
+design §6's "the low corner is nearer to some than others".
+
+Terrain relief was tried at 64 instead of 255 to make the flood spread further.
+It moved coverage from nine per cent to fifteen and cost more than it bought:
+sixty-four distinct heights make the quantile bands that keep every seed
+playable much coarser. Reverted, and recorded here so it is not tried twice.

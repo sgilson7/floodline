@@ -123,7 +123,7 @@ impl Map {
 
         let low_corner = Corner::ALL[rng.below(4) as usize];
         let high_corner = low_corner.opposite();
-        let height = terrain(rng, low_corner, NOISE_AMPLITUDE);
+        let height = terrain(rng, low_corner, NOISE_AMPLITUDE, SLOPE_SPAN);
 
         let (shallows_max, sand_max, rock_min) = band_heights(&height);
         let ground: Vec<Ground> = height
@@ -245,7 +245,7 @@ impl Map {
 /// reads as "a valley and a hill" or as "noise that happens to slope", and
 /// picking it by eye on one seed is how the first two versions of this
 /// function ended up wrong.
-fn terrain(rng: &mut Rng, low_corner: Corner, amplitude: i32) -> Vec<u8> {
+pub fn terrain(rng: &mut Rng, low_corner: Corner, amplitude: i32, slope_span: i32) -> Vec<u8> {
     // Four octaves, coarse to fine. The coarse one is the shape of the land
     // and the fine ones are the texture on it.
     let octaves = [(64i32, 8i32), (32, 4), (16, 2), (8, 1)];
@@ -275,7 +275,7 @@ fn terrain(rng: &mut Rng, low_corner: Corner, amplitude: i32) -> Vec<u8> {
             let d_low = (x - lx).abs() + (y - ly).abs();
             let d_high = (x - hx).abs() + (y - hy).abs();
             let span = d_low + d_high; // constant along the diagonal
-            let slope = if span == 0 { SLOPE_SPAN / 2 } else { d_low * SLOPE_SPAN / span };
+            let slope = if span == 0 { slope_span / 2 } else { d_low * slope_span / span };
 
             height[Map::idx(x, y)] = (slope + noise).clamp(0, 255) as u8;
         }
@@ -637,7 +637,7 @@ mod probe {
             for seed in 0..300u64 {
                 let mut rng = Rng::new(seed);
                 let low = Corner::ALL[rng.below(4) as usize];
-                let h = terrain(&mut rng, low, amp);
+                let h = terrain(&mut rng, low, amp, SLOPE_SPAN);
                 let (sh, _, _) = band_heights(&h);
 
                 let (lx, ly) = low.cell();
