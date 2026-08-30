@@ -1348,3 +1348,36 @@ refused it — and the leftovers stayed in its arms for the rest of the run. A
 hundred and forty stone, a fifth of the game's entire supply, quietly gone.
 `the_hearth_can_hold_what_a_city_starts_with` now makes that a rule rather than
 a coincidence.
+
+---
+
+## 2026-08-30 — The simulation gets a clock
+
+`main` advanced the world one tick per rendered frame. Design §3.1 says ten
+ticks a second; measured on the deployed build it was **24.3** in a headless
+browser (tick 248 at ten seconds, tick 977 at forty) and about sixty on an
+ordinary display. So a day was twenty to fifty seconds instead of two minutes
+and a whole run six to fifteen minutes instead of thirty-six, and the speed of
+the game was a property of the machine it was watched on.
+
+Everything counted in ticks went with it. `DROP_AFTER_TICKS` is three hundred,
+which design §8 calls thirty seconds of silence; at sixty frames a second it
+was five. `WAIT_WARN_TICKS` was under a second. Neither was wrong in the code —
+they were counting the right number of the wrong thing.
+
+It also decided the pace of a *shared* game by one machine's frame rate. The
+host emits one bundle per call and nobody advances without one, so a host on a
+120 Hz display ran everybody's game at twice the speed of a host on a 60 Hz
+one, and neither at the speed the balance was measured for.
+
+An accumulator in the frame loop, and the numbers mean what they say again:
+measured at exactly 10.0 ticks a second afterwards (tick 101 at ten seconds,
+tick 401 at forty).
+
+Two things about its shape. In the lobby it advances once a frame instead —
+nothing is being simulated there, and a handshake should not wait on a clock.
+And a frame may make up at most eight ticks: a tab that was backgrounded for a
+minute comes back owing thousands, and simulating them all freezes the page for
+seconds and then does it again. Dropping that backlog is right for the peer
+that fell behind, because lockstep will not let it run ahead of anybody
+regardless — the host is waiting on its turns either way.

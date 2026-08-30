@@ -126,7 +126,7 @@ with sync_playwright() as p:
     # Let it get built, then the gesture: choose everybody, right-click the
     # farm. The panel's hover row says how many are working there, so it is
     # read with the cursor over the farm both times.
-    pg.wait_for_timeout(25000)
+    pg.wait_for_timeout(45000)   # 450 ticks: hauling plus a farm's 300 builder-ticks
     pg.mouse.move(*cell(*farm))
     pg.wait_for_timeout(400)
     before_work = hover_line(shot())

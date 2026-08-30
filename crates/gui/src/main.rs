@@ -17,6 +17,54 @@ mod ui;
 
 use macroquad::prelude::*;
 
+/// The fixed timestep.
+///
+/// The simulation used to advance one tick per rendered frame, which made a
+/// day twenty seconds on one machine and fifty on another: measured at 24
+/// ticks a second in a headless browser against design §3.1's ten, and about
+/// sixty on an ordinary display. Everything counted in ticks went with it —
+/// design §8's "thirty seconds of silence before a player is dropped" was
+/// really five, because it counts the host's own ticks.
+///
+/// It also decided the pace of a whole game by the host's frame rate, since
+/// the host emits one bundle per call and nobody advances without one.
+#[derive(Default)]
+struct Clock {
+    /// Seconds owed to the simulation but not yet spent.
+    owed: f32,
+}
+
+impl Clock {
+    /// The longest catch-up a single frame may do.
+    ///
+    /// A tab that was backgrounded for a minute comes back owing thousands of
+    /// ticks, and simulating them all in one frame freezes the page for
+    /// seconds and then does it again. Dropping the backlog is the right
+    /// answer for the peer that fell behind: lockstep will not let it get
+    /// ahead of anybody, and the host is waiting for its turns either way.
+    const MOST_PER_FRAME: u32 = 8;
+
+    fn reset(&mut self) {
+        self.owed = 0.0;
+    }
+
+    fn ticks_due(&mut self, elapsed: f32) -> u32 {
+        // A frame that took a second is a frame the machine stalled on, not a
+        // second of game to make up.
+        self.owed += elapsed.min(0.25);
+        let step = 1.0 / sim::balance::TICKS_PER_SECOND as f32;
+        let mut due = 0;
+        while self.owed >= step && due < Self::MOST_PER_FRAME {
+            self.owed -= step;
+            due += 1;
+        }
+        if due == Self::MOST_PER_FRAME {
+            self.owed = 0.0;
+        }
+        due
+    }
+}
+
 fn window() -> Conf {
     Conf {
         window_title: "FLOODLINE".to_owned(),
@@ -48,6 +96,7 @@ async fn main() {
     let mut lobby = Some(lobby::Lobby::new());
     let mut session: Option<game::Session> = None;
     let mut input = input::Input::default();
+    let mut clock = Clock::default();
 
     loop {
         // Clear the whole window, letterbox bars included, then move into
@@ -62,8 +111,20 @@ async fn main() {
         // The session runs whether or not the lobby is on top of it: a joiner
         // sitting in the lobby still has to answer the host, and the host has
         // to hear it arrive.
+        //
+        // In the lobby that is once a frame, because nothing is being
+        // simulated and a handshake should not wait on a clock. In a game it
+        // is on the clock, because `advance` is a *tick* — and until this was
+        // here the game ran at whatever the display did.
         if let Some(s) = session.as_mut() {
-            s.advance();
+            if s.in_lobby() {
+                clock.reset();
+                s.advance();
+            } else {
+                for _ in 0..clock.ticks_due(get_frame_time()) {
+                    s.advance();
+                }
+            }
         }
 
         if let Some(screen) = lobby.as_mut() {
