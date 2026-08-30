@@ -28,6 +28,9 @@ pub struct Ui {
     /// The left button came up this frame. Phase 5's drag-select.
     #[allow(dead_code)]
     pub released: bool,
+    /// How far the cursor moved since the last frame, in logical pixels.
+    /// Only the camera wants it.
+    pub moved: Vec2,
     /// Modifier for the shortcuts a lobby needs: ctrl-V, ctrl-C.
     pub ctrl: bool,
     /// Where the logical canvas sits on the real one, so a rectangle can be
@@ -39,8 +42,13 @@ pub struct Ui {
 impl Ui {
     pub fn frame(view: &Viewport) -> Ui {
         let (mx, my) = view.mouse();
+        let d = mouse_delta_position();
         Ui {
             mouse: vec2(mx, my),
+            // `mouse_delta_position` is in a normalised space of its own and
+            // points the other way; scaled into logical pixels so a drag moves
+            // the map by as much as the cursor moved over it.
+            moved: vec2(-d.x * screen_width() / 2.0, -d.y * screen_height() / 2.0) / view.scale,
             clicked: is_mouse_button_pressed(MouseButton::Left),
             right_clicked: is_mouse_button_pressed(MouseButton::Right),
             held: is_mouse_button_down(MouseButton::Left),

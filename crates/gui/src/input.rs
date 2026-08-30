@@ -7,14 +7,14 @@
 //! *now*, under the cursor, instead of being silently dropped three ticks
 //! later on every machine at once.
 //!
-//! **Nothing here reads `mouse_position()`.** `Ui::frame` has already put the
-//! cursor into logical coordinates, and `draw::cell_at` is the only thing that
-//! turns those into a cell. The two conversions in `screen::Viewport` are the
-//! whole of the letterbox and this file may not do the arithmetic itself.
+//! **Nothing here reads `mouse_position()`, and nothing here converts.**
+//! `Ui::frame` has already put the cursor into logical coordinates and
+//! `screen::MapView` is the only thing that turns those into a cell or into
+//! map space. Between them those two types are the whole of the coordinate
+//! system; this file asks them and never does the arithmetic itself.
 
-use crate::draw::{self, CELL};
 use crate::game::Session;
-use crate::screen::{LOGICAL_H, LOGICAL_W, PANEL_W};
+use crate::screen::{MapView, CELL, LOGICAL_H, LOGICAL_W, PANEL_W};
 use crate::ui::Ui;
 use crate::{palette, ui};
 use macroquad::prelude::*;
@@ -85,20 +85,37 @@ impl Default for Input {
 const NOTICE_SECONDS: f64 = 4.5;
 
 impl Input {
-    /// One frame: draw the tools, read the mouse, issue what it meant.
-    pub fn frame(&mut self, ui: &Ui, session: &mut Session, panel_top: f32) {
+    /// Everything drawn in map space, under the map camera: the selection
+    /// rectangle, the ghost of what is about to be built, the road being laid.
+    ///
+    /// Split from the panel because the two are drawn through different
+    /// cameras — the map is clipped to its window and scaled by the zoom, the
+    /// panel is not — and mixing them was the one way this could have gone
+    /// wrong quietly.
+    pub fn map_layer(&mut self, ui: &Ui, session: &mut Session, view: &MapView) {
         let me = session.me();
         self.keys();
         self.forget_the_dead(session.world());
-
-        // The dialog is modal over the map, so it gets the mouse first.
         if self.trade.open {
-            self.trade_dialog(ui, session, me);
-            self.tools(ui, session, me, panel_top);
             return;
         }
-        self.map(ui, session, me);
-        self.tools(ui, session, me, panel_top);
+        self.map(ui, session, me, view);
+    }
+
+    /// Everything drawn on the logical canvas: the tools, the dialog, and the
+    /// line under the map that says why the last order was refused.
+    pub fn panel_layer(
+        &mut self,
+        ui: &Ui,
+        session: &mut Session,
+        panel_top: f32,
+        view: &MapView,
+    ) {
+        let me = session.me();
+        if self.trade.open {
+            self.trade_dialog(ui, session, me);
+        }
+        self.tools(ui, session, me, panel_top, view);
         self.notice();
     }
 
@@ -180,12 +197,12 @@ impl Input {
 
     // ---- the map ------------------------------------------------------------
 
-    fn map(&mut self, ui: &Ui, session: &mut Session, me: PlayerId) {
-        let cell = draw::cell_at(ui.mouse.x, ui.mouse.y);
+    fn map(&mut self, ui: &Ui, session: &mut Session, me: PlayerId, view: &MapView) {
+        let cell = view.cell_at(ui.mouse);
         self.hover(session.world(), me, cell);
 
         match self.tool {
-            Tool::Select => self.select(ui, session, me, cell),
+            Tool::Select => self.select(ui, session, me, cell, view),
             Tool::Build(kind) => {
                 if let (true, Some((x, y))) = (ui.clicked, cell) {
                     // A dike clicked with the dike tool is a dike to raise,
@@ -234,21 +251,30 @@ impl Input {
     }
 
     /// Drag to select, right-click to order.
-    fn select(&mut self, ui: &Ui, session: &mut Session, me: PlayerId, cell: Option<(i32, i32)>) {
-        let on_map = draw::map_rect().contains(ui.mouse);
-        if ui.clicked && on_map {
-            self.drag = Some(ui.mouse);
+    fn select(
+        &mut self,
+        ui: &Ui,
+        session: &mut Session,
+        me: PlayerId,
+        cell: Option<(i32, i32)>,
+        view: &MapView,
+    ) {
+        // In map space, so a rectangle dragged at one zoom means the same
+        // cells at any other.
+        let here = view.to_map(ui.mouse);
+        if ui.clicked && cell.is_some() {
+            self.drag = Some(here);
         }
         if let Some(start) = self.drag {
-            let r = rect_between(start, ui.mouse);
-            draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, palette::INK);
+            let r = rect_between(start, here);
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0 / view.zoom, palette::INK);
             if ui.released {
                 self.drag = None;
                 // A click is a drag of no size, and picking the one citizen
-                // under the cursor wants a few pixels of tolerance rather than
-                // an exact hit on a six-pixel circle.
-                let r = if r.w < 4.0 && r.h < 4.0 {
-                    Rect::new(start.x - 6.0, start.y - 6.0, 12.0, 12.0)
+                // under the cursor wants a little tolerance rather than an
+                // exact hit on a body a cell wide.
+                let r = if r.w < CELL / 2.0 && r.h < CELL / 2.0 {
+                    Rect::new(start.x - CELL, start.y - CELL, CELL * 2.0, CELL * 2.0)
                 } else {
                     r
                 };
@@ -300,22 +326,20 @@ impl Input {
             Tool::Build(kind) => {
                 let (bw, bh) = kind.size();
                 let ok = w.can_place(me, kind, x, y).is_ok();
-                let r = draw::map_rect();
                 draw_rectangle(
-                    r.x + x as f32 * CELL,
-                    r.y + y as f32 * CELL,
+                    x as f32 * CELL,
+                    y as f32 * CELL,
                     bw as f32 * CELL,
                     bh as f32 * CELL,
                     Color { a: 0.35, ..if ok { palette::GOOD } else { palette::ALARM } },
                 );
             }
             Tool::Road { from: Some((fx, fy)) } => {
-                let r = draw::map_rect();
                 draw_line(
-                    r.x + fx as f32 * CELL + CELL / 2.0,
-                    r.y + fy as f32 * CELL + CELL / 2.0,
-                    r.x + x as f32 * CELL + CELL / 2.0,
-                    r.y + y as f32 * CELL + CELL / 2.0,
+                    fx as f32 * CELL + CELL / 2.0,
+                    fy as f32 * CELL + CELL / 2.0,
+                    x as f32 * CELL + CELL / 2.0,
+                    y as f32 * CELL + CELL / 2.0,
                     2.0,
                     palette::WARNING,
                 );
@@ -326,7 +350,7 @@ impl Input {
 
     // ---- the panel ----------------------------------------------------------
 
-    fn tools(&mut self, ui: &Ui, session: &mut Session, me: PlayerId, top: f32) {
+    fn tools(&mut self, ui: &Ui, session: &mut Session, me: PlayerId, top: f32, view: &MapView) {
         let left = LOGICAL_W - PANEL_W + 18.0;
         let wide = PANEL_W - 36.0;
         let half = (wide - 8.0) / 2.0;
@@ -403,7 +427,7 @@ impl Input {
         // the click rather than as a refusal after it. Its own line, kept
         // clear whether or not there is anything under the mouse, so nothing
         // below it moves as the cursor crosses a building.
-        if let Some(line) = self.under_the_cursor(session.world(), me, ui) {
+        if let Some(line) = self.under_the_cursor(session.world(), me, ui, view) {
             draw_text(&line, left, y, 15.0, palette::INK);
         }
         y += 22.0;
@@ -452,8 +476,8 @@ impl Input {
     }
 
     /// The building under the mouse, and how full it is.
-    fn under_the_cursor(&self, w: &World, me: PlayerId, ui: &Ui) -> Option<String> {
-        let (x, y) = draw::cell_at(ui.mouse.x, ui.mouse.y)?;
+    fn under_the_cursor(&self, w: &World, me: PlayerId, ui: &Ui, view: &MapView) -> Option<String> {
+        let (x, y) = view.cell_at(ui.mouse)?;
         let b = w.building_at(x, y)?;
         let name = kind_name(b.kind);
         if b.owner != me {
@@ -655,16 +679,10 @@ impl Input {
     }
 }
 
-/// A citizen's position in logical coordinates, the same arithmetic `draw`
-/// does — and the only reason it is written twice is that one draws and one
-/// hit-tests, so a single function would have to be handed both a `Rect` and a
-/// `Citizen` for no gain.
+/// A citizen's position in map space, which is where the selection rectangle
+/// is too, so the two need no conversion between them.
 fn citizen_at(c: &sim::Citizen) -> Vec2 {
-    let r = draw::map_rect();
-    vec2(
-        r.x + c.pos.x.raw() as f32 / 256.0 * CELL,
-        r.y + c.pos.y.raw() as f32 / 256.0 * CELL,
-    )
+    vec2(c.pos.x.raw() as f32 / 256.0 * CELL, c.pos.y.raw() as f32 / 256.0 * CELL)
 }
 
 fn rect_between(a: Vec2, b: Vec2) -> Rect {

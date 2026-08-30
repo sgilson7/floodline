@@ -40,6 +40,15 @@ for dpr in 1 2; do
     "http://localhost:$PORT/index.html" "$dpr" || fail=1
 done
 
+# The camera, and the thing it could break: does a click still land on the cell
+# the cursor is over? At both device pixel ratios, because the coordinate code
+# has been wrong twice and both times it was invisible at one.
+for dpr in 1 2; do
+  say "camera.py at device pixel ratio $dpr"
+  "$VENV/bin/python" "$ROOT/packaging/browser/camera.py" \
+    "http://localhost:$PORT/index.html" "$dpr" || fail=1
+done
+
 # The mouse reaching the simulation, which is the one thing cargo cannot say.
 say "play.py"
 "$VENV/bin/python" "$ROOT/packaging/browser/play.py" \

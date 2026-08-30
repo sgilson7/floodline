@@ -18,6 +18,40 @@ mod ui;
 
 use macroquad::prelude::*;
 
+/// Zoom and pan.
+///
+/// Not in `input`, because it changes what the player is looking at rather
+/// than what the world is doing: nothing here can issue a command, and a wheel
+/// turn during a flood is not an order anybody has to agree about.
+fn camera_controls(ui: &ui::Ui, map: &mut screen::MapView) {
+    let (_, wheel) = mouse_wheel();
+    if wheel != 0.0 && screen::map_window().contains(ui.mouse) {
+        // A fixed step per notch: browsers report wildly different magnitudes
+        // for the same flick of the same wheel, so the sign is the only part
+        // of it worth trusting.
+        map.zoom_about(ui.mouse, if wheel > 0.0 { 1.18 } else { 1.0 / 1.18 });
+    }
+
+    // Keys, for anybody who would rather not drag.
+    let mut by = Vec2::ZERO;
+    let speed = 640.0 * get_frame_time();
+    if is_key_down(KeyCode::Left) { by.x -= speed; }
+    if is_key_down(KeyCode::Right) { by.x += speed; }
+    if is_key_down(KeyCode::Up) { by.y -= speed; }
+    if is_key_down(KeyCode::Down) { by.y += speed; }
+    if by != Vec2::ZERO {
+        map.pan(by);
+    }
+
+    // Middle-drag. Not right-drag: right-click is an order.
+    if is_mouse_button_down(MouseButton::Middle) {
+        map.pan(-ui.moved);
+    }
+    if is_key_pressed(KeyCode::Key0) {
+        map.frame_the_map();
+    }
+}
+
 /// The fixed timestep.
 ///
 /// The simulation used to advance one tick per rendered frame, which made a
@@ -99,6 +133,7 @@ async fn main() {
     let mut input = input::Input::default();
     let mut clock = Clock::default();
     let mut welcome = tutorial::Welcome::default();
+    let mut map = screen::MapView::default();
 
     loop {
         // Clear the whole window, letterbox bars included, then move into
@@ -158,9 +193,22 @@ async fn main() {
             }
         } else if let Some(s) = session.as_mut() {
             let me = s.me();
-            draw::world(s.world(), me, input::selected(&input));
-            let panel_ends = draw::panel(s.world(), me, s.status(), &build, &s.ticks());
             let over = s.world().finished().is_some();
+            let busy = over || welcome.showing();
+
+            // The map, through its own camera: clipped to its window, scaled
+            // by the zoom, and drawn in map space. Everything the player draws
+            // *on* the map goes here too, or the two would disagree the moment
+            // anybody zoomed.
+            set_camera(&map.camera(&view));
+            draw::world(s.world(), me, input::selected(&input), &map);
+            if !busy {
+                input.map_layer(&ui, s, &map);
+            }
+
+            // And back to the canvas for the panel and everything over it.
+            set_camera(&view.camera());
+            let panel_ends = draw::panel(s.world(), me, s.status(), &build, &s.ticks());
             if over {
                 // Nothing left to command, and a build menu over a score
                 // screen would only invite clicks that fail.
@@ -170,7 +218,8 @@ async fn main() {
                 // put a building down behind it.
                 welcome.draw(&ui);
             } else {
-                input.frame(&ui, s, panel_ends);
+                input.panel_layer(&ui, s, panel_ends, &map);
+                camera_controls(&ui, &mut map);
             }
             let stopped = matches!(s.status(), net::Status::Ended(_));
             let back = (over || stopped)

@@ -16,26 +16,15 @@ from playwright.sync_api import sync_playwright
 
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8123/index.html"
 DPR = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
+from view import View, LOGICAL_W, LOGICAL_H, CELL
+
 W, H = 1400, 900
-LOGICAL_W, LOGICAL_H = 1600.0, 980.0
-MAP_X, MAP_Y, CELL = 12.0, 12.0, 8.0
 PANEL_L = LOGICAL_W - 366.0 + 18.0
 errors = []
 
-scale = min(W / LOGICAL_W, H / LOGICAL_H)
-ox = (W - LOGICAL_W * scale) / 2.0
-oy = (H - LOGICAL_H * scale) / 2.0
-
-
-def css(lx, ly):
-    """Logical canvas -> CSS pixels. No device pixel ratio: the mouse is
-    already logical, and applying the ratio here is the input half of the
-    letterbox trap."""
-    return ox + lx * scale, oy + ly * scale
-
-
-def cell_px(cx, cy):
-    return css(MAP_X + (cx + 0.5) * CELL, MAP_Y + (cy + 0.5) * CELL)
+V = View(W, H)
+css = V.css
+cell_px = V.cell
 
 
 def wire(page, tag):
@@ -68,6 +57,12 @@ with sync_playwright() as p:
     def at_cell(img, cx, cy):
         x, y = cell_px(cx, cy)
         return img.getpixel((int(x * DPR), int(y * DPR)))
+
+    def changed_cells(a, c, cx0, cy0, cx1, cy1):
+        """How many sampled pixels differ over a block of map cells."""
+        x0, y0 = V.logical_of_map(cx0 * CELL, cy0 * CELL)
+        x1, y1 = V.logical_of_map(cx1 * CELL, cy1 * CELL)
+        return changed(a, c, x0, y0, x1, y1)
 
     def changed(a, c, x0, y0, x1, y1):
         """How many pixels of a logical rectangle differ between two frames.
@@ -116,7 +111,7 @@ with sync_playwright() as p:
     page.keyboard.press("Digit1")
     page.wait_for_timeout(200)
     was = at_cell(shot("play-2-tool"), 40, 40)
-    click(MAP_X + 40 * CELL + 4, MAP_Y + 40 * CELL + 4)
+    page.mouse.click(*cell_px(40, 40))
     page.wait_for_timeout(600)
     now = at_cell(shot("play-3-cottage"), 40, 40)
     check(now != was, f"a cottage site appeared at (40,40): {was} -> {now}")
@@ -131,13 +126,12 @@ with sync_playwright() as p:
     for row in (44, 36, 48, 32):
         was = shot("play-3-cottage")
         page.keyboard.press("KeyR")
-        click(MAP_X + 38 * CELL + 4, MAP_Y + row * CELL + 4)
+        page.mouse.click(*cell_px(38, row))
         page.wait_for_timeout(250)
-        click(MAP_X + 50 * CELL + 4, MAP_Y + row * CELL + 4)
+        page.mouse.click(*cell_px(50, row))
         page.wait_for_timeout(700)
         now = shot("play-4-road")
-        laid = changed(was, now, MAP_X + 38 * CELL, MAP_Y + (row - 4) * CELL,
-                       MAP_X + 50 * CELL, MAP_Y + (row + 4) * CELL)
+        laid = changed_cells(was, now, 38, row - 4, 50, row + 4)
         if laid > 40:
             print(f"  road along row {row}")
             break
@@ -146,11 +140,10 @@ with sync_playwright() as p:
     # --- pointing ------------------------------------------------------------
     was = shot("play-4-road")
     page.keyboard.press("KeyP")
-    click(MAP_X + 60 * CELL + 4, MAP_Y + 60 * CELL + 4)
+    page.mouse.click(*cell_px(60, 60))
     page.wait_for_timeout(300)
     now = shot("play-5-ping")
-    n = changed(was, now, MAP_X + 57 * CELL, MAP_Y + 57 * CELL,
-                MAP_X + 64 * CELL, MAP_Y + 64 * CELL)
+    n = changed_cells(was, now, 57, 57, 64, 64)
     check(n > 5, f"a ping is drawn around (60,60): {n} pixels changed")
 
     # --- the trade dialog ----------------------------------------------------
@@ -175,7 +168,7 @@ with sync_playwright() as p:
     # the sentence appears under the map on this frame rather than nothing
     # happening three ticks later.
     page.keyboard.press("Digit7")   # dike
-    click(MAP_X + 40 * CELL + 4, MAP_Y + 40 * CELL + 4)   # onto the cottage site
+    page.mouse.click(*cell_px(40, 40))   # onto the cottage site
     page.wait_for_timeout(300)
     refused = shot("play-9-refused")
     strip = [at(refused, x, LOGICAL_H - 34.0) for x in range(400, 900, 8)]

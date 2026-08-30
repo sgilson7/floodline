@@ -20,6 +20,8 @@ after that it is about a minute. `.venv-test/` is gitignored.
 | `clipboard.py` | the Copy button on the pasted-code screen actually copies, with clipboard writing denied |
 | `rejoin.py` | a seat a joiner left is given to the next one, an abandoned lobby leaves its room, and hosting a second game does not close the one it just opened |
 | `assign.py` | choosing a whole city and right-clicking a farm puts three people on it and says so, instead of being refused whole |
+| `camera.py` | zoom and pan, nothing drawn over the panel, and a click still lands on the cell the cursor is over |
+| `view.py` | not a check: the one copy of the letterbox-and-camera arithmetic every other script imports |
 | `play.py` | the mouse reaching the simulation: choosing citizens, ordering them about, a cottage, a road, a ping, a trade, and a refusal that says so |
 | `game_two_tabs.py` | the whole stack: two tabs reach the lobby, join by room code or by pasted code, and both leave the lobby into the same world |
 

@@ -10,3 +10,6 @@ reference/
 
 # Browser checks: a virtualenv with playwright and a copy of Chromium.
 .venv-test/
+
+# Python bytecode from the browser checks.
+__pycache__/

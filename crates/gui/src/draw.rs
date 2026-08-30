@@ -1,44 +1,37 @@
 //! Everything on the screen, drawn with primitives.
 
 use crate::palette;
-use crate::screen::{LOGICAL_H, LOGICAL_W, PANEL_W};
+use crate::screen::{MapView, CELL, LOGICAL_H, LOGICAL_W, PANEL_W};
 use macroquad::prelude::*;
 use sim::{PlayerId, World};
 
-/// A map cell is eight logical pixels (plan phase 5), so 128 cells is 1024 —
-/// which fits the canvas beside a 366-pixel panel with room to breathe.
-pub const CELL: f32 = 8.0;
-pub const MAP_X: f32 = 12.0;
-pub const MAP_Y: f32 = 12.0;
+/// The map's own origin is its top-left corner, and everything below draws in
+/// map space: `cell * CELL`. `screen::MapView` puts that on the screen, and
+/// nothing here knows where on the canvas it lands.
+pub const MAP_X: f32 = 0.0;
+pub const MAP_Y: f32 = 0.0;
 
-/// Where the map sits on the canvas. Kept here beside the drawing so the
-/// drawing and the hit-testing cannot disagree about where a cell is.
-pub fn map_rect() -> Rect {
-    Rect::new(MAP_X, MAP_Y, sim::MAP_W as f32 * CELL, sim::MAP_H as f32 * CELL)
-}
-
-/// The cell under a point in logical coordinates, if any.
-pub fn cell_at(x: f32, y: f32) -> Option<(i32, i32)> {
-    let r = map_rect();
-    if !r.contains(vec2(x, y)) {
-        return None;
-    }
-    Some((((x - r.x) / CELL) as i32, ((y - r.y) / CELL) as i32))
-}
-
-pub fn world(w: &World, me: PlayerId, selected: &[sim::CitizenId]) {
-    ground(w);
-    water(w);
-    buildings(w);
+/// Everything under the map camera. The caller sets it; this draws in map
+/// space and never asks where the window is.
+pub fn world(w: &World, me: PlayerId, selected: &[sim::CitizenId], view: &MapView) {
+    let seen = view.visible();
+    ground(w, seen);
+    water(w, seen);
+    buildings(w, seen);
     citizens(w, selected);
     pings(w);
     let _ = me;
 }
 
-fn ground(w: &World) {
+/// Whether a footprint is anywhere near the window, for culling.
+fn on_screen(seen: (i32, i32, i32, i32), x: i32, y: i32, w: i32, h: i32) -> bool {
+    x + w > seen.0 && y + h > seen.1 && x <= seen.2 && y <= seen.3
+}
+
+fn ground(w: &World, seen: (i32, i32, i32, i32)) {
     let relief = *w.map.height.iter().max().unwrap_or(&1) as i32;
-    for y in 0..sim::MAP_H {
-        for x in 0..sim::MAP_W {
+    for y in seen.1..=seen.3 {
+        for x in seen.0..=seen.2 {
             let i = sim::Map::idx(x, y);
             draw_rectangle(
                 MAP_X + x as f32 * CELL,
@@ -51,12 +44,12 @@ fn ground(w: &World) {
     }
 }
 
-fn water(w: &World) {
+fn water(w: &World, seen: (i32, i32, i32, i32)) {
     if w.water.volume() == 0 {
         return;
     }
-    for y in 0..sim::MAP_H {
-        for x in 0..sim::MAP_W {
+    for y in seen.1..=seen.3 {
+        for x in seen.0..=seen.2 {
             let d = w.water.depth[sim::Map::idx(x, y)];
             if d == 0 {
                 continue;
@@ -72,12 +65,15 @@ fn water(w: &World) {
     }
 }
 
-fn buildings(w: &World) {
+fn buildings(w: &World, seen: (i32, i32, i32, i32)) {
     for b in &w.buildings {
         if b.state == sim::building::BuildState::Rubble {
             continue;
         }
         let (bw, bh) = b.kind.size();
+        if !on_screen(seen, b.x as i32, b.y as i32, bw, bh) {
+            continue;
+        }
         let x = MAP_X + b.x as f32 * CELL;
         let y = MAP_Y + b.y as f32 * CELL;
         let (pw, ph) = (bw as f32 * CELL, bh as f32 * CELL);

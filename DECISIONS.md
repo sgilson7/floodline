@@ -1567,3 +1567,39 @@ neither producer may be bought with its own output, and a granary, a farm and a
 hut must all still fit inside the opening stock with room left for the quarry.
 
 First of the seven milestones agreed for the river-and-gold plan.
+
+---
+
+## 2026-08-30 — A camera over the map, and a second conversion that stays home
+
+M2 of the plan. The map is 128 cells square drawn at eight pixels a cell and a
+city is about twelve cells across, so the game was being played on a postage
+stamp. `screen::MapView` is zoom and pan: wheel toward the cursor, arrows or
+middle-drag to move, `0` to frame the whole map again.
+
+**The rule that keeps this safe is the one that already existed.** The
+letterbox has been wrong twice, both times because two places did the same
+arithmetic and disagreed, and both times it was invisible at a device pixel
+ratio of one. So the camera is not a multiplication sprinkled through the
+drawing code: `MapView` is the only thing that converts between the logical
+canvas and the map, `draw` and `input` ask it, and `draw::map_rect` and
+`draw::cell_at` are gone rather than left as a second opinion. Map space is
+`cell * CELL` with its origin at the map's corner — the same units everything
+was already drawn in, so no building's position changed.
+
+**One real trap, found by writing it down rather than by a bug.**
+`Viewport::camera` passes the letterbox's *top* margin as the GL viewport's y,
+and GL wants the distance from the *bottom*. It has always been correct because
+the letterbox is centred, so its top and bottom margins are the same number.
+The map window is not centred, so `MapView::camera` computes
+`fb_h - top - h` — and if the letterbox ever stops being centred, the older one
+will need the same treatment.
+
+The map gets its own `Camera2D` with a viewport, which is how macroquad
+scissors: terrain cannot draw over the side panel at any zoom, and the test
+checks that at both pixel ratios. Culling came free with it — the ground pass
+is sixteen thousand rectangles at the fit and a few hundred up close.
+
+`packaging/browser/view.py` is the same discipline on the test side: one copy
+of the letterbox-and-camera arithmetic, imported by every script that clicks
+the map, instead of four scripts each doing the sum.

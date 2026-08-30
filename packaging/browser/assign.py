@@ -15,12 +15,11 @@ from PIL import Image
 from playwright.sync_api import sync_playwright
 
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8123/index.html"
+from view import View, LOGICAL_W, LOGICAL_H as LH, PANEL_W, CELL
+
 W, H = 1400, 900
-LW, LH, MAP_X, MAP_Y, CELL = 1600.0, 980.0, 12.0, 12.0, 8.0
-scale = min(W / LW, H / LH)
-ox, oy = (W - LW * scale) / 2.0, (H - LH * scale) / 2.0
-css = lambda lx, ly: (ox + lx * scale, oy + ly * scale)
-cell = lambda cx, cy: css(MAP_X + (cx + 0.5) * CELL, MAP_Y + (cy + 0.5) * CELL)
+V = View(W, H)
+css, cell = V.css, V.cell
 BLUE = (92, 168, 242)          # palette::player(PlayerId(0))
 errors = []
 
@@ -44,8 +43,10 @@ with sync_playwright() as p:
     def own(img):
         """Pixels of this player's own colour: their standing buildings."""
         px, pts = img.load(), []
-        for y in range(int(oy), int(oy + LH * scale), 2):
-            for x in range(int(ox), int(ox + 1036 * scale), 2):
+        x0, y0 = css(0.0, 0.0)
+        x1, y1 = css(LOGICAL_W - PANEL_W, LH)
+        for y in range(int(y0), int(y1), 2):
+            for x in range(int(x0), int(x1), 2):
                 r, g, b = px[x, y]
                 if abs(r - BLUE[0]) < 26 and abs(g - BLUE[1]) < 26 and abs(b - BLUE[2]) < 26:
                     pts.append((x, y))
@@ -59,16 +60,17 @@ with sync_playwright() as p:
         like the ground it is drawn on, and matching the player's colour finds
         the hearth and the citizens standing around it instead.
         """
-        x0, y0 = css(MAP_X + cx * CELL, MAP_Y + cy * CELL)
-        x1, y1 = css(MAP_X + (cx + w_cells) * CELL, MAP_Y + (cy + h_cells) * CELL)
+        x0, y0 = css(*V.logical_of_map(cx * CELL, cy * CELL))
+        x1, y1 = css(*V.logical_of_map((cx + w_cells) * CELL, (cy + h_cells) * CELL))
         return img.crop((int(x0), int(y0), int(x1), int(y1))).tobytes()
 
     def alarm_band(img):
         """Red pixels where a refusal or a count is written, under the map."""
         px, n = img.load(), 0
         y0, y1 = css(0.0, LH - 54.0)[1], css(0.0, LH - 14.0)[1]
+        xa, xb = css(0.0, 0.0)[0], css(LOGICAL_W - PANEL_W, 0.0)[0]
         for y in range(int(y0), int(y1)):
-            for x in range(int(ox), int(ox + 1036 * scale), 2):
+            for x in range(int(xa), int(xb), 2):
                 r, g, b = px[x, y]
                 if r > g + 40 and r > b + 30 and r > 90:
                     n += 1
@@ -95,8 +97,11 @@ with sync_playwright() as p:
     check(bool(pts), "found the city on screen")
     if not pts:
         raise SystemExit(1)
-    hx = int(((sum(p[0] for p in pts) / len(pts) - ox) / scale - MAP_X) / CELL)
-    hy = int(((sum(p[1] for p in pts) / len(pts) - oy) / scale - MAP_Y) / CELL)
+    # Centroid of the player's colour, back through both conversions.
+    mx = sum(p[0] for p in pts) / len(pts)
+    my = sum(p[1] for p in pts) / len(pts)
+    lx, ly = (mx - V.ox) / V.scale, (my - V.oy) / V.scale
+    hx, hy = V.map_cell(lx, ly)
     hx, hy = max(10, min(112, hx)), max(10, min(112, hy))
 
     # A farm somewhere near. The ground by the shore is often shallows or rock,

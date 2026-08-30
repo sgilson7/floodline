@@ -13,9 +13,8 @@ from playwright.sync_api import sync_playwright
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8123/index.html"
 DPR = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
 
-# crates/gui/src/screen.rs and crates/gui/src/draw.rs, and sim::MAP_W.
-LOGICAL_W, LOGICAL_H = 1600.0, 980.0
-MAP_X, MAP_Y, MAP_PX = 12.0, 12.0, 128 * 8.0
+from view import View, LOGICAL_W, LOGICAL_H
+
 WINDOW_W, WINDOW_H = 1400, 900
 
 errors = []
@@ -92,10 +91,8 @@ with sync_playwright() as p:
     # through the same letterbox arithmetic the game does — in CSS pixels, with
     # no device pixel ratio anywhere, because that is what `mouse_position()`
     # reports and getting *that* wrong is the other half of the trap.
-    scale = min(WINDOW_W / LOGICAL_W, WINDOW_H / LOGICAL_H)
-    ox = (WINDOW_W - LOGICAL_W * scale) / 2.0
-    oy = (WINDOW_H - LOGICAL_H * scale) / 2.0
-    click = lambda lx, ly: page.mouse.click(ox + lx * scale, oy + ly * scale)
+    V = View(WINDOW_W, WINDOW_H, DPR)
+    click = lambda lx, ly: page.mouse.click(*V.css(lx, ly))
     click(970.0, 353.0)   # by pasted code
     click(630.0, 518.0)   # Host a game
     page.wait_for_timeout(1200)
@@ -119,8 +116,12 @@ with sync_playwright() as p:
         # to GL put the whole frame in the bottom-left quarter, so the content
         # started halfway down the window instead of twelve logical pixels from
         # the top of the canvas.
-        want_x = lx + MAP_X * scale * DPR
-        want_y = ly + MAP_Y * scale * DPR
+        # Through both conversions now: the letterbox, then the camera at its
+        # default fit. The map is square and the window is not, so the map no
+        # longer starts in the window's corner.
+        cx, cy = V.map_corner()
+        want_x = lx + cx * scale * DPR
+        want_y = ly + cy * scale * DPR
         slack = 0.02 * max(img.size)
         off = max(abs(got[0] - want_x), abs(got[1] - want_y))
         print(f"          map corner wanted ({want_x:.0f}, {want_y:.0f}), "
