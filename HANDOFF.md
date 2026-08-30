@@ -1,7 +1,8 @@
 # FLOODLINE — handoff
 
-Written at the end of the session that built phases 0 to 3 of
-`floodline-mvp-plan.md` (the v2, no-server plan). Everything below is true of
+Written at the end of the session that finished the MVP — phases 4, 5 and 6 of
+`floodline-mvp-plan.md` (the v2, no-server plan), on top of the session that
+built 0 to 3. Everything below is true of
 commit `main` as it stands; `git log` is the authority if this drifts.
 
 Read `CLAUDE.md` first, then `floodline-design.md` and `floodline-mvp-plan.md`,
@@ -11,11 +12,12 @@ then `DECISIONS.md`. This file is the shortcut through the last of those.
 
 ## Where it is
 
-**Playable, deployed, and green.** <https://sgilson7.github.io/floodline/>
+**The MVP is finished, deployed and green.**
+<https://sgilson7.github.io/floodline/>
 
-The page shows a generated map with two cities on it, both eight strong, a
-side panel, and a lockstep game running between two in-process peers. Press
-**space** to start it. 204 tests, no warnings, `make test` in about twelve
+One player hosts and shares a room code or a pasted invitation; the other
+joins; both play the same world, and nothing runs anywhere but GitHub Pages.
+212 tests, seven browser checks, no warnings, `make test` in about twelve
 seconds.
 
 | Phase | | |
@@ -24,15 +26,13 @@ seconds.
 | 1 | `sim`: land, citizens, buildings | **done** |
 | 2 | `sim`: water and bodies | **done** |
 | 3 | Lockstep on `net::Loopback` | **done** |
-| 4 | `quad_rtc.js` and `net-web` | **not started** ← you are here |
-| 5 | `gui` | renderer, panel and score screen done; **no input at all** |
-| 6 | Hardening the serverless deployment | **not started** |
+| 4 | `quad_rtc.js` and `net-web` | **done** |
+| 5 | `gui` | **done**, except that nobody has played it — see below |
+| 6 | Hardening the serverless deployment | **done** |
 
-Phase 5's map, panel and score screen were built early because phase 3's
-done-condition needed a window to look at, and a blank canvas would have proved
-only that the lockstep does not crash. What is missing from it is everything a
-player *does*: selection, the build menu, the road tool, the trade dialog, and
-the lobby.
+The one thing left in the plan is the one thing no test can discharge: design
+step 7, "playtest the flood until it is fun". `PROGRESS.md` names the three
+questions a person needs to answer.
 
 ---
 
@@ -41,14 +41,15 @@ the lobby.
 ```
 crates/sim/     the whole game. serde + postcard, nothing else, no floats
 crates/net/     Peer trait, Loopback, wire format, the star lockstep
-crates/net-web/ Peer over web/quad_rtc.js — wasm32 only, currently EMPTY
-crates/gui/     macroquad: renderer, panel, score screen; no input yet
-web/            index.html, quad_rtc.js (a stub), config.js
-packaging/      package-web.sh
+crates/net-web/ Peer over web/quad_rtc.js — wasm32 only
+crates/gui/     macroquad: renderer, panel, lobby, input, score screen
+web/            index.html, quad_rtc.js, config.js, echo.html
+web/vendor/     Trystero, pinned by filename and sha256
+packaging/      package-web.sh, and browser/ for the checks that need Chromium
 ```
 
-`sim` is 6 400 lines and its tests are 3 000. `net` is 400 lines and its tests
-are 540. That ratio is deliberate and is most of why the thing works.
+`sim` is the bulk of it and its tests are most of that again. That ratio is
+deliberate and is most of why the thing works.
 
 ### Where to start reading
 
@@ -61,62 +62,24 @@ are 540. That ratio is deliberate and is most of why the thing works.
 * `crates/net/src/lockstep.rs` — the star from design §8.
 * `crates/net/tests/lockstep.rs` — the best single description of what the
   networking is supposed to do.
+* `web/quad_rtc.js` — the whole of the browser's side of the network, and the
+  file DECISIONS.md's "The handshake, written down before the plugin" is about.
+* `crates/sim/tests/playtest.rs` — five strategies through full three-age runs.
+  Not an assertion: a measurement, run with `--ignored --nocapture`. It is the
+  only thing in the repo that answers "is this a game".
 
 ---
 
-## What to do next, in order
+## What to do next
 
-### 1. Phase 4 — `quad_rtc.js` and `net-web`
+**Play it.** Design step 7 is the only item in the plan that a passing test
+cannot discharge, and `PROGRESS.md` names the three questions that came out of
+measuring what could be measured: age three kills everybody on two seeds in
+three whatever is done, nothing in the MVP produces stone so a player gets
+exactly one wall in a whole run, and a run is thirty-six minutes.
 
-The plan's own checklist is in `floodline-mvp-plan.md`. Two things it says that
-are worth repeating here because they are easy to skip:
-
-**Write the message sequence down before writing the plugin.** The design's
-§9.2 lists the imports; write out in `DECISIONS.md` exactly what two peers
-exchange, in order, for both paths — trystero and pasted code — and implement
-to that. This is the riskiest phase in the project and the one where a
-half-understood handshake costs a day.
-
-**Vendor trystero, pinned by filename and sha256**, into `web/vendor/`, and
-record the version and hash in `DECISIONS.md`. No npm at build time; the same
-rule the workbench and redactor follow. `packaging/package-web.sh` copies
-`web/` wholesale, so a new file there is picked up with no script change — but
-add the version check to the script the way it already checks macroquad's and
-sapp-jsutils'.
-
-Note `net-web` and `net-native` were **not** the same thing: `net-native` and
-the `bot` crate were deleted when the project moved to v2 (see DECISIONS).
-`net::Loopback` does that job now, in-process and inside `cargo test`.
-
-**A trap specific to this phase.** `web/quad_rtc.js` today is a stub that does
-one real thing: it hands the wasm its own build hash through `sapp-jsutils`.
-That was deliberate — it proves the bridge phase 4 rests on. It also exports
-`quad_rtc_crate_version()` from `crates/gui/src/buildid.rs`, and miniquad
-compares that against the `version` in the plugin's `miniquad_add_plugin` call.
-Bump both together or the console tells you they have drifted.
-
-### 2. Phase 5 — the rest of `gui`
-
-Input is the whole of what is missing, and there is one trap in it, written up
-in the plan's phase 5 checklist and in `DECISIONS.md`:
-**`screen::Viewport` is the only thing allowed to convert between the screen
-and the map.** It carries a `dpi` because `Camera2D::viewport` is in framebuffer
-pixels while `screen_width()` and `mouse_position()` are in logical ones. The
-drawing half of that was got wrong once already — the deployed game rendered
-into the bottom-left quarter of the window on any retina display — and the
-input half is where it will be got wrong again, because there the ratio must
-*not* be applied. **Check anything that touches it at a device pixel ratio of
-1 and 2.**
-
-`crates/gui/src/draw.rs` already has `map_rect()` and `cell_at()` waiting for
-you, marked `#[allow(dead_code)]`.
-
-### 3. Phase 6 — hardening
-
-Small, and mostly about failure messages that say what to do. There is nothing
-to deploy but static files; if GitHub Pages is up, the game is up.
-
----
+Everything else in `floodline-mvp-plan.md` is checked. `M2` onward in "Later
+milestones" is where new work goes.
 
 ## Things that will bite you
 
@@ -144,13 +107,33 @@ this is the index.
 * **macroquad's bundle needs `var register_plugin;` declared before it loads.**
   It assigns to an undeclared global under `"use strict"`. Already in
   `index.html`; do not tidy it away.
+* **macroquad's built-in font is ASCII** and draws a hollow box for anything
+  else, with no fallback and no warning. `gui` lints its own string literals
+  for this; `Refusal::to_message` and `RuleError::to_message` are checked in
+  their own crates, because the lint reads only `gui`'s files.
+* **Both data channels are negotiated on fixed stream ids**, so there is no
+  `ondatachannel` event and no race about who was listening. Do not "simplify"
+  that back to the in-band form; the race it removes cannot be closed.
+* **The first byte on the reliable channel says host or joiner.** Trystero
+  rooms are meshes and two joiners will meet; design §9.2's "a joiner accepts
+  the first peer" is a guess that is wrong about a third of the time with three
+  players.
+* **Hearth sites sit on a line at a fixed distance from the low corner**, not
+  on a ring around the map centre, and `balance::SHORE_DISTANCE` carries the
+  measurement that says why. Moving them back is moving whole cities out of the
+  flood.
+* **A citizen with nothing to carry builds.** Removing that is removing the
+  reason an unattended city does not starve on day four. Farming is
+  deliberately *not* automatic, and `nobody_takes_a_job_that_was_not_given_to_them`
+  holds that line.
+* **A `MoveTo` holds**, until `Unassign`. "Get uphill" is the order the flood
+  is about and it does not work otherwise.
 * **A locally built page and the deployed page have different build hashes**,
   and design §8 says mismatched builds cannot join. The hash is the sha256 of
   the wasm, and CI's rustc is not the same version as yours, so the same source
   produces a different binary. This is correct and is the guard doing its job —
-  but when phase 4 tries a local tab against the deployed one they will refuse
-  each other, and the reason will not be obvious at the time. Test two tabs on
-  the *same* build.
+  but a local tab and the deployed one will refuse each other and the reason
+  will not be obvious at the time. Test two tabs on the *same* build.
 
 ## How the tests are meant to be used
 
@@ -162,33 +145,54 @@ this is the index.
   a tick at 500 citizens with the flood running. 0.36 ms against a 20 ms budget.
 * `cargo test -p sim probe -- --ignored --nocapture` — the terrain sweep. A
   measurement, not an assertion.
+* `cargo test -p sim --release --test playtest -- --ignored --nocapture` — five
+  strategies through full three-age runs, and how far each age's water reaches
+  from the corner it comes out of. Also a measurement, and the one that found
+  four bugs no assertion had.
+* `make browser-test` — the seven things only a real browser can answer.
 
 `sim` is built with `opt-level = 2` under test. Without it the flood tests take
 two minutes, and a determinism test nobody runs is worse than none.
 
 ## Verifying the browser build
 
-There is no browser tooling in the repo, deliberately, but this is what the last
-session used and phase 4 will need something like it:
-
 ```
-python3 -m venv .venv-test && ./.venv-test/bin/pip install playwright
-./.venv-test/bin/playwright install chromium
-make web && (cd dist/web && python3 -m http.server 8123 &)
+make browser-test
 ```
 
-then drive it with Playwright, **at a device pixel ratio of 2 as well as 1**,
-and read `page.on("pageerror")` — that is how the `register_plugin` error and
-the letterbox bug were both found, and neither was visible any other way.
+Seven checks: three on the transport alone through `web/echo.html` (no wasm, no
+`sim`, no lockstep), one on the mouse reaching the simulation, one on the
+letterbox at a device pixel ratio of 1 *and* 2, and two on the whole stack in
+two tabs — one per signalling path. `packaging/browser/README.md` says what each
+answers. The first run builds a virtualenv and downloads Chromium.
+
+Two habits worth keeping, because between them they found the `register_plugin`
+error, the letterbox bug, the font's hollow boxes and Trystero's
+"User-Initiated Abort": **read the console**, and **run at a device pixel ratio
+of 2 as well as 1**. Every script forwards `pageerror` and `console.error`.
+
+Against the deployed build instead of a local one:
+
+```
+./.venv-test/bin/python packaging/browser/echo_room.py \
+    https://sgilson7.github.io/floodline/echo.html
+```
 
 ## What has never been tested
 
 Honesty about the edges:
 
-* **Two real browsers have never talked to each other.** All of the networking
-  is proven against `Loopback`. That is phase 4's whole job.
-* **Nobody has played it.** There is no input. The flood has never been tuned
-  against a person's judgement, only against measurements — design step 7
-  ("playtest the flood until it is fun") has not begun.
-* **`net-web` is an empty crate.**
+* **Nobody has played it.** Two tabs on one machine have played it, and the
+  browser checks assert that they do; a person has never sat down with it. The
+  flood has been tuned against measurements only, which is the part measurement
+  can reach — see `DECISIONS.md`, "Design step 7".
+* **Two browsers on two different networks have never talked to each other.**
+  Everything is verified across tabs and against the deployed Pages build,
+  including over the public Nostr relays and the BitTorrent trackers, but both
+  ends were always this machine. The case that cannot work without a TURN
+  server — both players behind strict NATs — is by definition untested and is
+  the one thing in the game that can cost money to fix.
+* **More than three peers has only been tested on `Loopback` and in
+  `echo.html`.** The star is enforced and the three-tab check passes; six
+  browsers have never been in one room.
 * Ages 4+ exist in the escalation table and are unreachable: the MVP stops at 3.

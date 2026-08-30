@@ -4,61 +4,75 @@ Where the last session ended. Short enough to read in a minute.
 
 ---
 
-## Session 1 — 2026-08-29/30
+## Session 2 — 2026-08-30
 
-**Phases 0, 1, 2 and 3 done. Phase 5's renderer done early.** 204 tests, no
-warnings, `make test` in about twelve seconds. Every push to `main` has
-deployed green.
+**Phases 4, 5 and 6 done. The MVP is playable end to end.** 212 tests and
+seven browser checks, no warnings, `make test` in about twelve seconds.
 
-Live and playable at **https://sgilson7.github.io/floodline/** — a generated
-map, two cities, a running lockstep game. Press space to start it.
-
-**`HANDOFF.md` is the document to read next**, and `NEXT-SESSION-PROMPT.md` is
-the prompt to start the next session with. This file is only the summary.
+Live at **https://sgilson7.github.io/floodline/**. Two people on two machines
+open the link, one hosts and shares a room code or a pasted invitation, the
+other joins, and both play the same world — with nothing running anywhere
+except GitHub Pages.
 
 ### Checklist
 
 - [x] **Phase 0** — workspace, Makefile, `package-web.sh`, Pages workflow
-- [x] **Phase 1** — `Fx`, `Rng`, `checksum`, map, citizens, buildings, flow
-      fields, jobs, `Command`, roads and trade, ages and score, determinism and
-      boundary tests
-- [x] **Phase 2** — the shallow-water automaton, the surge, bodies in the
-      flood, building damage, profiling
-- [x] **Phase 3** — `net::Peer`, `net::Loopback`, the wire format, the star
-      lockstep, and all of phase 3's checklist in `cargo test`
-- [ ] **Phase 4** — `quad_rtc.js`, trystero, the pasted-code path, `net-web`.
-      Not started. `net-web` is an empty crate.
-- [~] **Phase 5** — map, panel and score screen done. **No input at all**:
-      no selection, no build menu, no road tool, no trade dialog, no lobby.
-- [ ] **Phase 6** — hardening. Not started.
+- [x] **Phase 1** — `sim`: land, citizens, buildings, roads, trade, ages, score
+- [x] **Phase 2** — water, the surge, bodies in the flood, building damage
+- [x] **Phase 3** — `net::Peer`, `Loopback`, the wire format, the star lockstep
+- [x] **Phase 4** — `quad_rtc.js`, vendored Trystero, the pasted-code path,
+      `net-web`, `echo.html`. Both paths verified in a real browser, on the
+      deployed build.
+- [x] **Phase 5** — the lobby, selection, the build menu, the road tool, the
+      trade dialog, the score screen, and design step 7's playtest.
+- [x] **Phase 6** — failure messages that say what to do, the relay fallback,
+      the build-hash guard end to end, the README.
 
-### The v2 pivot
+### What was decided
 
-Mid-session the design and plan were replaced with their `v2-noserver` drafts.
-Sections 1–6 — the whole simulation — are unchanged, so phases 0 to 2 stood.
-What changed: no server anywhere (trystero over public relays, plus a pasted
-code, instead of matchbox on Fly.io), a star instead of a full mesh, and
-phases 3 and 4 swapped so the lockstep is proven on an in-process loopback
-before any browser is involved. `net-native` and `bot` were deleted.
+Ten entries added to `DECISIONS.md`; the ones that would change what somebody
+else wrote are indexed under "Things that will bite you" in `HANDOFF.md`. The
+four that matter most:
 
-That swap earned its keep immediately: four corrections to design §8 and one
-plain single-player bug in `sim` came out of phase 3, and every one of them
-would otherwise have been debugged through a WebRTC connection.
-
-### Decided this session
-
-Thirty-one entries in `DECISIONS.md`. The ones that change what somebody else
-would have written are indexed under "Things that will bite you" in
-`HANDOFF.md`.
+* **The handshake was written down before the plugin** (as the plan asks) and
+  three of its guesses were wrong in ways only a browser could say. The one it
+  got right in advance — replacing design §9.2's "a joiner accepts the first
+  peer it meets" with a role byte — would otherwise have wired two joiners
+  together and only with three players and only sometimes.
+* **Playing a full run found four bugs no test had.** Nothing in a city ever
+  built anything unless a player knew to assign builders, so an unattended city
+  starved on day four with the materials on the floor. "Get uphill" — design
+  §3.2's one order that matters in a flood — was undone a tick after they
+  arrived. Every citizen starts inside its own Hearth and could not be ordered
+  out of it.
+* **The map decided the game.** Hearth sites on a ring around the map centre
+  sat anywhere from 65 to 148 cells from the water, and an age-one flood stops
+  at about 115. They now sit on a line at a fixed distance from the corner the
+  water comes out of. The spacing guarantee fell from 40 cells to 17 and
+  five- and six-player maps are cramped; that cost is written down.
+* **A dike cost twenty times what a city could pay.** A wall that changes the
+  outcome is about thirty-four cells; at forty stone a level that is 2 720
+  against a purse of 120. Ten a level and 720 to start buys one good wall in a
+  run, and choosing where to put it is the decision.
 
 ### Blocked
 
-Nothing. The one thing that needed an account the author has and the agent does
-not — a Fly.io signalling server — stopped existing when the project moved to
-v2.
+Nothing.
+
+### Not answered, and needing a person
+
+Design step 7 says "playtest the flood until it is fun", and nobody has played
+FLOODLINE with their hands. What was measured is that the decisions now have
+different outcomes — idling starves, growing survives two ages bloodied, a dike
+keeps everybody through ages one and two — which is the part a test can settle.
+Three specific questions are left, all in `DECISIONS.md` under "Design step 7":
+
+1. **Age three kills everybody on two of three seeds** whatever is done.
+2. **Nothing produces stone**, so a player gets exactly one wall in a run. That
+   is a clean decision or a straitjacket, and only playing will say which.
+3. **A run is thirty-six minutes.** Design §11 already suspects that is long.
 
 ### Next action
 
-Phase 4, first item: write the message sequence for a host and one joiner into
-`DECISIONS.md`, for both the trystero path and the pasted-code path, before
-writing any of `web/quad_rtc.js`.
+Play it, with a person, three times, and answer those three questions. Nothing
+else in the plan is unfinished.
