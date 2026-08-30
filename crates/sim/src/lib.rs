@@ -10,10 +10,15 @@
 #![forbid(unsafe_code)]
 
 pub mod balance;
+pub mod citizen;
 pub mod fx;
 pub mod map;
+pub mod names;
 pub mod rng;
+pub mod world;
 
+pub use citizen::{Citizen, CitizenId, Job, PlayerId, State};
 pub use fx::{Fx, Turns, V2};
 pub use map::{Corner, Ground, Map, MAP_H, MAP_W};
 pub use rng::Rng;
+pub use world::World;
