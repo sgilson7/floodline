@@ -1468,3 +1468,49 @@ the lobby only offers the button when a different introduction would help. The
 messages say which of the three happened. And the button keeps what the player
 was doing: it used to turn a *joiner* into the host of a brand new empty room,
 which is not a way out of anything.
+
+---
+
+## 2026-08-30 — Citizens take up room
+
+Two rules, both about what a player sees. Eight people standing at a hearth
+were one circle with a number of them inside it, and anybody walking to a
+granary walked through whatever was in the way.
+
+`crowd.rs` runs **last in the tick**, after everything that moves anybody:
+walking, the flood carrying bodies about, a citizen stepping out of a building
+it started inside. Doing it once at the end rather than inside each of those is
+what makes "nobody is standing in a wall, and nobody is standing in anybody
+else" true whatever put them there.
+
+**A cell index, not pairwise.** Sixteen thousand `u16`s, cleared and refilled
+each tick, so "who is near me" is nine lookups. The pairwise version is a
+quarter of a million distance checks a tick at five hundred citizens. Measured
+in `tests/profile.rs`: a tick with the flood running went from 0.36 ms to
+**0.46 ms** against a twenty-millisecond budget.
+
+**Everything is integer and every loop has a fixed order**, for the reason
+every loop in `sim` does: two peers that resolved a crowd in different orders
+would push the same two people in different directions and the game would come
+apart inside a second. The index is filled in descending id order so each
+cell's list comes out ascending; citizens are visited by id; the push is whole
+1/256ths; and two people on the same spot are separated by *the lower id
+stepping aside*, which is the same choice on every machine.
+`the_crowd_settles_the_same_way_on_two_peers` is the check.
+
+**One fixed-point trap, worth writing down.** The first version pushed two
+co-located citizens apart along `V2::new(-Fx(1), Fx(0))` — a vector one
+256th of a cell long — and normalised it with `with_len`. `with_len` divides by
+a length computed in the same 1/256ths, and the squared length of 1/256 is
+*zero*, so it normalised to nothing and a knot of eight people stayed a knot
+for ever. Anything shorter than about a sixteenth of a cell has no usable
+direction in this representation; the fallback is a whole-cell unit vector now,
+and the threshold is explicit.
+
+**And they no longer start inside the fire.** The founding party was scattered
+within two cells of the hearth's middle, and a Hearth is three by three and
+blocks movement — so everybody began the game standing in a wall. `spawn_ring`
+walks outward from the hearth in a fixed order and hands each of them a cell
+somebody can actually stand on. That also removes the last reason for
+`step_off_a_building`, which stays anyway: a citizen can still end up inside
+something the flood dropped a building on.

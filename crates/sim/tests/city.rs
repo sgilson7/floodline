@@ -125,9 +125,16 @@ fn a_city_with_a_farm_and_a_granary_does_not_starve() {
     let start = w.population(PlayerId(0));
     assert_eq!(start, FOUNDING_CITIZENS);
 
-    // Well past the point where the founding party would have starved with
-    // nothing to eat: food empties in 250 ticks and death follows 600 later.
-    for _ in 0..TICKS_PER_DAY * 12 {
+    // Five days: comfortably past the point where the founding party would
+    // have starved with nothing to eat — food empties at tick 1000 and death
+    // follows 3600 later, so tick 4600 — and stopping before day six, which is
+    // when the water comes.
+    //
+    // It used to run twelve days, which is two floods, and asserted that
+    // nobody died at all. That passed for as long as nobody happened to drown;
+    // the first time somebody did, this test reported a starvation. A test
+    // about food should not be able to fail because of water.
+    for _ in 0..TICKS_PER_DAY * 5 {
         w.tick(&mut nav, &[]);
     }
 
@@ -135,6 +142,12 @@ fn a_city_with_a_farm_and_a_granary_does_not_starve() {
         w.population(PlayerId(0)),
         start,
         "the city starved with a farm and a granary standing"
+    );
+    // This city only: the world has a second one with no farm in it, and it
+    // is starving exactly as it should be.
+    assert!(
+        w.citizens.iter().filter(|c| c.owner == PlayerId(0)).all(|c| c.starved_for == 0),
+        "somebody is on the starvation clock with a granary in reach"
     );
     // And they really did eat rather than never getting hungry.
     assert!(

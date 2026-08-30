@@ -7,6 +7,8 @@
 //!
 //! Anything here may move. Nothing here may become a float.
 
+use crate::fx::Fx;
+
 // ---- time ------------------------------------------------------------------
 
 /// Simulation ticks per second (design §3.1).
@@ -255,6 +257,24 @@ pub const DIKE_MAX_LEVEL: u8 = 4;
 /// A quarter of a cell a tick is two and a half cells a second, which crosses
 /// a city in a few seconds and the whole map in about a minute.
 pub const WALK_SPEED: i32 = 64;
+
+/// How close two citizens may stand, as a squared distance in `Fx`.
+///
+/// Design §3.2 draws a citizen as a body on a cell, and eight of them used to
+/// occupy the same eighth of a cell at the hearth: one circle, with a number
+/// of people inside it. Half a cell apart is enough to read as a crowd rather
+/// than a smudge, and small enough that a three-slot farm still has room for
+/// its three workers to stand at it.
+pub const ELBOW_ROOM: Fx = Fx(128); // half a cell
+pub const ELBOW_ROOM_SQ: Fx = Fx((128 * 128) >> 8);
+
+/// How hard one tick pushes two people apart, in 1/256ths of a cell.
+///
+/// A twelfth of a cell: gentle enough that being jostled does not throw
+/// anybody off a bridge, and firm enough that a knot of eight untangles in
+/// about a second. Not a spring — a constant — because a spring needs a
+/// division per pair and this runs on every citizen every tick.
+pub const ELBOW_PUSH: Fx = Fx(21);
 
 /// How many flow fields are kept before the least recently used is dropped.
 /// A field is sixteen thousand cells; a dozen is plenty for one city's

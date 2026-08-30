@@ -185,18 +185,26 @@ impl World {
         let mut citizens = Vec::new();
         for p in 0..players {
             let (hx, hy) = map.hearth_sites[p as usize];
+            // Around the hearth, and *outside* it. The Hearth's three-by-three
+            // footprint blocks movement, so a party scattered within two cells
+            // of its middle began the game standing in a wall — unorderable
+            // until it wandered out, and drawn as one circle with eight people
+            // inside it. A ring, walked in a fixed order, gives each of them a
+            // cell of their own to stand on.
+            let mut spots = spawn_ring(&map, hx, hy);
             for _ in 0..FOUNDING_CITIZENS {
-                // Spread the party around its hearth so eight people do not
-                // start inside one another.
-                let dx = rng.range(-2, 2);
-                let dy = rng.range(-2, 2);
+                let (cx, cy) = spots.next().unwrap_or((hx, hy));
+                // Jitter inside the cell, so a party is a crowd and not a
+                // parade. Small enough that nobody starts on somebody else.
+                let jx = Fx(rng.range(-48, 48));
+                let jy = Fx(rng.range(-48, 48));
                 let name = rng.below(NAMES.len() as u32) as u16;
                 let id = CitizenId(citizens.len() as u16);
                 citizens.push(Citizen::new(
                     id,
                     PlayerId(p as u8),
                     name,
-                    V2::cell_centre(hx + dx, hy + dy),
+                    V2::cell_centre(cx, cy) + V2::new(jx, jy),
                 ));
             }
         }
@@ -560,8 +568,11 @@ impl World {
     /// 3. **errands** — the living decide, or are overruled by their bodies.
     /// 4. **walking** — one step along a shared field.
     /// 5. **arrivals** — whoever got there does the thing they went for.
-    /// 6. **production** — farms turn farmer-ticks into food, after arrivals
-    ///    so that a farmer who reached the field this tick counts on it.
+    /// 6. **production** — producers turn worker-ticks into goods, after
+    ///    arrivals so that a farmer who reached the field this tick counts on
+    ///    it.
+    /// 7. **the crowd settles** — last, so that whatever moved somebody, they
+    ///    end the tick out of the walls and out of each other.
     pub fn tick(&mut self, nav: &mut Nav, commands: &[(PlayerId, Command)]) {
         // Commands first, and in the order given. The lockstep is what
         // guarantees every peer sees that order identically (design §8); `sim`
@@ -599,6 +610,12 @@ impl World {
         self.produce();
         self.step_water();
         self.flood_bodies();
+        // Last, after everything that moves anybody: walking, the flood
+        // carrying bodies about, a citizen stepping out of the building it
+        // started inside. Doing it once at the end is what makes "nobody is
+        // standing in a wall, and nobody is standing in anybody else" true
+        // whatever put them there.
+        self.settle_crowd();
         self.tick += 1;
         if self.tick % TICKS_PER_DAY == 0 {
             self.trade_day();
@@ -1217,6 +1234,32 @@ impl World {
             },
         }
     }
+}
+
+/// Cells around a hearth that somebody can stand on, nearest first.
+///
+/// Rings outward in a fixed order, skipping the hearth's own footprint and any
+/// ground nobody can walk on. Deterministic by construction: it depends on the
+/// map and nothing else.
+fn spawn_ring(map: &Map, hx: i32, hy: i32) -> impl Iterator<Item = (i32, i32)> + '_ {
+    let half = HEARTH_SIZE / 2;
+    (2..8i32).flat_map(move |r| {
+        (-r..=r).flat_map(move |dy| (-r..=r).map(move |dx| (dx, dy))).filter_map(
+            move |(dx, dy)| {
+                if dx.abs() != r && dy.abs() != r {
+                    return None;
+                }
+                if dx.abs() <= half && dy.abs() <= half {
+                    return None;
+                }
+                let (x, y) = (hx + dx, hy + dy);
+                if !Map::contains(x, y) || !map.buildable(x, y) {
+                    return None;
+                }
+                Some((x, y))
+            },
+        )
+    })
 }
 
 /// FNV-1a, 64-bit. Small, has no state to get wrong, and — the part that
