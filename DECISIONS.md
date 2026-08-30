@@ -310,3 +310,38 @@ lets a starving citizen run for food and a tired one keep walking at half
 speed. Death is the one condition that *is* a state, because it ends every
 activity, and `Citizen::die` clears the destination and job that only make
 sense for the living.
+
+---
+
+## 2026-08-30 — The Hearth holds no food, and hunger does not veto sleep
+
+Two bugs the city test found, both worth writing down because both were a
+plausible-looking design choice rather than a slip.
+
+**The Hearth had a food capacity**, invented when its stores were written and
+not taken from anywhere. Design §3.3 gives the Hearth no larder and gives the
+Granary "food stockpile; citizens eat here". With a food capacity, the Hearth
+sat nearer the farm than the granary on most layouts, so haulers filled it
+instead, citizens ate at the fire, and the granary stayed empty for ever. The
+city did not starve, which is why only a test that asked specifically about the
+granary caught it. The Hearth now holds wood and stone — the starting
+"stockpile of wood" of design §4 — and nothing else.
+
+**Hunger vetoed sleep.** The priority list was written as "eat, else if not
+hungry then sleep, else work", which reads correctly and is wrong: a city that
+runs out of food has citizens who are permanently hungry, so they never slept
+again, never claimed a bed, and worked at half speed until they starved — the
+failure spiralling exactly when the player could least afford it. A hunger that
+cannot be answered must not veto the sleep that can, so the check is now "if
+hungry *and there is food*, eat; otherwise if tired, sleep".
+
+---
+
+## 2026-08-30 — A producer is not a store
+
+`Kind::stores` originally meant "has capacity for", which put a Farm's output
+buffer in the same category as a Granary. A hauler emptying a farm then looked
+for the nearest place to put food and found the farm it was standing in, so the
+harvest never moved. `is_store` (Hearth, Granary, Stockpile) and `produces`
+(Farm) are now separate questions, and `stores` means "will take delivery",
+which is the thing a hauler actually needs to know.

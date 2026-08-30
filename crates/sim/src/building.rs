@@ -237,15 +237,64 @@ impl Kind {
     /// How much of each good this can hold.
     pub fn capacity(self) -> Goods {
         match self {
-            Kind::Hearth => Goods::of(200, 500, 500),
+            // Wood and stone, and deliberately no food. Design §3.3 gives the
+            // Hearth no larder and gives the Granary "citizens eat here"; a
+            // Hearth that took food would sit nearer the farm than the granary
+            // on most layouts, quietly become the city's pantry, and leave the
+            // granary empty while everybody ate at the fire.
+            Kind::Hearth => Goods::of(0, 500, 500),
             Kind::Granary => Goods::of(500, 0, 0),
             Kind::Stockpile => Goods::of(0, 500, 500),
+            // Not a store — an output buffer. See `is_store`.
+            Kind::Farm => Goods::of(FARM_BUFFER, 0, 0),
             _ => Goods::NONE,
         }
     }
 
+    /// Whether this is somewhere goods are *kept*, as opposed to somewhere
+    /// they happen to be.
+    ///
+    /// A Farm holds food, but it is a buffer waiting for a hauler, not a
+    /// store: if farms counted, a hauler emptying one would find the nearest
+    /// place to put food was the farm it just came from, and the food would
+    /// never reach a granary.
+    pub fn is_store(self) -> bool {
+        matches!(self, Kind::Hearth | Kind::Granary | Kind::Stockpile)
+    }
+
+    /// What this building makes, if anything.
+    pub fn produces(self) -> Option<Good> {
+        match self {
+            Kind::Farm => Some(Good::Food),
+            _ => None,
+        }
+    }
+
+    /// Whether goods of this kind may be *delivered* here for keeping.
     pub fn stores(self, g: Good) -> bool {
-        self.capacity().get(g) > 0
+        self.is_store() && self.capacity().get(g) > 0
+    }
+
+    /// Whether this building can hold any more of `g`, given what it has.
+    pub fn has_room_for(self, g: Good, held: &Goods) -> bool {
+        held.get(g) < self.capacity().get(g)
+    }
+
+    /// How many citizens can work here at once. A construction site takes
+    /// builders regardless of what it is going to become.
+    pub fn slots_for(self, job: crate::citizen::Job) -> usize {
+        use crate::citizen::Job;
+        match job {
+            Job::Farmer => {
+                if self == Kind::Farm {
+                    self.job_slots()
+                } else {
+                    0
+                }
+            }
+            Job::Builder => BUILDER_SLOTS,
+            Job::Hauler => usize::MAX,
+        }
     }
 
     /// Whether the ground under one cell of the footprint will take it.
@@ -288,6 +337,8 @@ pub struct Building {
     /// Dikes only, 1..=DIKE_MAX_LEVEL. One for everything else.
     pub level: u8,
     pub store: Goods,
+    /// Work accumulated toward the next unit of output. Producers only.
+    pub work: u32,
     /// Assigned citizens, in the order they were assigned. A `Vec` and not a
     /// set, because iteration order is a decision here like everywhere else.
     pub workers: Vec<CitizenId>,
@@ -307,6 +358,7 @@ impl Building {
             integrity: kind.integrity(),
             level: 1,
             store: Goods::NONE,
+            work: 0,
             workers: Vec::new(),
         }
     }
@@ -513,13 +565,22 @@ mod tests {
             if k != Kind::Hearth {
                 assert!(k.build_ticks() > 0, "{k:?} builds itself instantly");
             }
-            // Anything that stores something must have somewhere to put it.
+            // Anything that takes delivery of something must have somewhere
+            // to put it — but not the other way round. A Farm has room for
+            // food and is not a store: that room is an output buffer waiting
+            // for a hauler, and if it counted as a store then a hauler
+            // emptying a farm would find the nearest place to put food was the
+            // farm it had just come from.
             for g in Good::ALL {
-                assert_eq!(
-                    k.stores(g),
-                    k.capacity().get(g) > 0,
-                    "{k:?} disagrees with itself about storing {g:?}"
-                );
+                if k.stores(g) {
+                    assert!(k.capacity().get(g) > 0, "{k:?} takes {g:?} with nowhere to put it");
+                    assert!(k.is_store(), "{k:?} takes delivery but is not a store");
+                }
+            }
+            if let Some(made) = k.produces() {
+                assert!(k.capacity().get(made) > 0, "{k:?} makes {made:?} with nowhere to put it");
+                assert!(!k.is_store(), "{k:?} is both a producer and a store");
+                assert!(!k.stores(made), "a producer must not be a destination for its own output");
             }
         }
     }

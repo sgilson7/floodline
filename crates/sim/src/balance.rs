@@ -153,3 +153,36 @@ pub const WALK_SPEED: i32 = 64;
 /// granary, cottages and building sites, and a group sent to a cell shares
 /// one between all of them.
 pub const NAV_CACHE_MAX: usize = 24;
+
+// ---- work ------------------------------------------------------------------
+
+/// How much of a citizen's food need one unit of stored food fills.
+///
+/// This is the exchange rate between the two numbers that look like "food":
+/// `Citizen::food` is a need on a 0..=1000 scale, and `Good::Food` is a thing
+/// haulers carry. At 100, a citizen eats about eight units a day.
+pub const FOOD_PER_UNIT: u16 = 100;
+
+/// Farmer-ticks per unit of food produced. One farmer makes twenty-five units
+/// a day, which feeds about three people; a three-slot farm feeds nine. A city
+/// of eight is therefore one farm and some room to grow, not a city where
+/// everybody farms.
+pub const FARM_TICKS_PER_UNIT: u32 = 8;
+
+/// How much a farm holds before its farmers stop, waiting for a hauler. Small
+/// on purpose: a farm that could stockpile a week of food would make haulers
+/// optional, and watching the food move is the point.
+pub const FARM_BUFFER: u16 = 60;
+
+/// Units a citizen can carry at once.
+pub const CARRY_CAPACITY: u16 = 20;
+
+/// Units of food eaten per tick at a granary, and rest recovered per tick in a
+/// bed. Sleep has to beat `REST_DECAY` by enough to be worth the walk.
+pub const EAT_RATE: u16 = 1;
+pub const SLEEP_RATE: u16 = 20;
+
+/// A citizen stops eating once this full, rather than at the brim, so it does
+/// not spend its life at the granary topping up.
+pub const FED_ENOUGH: u16 = 900;
+pub const RESTED_ENOUGH: u16 = 950;

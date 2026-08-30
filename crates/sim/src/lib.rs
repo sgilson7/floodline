@@ -13,6 +13,7 @@ pub mod balance;
 pub mod building;
 pub mod citizen;
 pub mod fx;
+pub mod jobs;
 pub mod map;
 pub mod names;
 pub mod nav;

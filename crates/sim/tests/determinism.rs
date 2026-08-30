@@ -13,7 +13,7 @@
 
 use sim::balance::TICKS_PER_DAY;
 use sim::building::{Good, Kind};
-use sim::citizen::PlayerId;
+use sim::citizen::{Job, PlayerId};
 use sim::nav::{Dest, Nav};
 use sim::World;
 
@@ -300,4 +300,75 @@ fn a_fresh_nav_cache_navigates_like_a_warm_one() {
     assert_eq!(warm.checksum(), cold.checksum());
     assert_eq!(warm, cold);
     assert!(nav.len() > 0, "the warm cache was never used");
+}
+
+
+/// A city actually being lived in, twice.
+///
+/// The jobs layer is the most decision-heavy code in `sim`: every tick, every
+/// citizen picks a granary, a bed, a load or a site out of ordered lists, and
+/// any one of those choices going differently on two peers is a desync. Two
+/// days of a working city is a lot of those choices.
+#[test]
+fn a_city_at_work_runs_the_same_twice() {
+    let run = |seed: u64| -> Vec<u64> {
+        let mut w = World::new(seed, 2);
+        let mut nav = Nav::new();
+
+        // A farm, a granary and two cottages for player 0, finished outright.
+        let mut built = Vec::new();
+        for kind in [Kind::Farm, Kind::Granary, Kind::Cottage, Kind::Cottage] {
+            let (hx, hy) = w.map.hearth_sites[0];
+            'place: for r in 3..40i32 {
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        if dx.abs() != r && dy.abs() != r {
+                            continue;
+                        }
+                        if w.can_place(PlayerId(0), kind, hx + dx, hy + dy).is_ok() {
+                            let id = w.place(PlayerId(0), kind, hx + dx, hy + dy).unwrap();
+                            for g in Good::ALL {
+                                let want = kind.cost().get(g);
+                                if want > 0 {
+                                    w.deliver_to(id, g, want);
+                                }
+                            }
+                            w.build_at(id, kind.build_ticks());
+                            built.push((kind, id));
+                            break 'place;
+                        }
+                    }
+                }
+            }
+        }
+        let farm = built.iter().find(|(k, _)| *k == Kind::Farm).unwrap().1;
+
+        // Three farmers; everyone else hauls, which is what `None` means.
+        let mut n = 0;
+        for i in 0..w.citizens.len() {
+            if w.citizens[i].owner == PlayerId(0) && n < 3 {
+                w.citizens[i].job = Some(Job::Farmer);
+                w.citizens[i].workplace = Some(farm);
+                n += 1;
+            }
+        }
+
+        let mut marks = vec![w.checksum()];
+        for t in 0..(TICKS_PER_DAY * 2) {
+            w.tick(&mut nav);
+            if t % 100 == 0 {
+                marks.push(w.checksum());
+            }
+        }
+        marks.push(w.checksum());
+        marks
+    };
+
+    for seed in [31u64, 77, 404] {
+        let a = run(seed);
+        let b = run(seed);
+        assert_eq!(a, b, "seed {seed}: a working city did not replay");
+        let distinct: std::collections::BTreeSet<u64> = a.iter().copied().collect();
+        assert!(distinct.len() > 3, "seed {seed}: nothing happened: {a:?}");
+    }
 }

@@ -348,11 +348,30 @@ impl World {
     /// `nav` is passed in rather than owned because flow fields are a cache
     /// and `World` is the authoritative state; see the `nav` module. It is
     /// `&mut` because a tick may need a field that has not been built yet.
+    /// The order of the stages is itself a decision:
+    ///
+    /// 1. **needs** — everybody gets hungrier and more tired, and anyone whose
+    ///    three days are up dies. First, so the rest of the tick is decided by
+    ///    the state a citizen is actually in.
+    /// 2. **the dead are taken off the rosters** — before production, so a
+    ///    farm does not harvest one more tick from someone who starved on it.
+    /// 3. **errands** — the living decide, or are overruled by their bodies.
+    /// 4. **walking** — one step along a shared field.
+    /// 5. **arrivals** — whoever got there does the thing they went for.
+    /// 6. **production** — farms turn farmer-ticks into food, after arrivals
+    ///    so that a farmer who reached the field this tick counts on it.
     pub fn tick(&mut self, nav: &mut Nav) {
         for i in 0..self.citizens.len() {
+            let was_alive = self.citizens[i].alive();
             self.citizens[i].tick_needs();
+            if was_alive && !self.citizens[i].alive() {
+                self.clear_from_rosters(CitizenId(i as u16));
+            }
         }
+        self.assign_errands();
         self.walk(nav);
+        self.resolve_arrivals();
+        self.produce();
         self.tick += 1;
     }
 

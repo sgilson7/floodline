@@ -6,7 +6,7 @@
 //! is. Everything here is integer and ordered, like the rest of `sim`.
 
 use crate::balance::*;
-use crate::building::BuildingId;
+use crate::building::{BuildingId, Good, Goods};
 use crate::nav::Dest;
 use crate::fx::{Fx, V2};
 use serde::{Deserialize, Serialize};
@@ -21,11 +21,38 @@ pub struct CitizenId(pub u16);
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub struct PlayerId(pub u8);
 
+/// What a citizen has been told to spend its day on.
+///
+/// Design §3.2 lists more; the plan's item 6 cuts the MVP to these three.
+/// Hauler is what an unassigned citizen does, which is why `Citizen::job` is
+/// an `Option` and `None` means hauling rather than idling: a city where
+/// nobody moves anything is a city that starves next to a full granary.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Job {
     Hauler,
     Farmer,
     Builder,
+}
+
+/// The errand a citizen is part-way through.
+///
+/// Kept as one small enum rather than as flags, because the alternative is a
+/// citizen that is somehow both eating and hauling and the tick order decides
+/// which. An errand is abandoned wholesale when something more urgent comes
+/// up — hunger interrupts hauling, and the load gets dropped where it is
+/// standing, which is a real cost of leaving it too late.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Errand {
+    /// On the way to `from` to pick up `good`, bound for `to`.
+    Collect { from: BuildingId, good: Good, to: BuildingId },
+    /// Loaded, on the way to `to`.
+    Carry { to: BuildingId },
+    /// On the way to the workplace.
+    ToWork(BuildingId),
+    /// On the way to a granary to eat.
+    ToEat(BuildingId),
+    /// On the way to a bed.
+    ToSleep(BuildingId),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -55,7 +82,16 @@ pub struct Citizen {
     pub pos: V2,
     pub vel: V2,
     pub home: Option<BuildingId>,
-    pub job: Option<(Job, BuildingId)>,
+    /// What this citizen has been assigned to. `None` is a hauler: design
+    /// §3.2 makes that the default for anyone unskilled.
+    pub job: Option<Job>,
+    /// The building the job is done at. A Farmer has one; a Hauler and a
+    /// Builder pick their work as they go, so theirs is whatever they are
+    /// currently at.
+    pub workplace: Option<BuildingId>,
+    /// What is in this citizen's arms.
+    pub carrying: Goods,
+    pub errand: Option<Errand>,
     /// 0..=NEED_FULL.
     pub food: u16,
     pub rest: u16,
@@ -76,6 +112,9 @@ impl Citizen {
             vel: V2::ZERO,
             home: None,
             job: None,
+            workplace: None,
+            carrying: Goods::NONE,
+            errand: None,
             food: NEED_FULL,
             rest: NEED_FULL,
             state: State::Idle,
@@ -118,11 +157,33 @@ impl Citizen {
 
     /// Stop being. Clears everything that only makes sense for the living, so
     /// a corpse is not still walking somewhere in the state it leaves behind.
+    ///
+    /// What it was carrying is lost with it. Design §6 says as much about
+    /// trade — "a hauler that drowns loses the cargo" — and there is no reason
+    /// for a famine to be gentler than a flood.
     pub fn die(&mut self) {
         self.state = State::Dead;
         self.vel = V2::ZERO;
         self.dest = None;
         self.job = None;
+        self.workplace = None;
+        self.errand = None;
+        self.carrying = Goods::NONE;
+    }
+
+    /// Whether this citizen is doing something it should not be interrupted
+    /// from without cause.
+    pub fn busy(&self) -> bool {
+        self.errand.is_some() || self.state == State::Walking
+    }
+
+    /// Give up whatever this was doing. Anything being carried is put down
+    /// where the citizen stands, which is to say lost — there is nowhere else
+    /// for it to go.
+    pub fn abandon(&mut self) {
+        self.errand = None;
+        self.carrying = Goods::NONE;
+        self.halt();
     }
 
     /// Stop walking, wherever this is.
