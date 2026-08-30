@@ -22,7 +22,7 @@ after that it is about a minute. `.venv-test/` is gitignored.
 | `assign.py` | choosing a whole city and right-clicking a farm puts three people on it and says so, instead of being refused whole |
 | `camera.py` | zoom and pan, nothing drawn over the panel, and a click still lands on the cell the cursor is over |
 | `view.py` | not a check: the one copy of the letterbox-and-camera arithmetic every other script imports |
-| `play.py` | the mouse reaching the simulation: choosing citizens, ordering them about, a cottage, a road, a ping, a trade, and a refusal that says so |
+| `play.py` | the mouse reaching the simulation: choosing citizens, ordering them about, a cottage, a road, a ping, a trade, a wall drawn with a drag, and a refusal that says so |
 | `game_two_tabs.py` | the whole stack: two tabs reach the lobby, join by room code or by pasted code, and both leave the lobby into the same world |
 
 The three `echo_*` scripts drive `web/echo.html`, which drives `window.FLOODLINE_RTC`

@@ -13,7 +13,7 @@ comes next**. Read `CLAUDE.md`, then `HANDOFF.md`, then this.
 have finished a run together and survived the first flood — the first time
 anybody has played it.
 
-227 cargo tests, 13 browser checks, no warnings. `make test` ~17s,
+x, no warnings. `make test` ~17s,
 `make browser-test` ~6 minutes.
 
 The plan is an artifact, and it is the plan of record:

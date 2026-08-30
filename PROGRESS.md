@@ -115,3 +115,72 @@ See `HANDOFF-M2.md`. Two people have now played together and survived the first
 flood, and a ten-milestone plan is agreed and under way — M1 and M2 are done,
 M3 (dikes) is next. The plan of record is an artifact:
 <https://claude.ai/code/artifact/f51d6368-d9a0-48f2-9213-c41f1eba59b1>
+
+---
+
+## Session 4 — 2026-08-30
+
+**M3 is done: dikes are three cells wide, drawn as a line, and they break.**
+250 cargo tests, no warnings, `make test` in about seventeen seconds. Three
+commits, each green on its own, in the order the handover asked for.
+
+* **`Building::facing`.** A wide mechanical edit on its own, before a line of
+  the pressure model. `Kind::size` takes a `Facing`, which ripples through
+  `footprint`, `fits_on_map`, `ground_suits`, `neighbours_suit`, `can_place`
+  and `place`; `Command::Place` carries one for every kind so there is one
+  `place` on the wire. `Building::site` normalises it away for a kind that
+  does not turn, so a cottage cannot checksum a distinction the game does not
+  make.
+* **`Command::DikeLine { from, to }`**, beside `Command::Road` and not reusing
+  it. The run snaps to the longer axis and to a whole number of segments; a
+  segment the ground refuses is skipped rather than failing the line. The tool
+  is a click-drag with a ghost and a running cost, both drawn from
+  `plan_dike_line` — the same function that lays the wall.
+* **`Building::stress`.** Each tick the water's push on the wet side is added,
+  time takes some away, past a per-level limit the segment is rubble, and a
+  strained dike darkens toward it. Dikes leave `batter_buildings`.
+
+### What was decided
+
+Three entries in `DECISIONS.md`. Two matter to anyone else:
+
+* **The plan's pressure formula was wrong and the measurement said so.**
+  `depth * speed` is zero exactly where a wall earns its keep, because water a
+  dike has stopped is water that has stopped moving — fifty-one sixteenths
+  piled against a wall moving at a speed of two. It is
+  `depth * (STILL_PUSH + speed)` now: depth loads the wall, flow makes the
+  front worse than the pool.
+* **A segment is priced per cell.** Leaving `Kind::Dike.cost()` at ten stone
+  would have made a wall a third of the price `STARTING_STONE` was measured
+  against. No assertion caught it; the five-strategy playtest did.
+
+### Measured, and left alone deliberately
+
+Drawing straight costs a barrier something. `playtest.rs` used to wall a
+diagonal one cell at a time, which against a four-neighbour automaton is a
+perfect seal for one cell of stone per cell of front; straight segments cannot
+draw a diagonal, so it draws a staircase and half of every staircase runs along
+the flow rather than across it. Same seeds, same stone: survivors for the
+`dike` strategy went from 2 to 1 and for `both` from 4 to 1. **This is not
+tuned here on purpose.** M4 replaces the corner flood with a river, where a
+wall along a bank *is* a straight line, and M5 re-derives every one of these
+numbers against it.
+
+`DIKE_STRESS_LIMIT` is provisional for the same reason and says so in its doc
+comment: measured against sustained flow on flat ground, enough to make "a
+level one breaks, a level two holds" true and testable, and M5's to replace.
+
+### Blocked
+
+Nothing.
+
+### Next action
+
+**M4 — the river, and the wave.** Two sessions, the biggest change in the plan,
+and the one that invalidates the most measurement. Start with `map::river`:
+a deterministic meandering channel carved before the ground bands are computed,
+so the river counts as the shallows it is. `SHORE_DISTANCE` stops meaning
+"from the low corner" and starts meaning "from the river bank". The ford is a
+fourth passability rule in a system that has had one, and `nav::passable` is
+read by pathing, the crowd, the flood and road-laying — change all four
+together.

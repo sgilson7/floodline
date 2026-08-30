@@ -163,6 +163,27 @@ with sync_playwright() as p:
     check(at(closed, 650.0, 500.0) != at(stepped, 650.0, 500.0),
           "the dialog closed once the trade was proposed")
 
+    # --- a wall, drawn ------------------------------------------------------
+    # The one gesture in the game that is a drag rather than a click, and the
+    # only place a `DikeLine` starts life as a mouse. Drawn well clear of the
+    # city so nothing it meets is already occupied, and checked over the whole
+    # run rather than at one cell, because the run snaps to a whole number of
+    # three-cell segments and may overshoot where the button came up.
+    page.keyboard.press("Digit7")
+    page.wait_for_timeout(200)
+    empty = shot("play-9-wall-tool")
+    page.mouse.move(*cell_px(52, 30))
+    page.mouse.down()
+    page.mouse.move(*cell_px(64, 30), steps=8)
+    ghost = shot("play-10-wall-ghost")
+    n = changed_cells(empty, ghost, 52, 29, 66, 32)
+    check(n > 8, f"a ghost of the run followed the drag: {n} pixels")
+    page.mouse.up()
+    page.wait_for_timeout(700)
+    built = shot("play-11-wall")
+    n = changed_cells(empty, built, 52, 29, 66, 32)
+    check(n > 8, f"a wall of dike sites went down along the drag: {n} pixels")
+
     # --- a refusal says so ---------------------------------------------------
     # A dike on the hearth is illegal, and `Lockstep::issue` checks locally, so
     # the sentence appears under the map on this frame rather than nothing
@@ -170,7 +191,7 @@ with sync_playwright() as p:
     page.keyboard.press("Digit7")   # dike
     page.mouse.click(*cell_px(40, 40))   # onto the cottage site
     page.wait_for_timeout(300)
-    refused = shot("play-9-refused")
+    refused = shot("play-12-refused")
     strip = [at(refused, x, LOGICAL_H - 34.0) for x in range(400, 900, 8)]
     check(any(sum(c) > 90 for c in strip), "a refusal is written under the map")
 
