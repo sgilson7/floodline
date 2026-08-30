@@ -197,12 +197,19 @@ fn wood_gives_way_before_stone() {
     // wooden building in the front takes a beating and may well survive it,
     // which is a fair thing for a game to say. What must not happen is stone
     // faring worse than wood.
+    //
+    // The dike used to stand for stone here and cannot any more: a dike is
+    // pressed rather than battered (see `flood::press_dikes`), so the flow
+    // over it leaves its integrity alone by design. The only other stone thing
+    // a player can put down is a road, which design §6 wants the flood to
+    // break and which `the_flood_breaks_the_roads_it_runs_over` holds to that.
+    // So the comparison is made where it actually lives, and the water is left
+    // to say the half of it that a placeable building can still answer.
     let (wood, _) = battered_by_the_front(Kind::Cottage);
-    let (stone, _) = battered_by_the_front(Kind::Dike);
     assert!(wood > 0, "a wooden cottage in the front took no damage at all");
     assert!(
-        wood > stone,
-        "stone ({stone}) fared worse than wood ({wood}) in the same water"
+        RESIST_STONE > RESIST_WOOD,
+        "stone ({RESIST_STONE}) shrugs off no more flow than wood ({RESIST_WOOD})"
     );
 }
 

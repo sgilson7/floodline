@@ -10,7 +10,7 @@
 //! ground, and a roof. Everything else is arithmetic.
 
 use crate::balance::*;
-use crate::building::{BuildState, BuildingId};
+use crate::building::{BuildState, BuildingId, Kind};
 use crate::citizen::State;
 use crate::fx::{Fx, V2};
 use crate::map::Map;
@@ -23,11 +23,35 @@ impl World {
     /// whole tick of hunger and errands around it. `tick` calls both in order
     /// and nothing else should need to.
     pub fn flood_bodies(&mut self) {
-        if self.water.volume() == 0 {
-            return;
+        if self.water.volume() > 0 {
+            self.sweep_citizens();
+            self.batter_buildings();
         }
-        self.sweep_citizens();
-        self.batter_buildings();
+        // Outside the guard, because the half of `press_dikes` that matters
+        // between floods is the half that runs when there is no water: a wall
+        // that never shed its stress would be a wall that remembered every
+        // surge it had ever held for the rest of the run.
+        self.press_dikes();
+    }
+
+    /// The water's push on one side of a dike: `depth * (STILL_PUSH + speed)`
+    /// over its three cells, scaled.
+    ///
+    /// Both numbers come from the automaton and neither is new. Depth alone
+    /// would make a still pond as dangerous as a surge front; speed alone
+    /// makes a wall that has done its job invulnerable, because water a wall
+    /// has stopped is water that has stopped moving — which is what the flat
+    /// ground probe found, and why `STILL_PUSH` exists. So depth is what loads
+    /// a wall and flow is what makes the front worse than the pool.
+    fn push_on(&self, cells: &[(i32, i32)]) -> u32 {
+        cells
+            .iter()
+            .map(|&(x, y)| {
+                self.water.depth_at(x, y) as u32
+                    * (STILL_PUSH + self.water.speed_at(x, y) as u32)
+            })
+            .sum::<u32>()
+            / PRESSURE_SCALE
     }
 
     /// How deep the water is where a citizen is standing, after whatever it is
@@ -132,12 +156,60 @@ impl World {
     }
 
     /// Buildings take damage from the water going past them.
+    /// What the water does to a wall, which is not what it does to a cottage.
+    ///
+    /// A cottage is knocked down by the flow *over* it. A dike is not in the
+    /// flow — that is its whole purpose — it is leaned on from one side, and
+    /// it gives way when it has been leaned on hard enough for long enough.
+    /// So a dike keeps a `stress` accumulator instead of taking damage per
+    /// tick, and `batter_buildings` leaves it alone: one model for a wall, and
+    /// not two disagreeing about the same building.
+    ///
+    /// Design's "100 psi over 10 seconds" is exactly this shape. Ten seconds
+    /// is a hundred ticks, so a threshold is a pressure times a number of
+    /// ticks, and `Building::stress` is the running total.
+    fn press_dikes(&mut self) {
+        let mut broken: Vec<BuildingId> = Vec::new();
+
+        for b in 0..self.buildings.len() {
+            let building = &self.buildings[b];
+            if building.kind != Kind::Dike || building.state == BuildState::Rubble {
+                continue;
+            }
+            // Whichever side is wetter is the side the water is on. A wall
+            // does not know which way round it was built.
+            let [near, far] = building.sides();
+            let load = self.push_on(&near).max(self.push_on(&far));
+
+            let building = &mut self.buildings[b];
+            building.stress = if load > 0 {
+                building.stress.saturating_add(load)
+            } else {
+                building.stress.saturating_sub(STRESS_RELIEF)
+            };
+            if building.stress >= building.stress_limit() {
+                broken.push(BuildingId(b as u16));
+            }
+        }
+
+        for id in broken {
+            // Ruined outright rather than damaged: a bank that gives way gives
+            // way, and `damage_building` is what already knows to tell the
+            // pathing and the people who worked there.
+            self.damage_building(id, u16::MAX);
+        }
+    }
+
     fn batter_buildings(&mut self) {
         let mut ruined: Vec<BuildingId> = Vec::new();
 
         for b in 0..self.buildings.len() {
             let building = &self.buildings[b];
             if building.state == BuildState::Rubble {
+                continue;
+            }
+            // A dike is pressed, not battered. See `press_dikes`.
+            if building.kind == Kind::Dike {
                 continue;
             }
             let resist = building.kind.resist();

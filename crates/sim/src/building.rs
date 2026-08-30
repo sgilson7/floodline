@@ -510,6 +510,9 @@ pub struct Building {
     pub integrity: u16,
     /// Dikes only, 1..=DIKE_MAX_LEVEL. One for everything else.
     pub level: u8,
+    /// How much the water has leaned on this, in scaled pressure-ticks.
+    /// Dikes only; everything else takes damage the ordinary way.
+    pub stress: u32,
     pub store: Goods,
     /// Work accumulated toward the next unit of output. Producers only.
     pub work: u32,
@@ -539,6 +542,7 @@ impl Building {
             progress: 0,
             integrity: kind.integrity(),
             level: 1,
+            stress: 0,
             store: Goods::NONE,
             work: 0,
             workers: Vec::new(),
@@ -658,6 +662,46 @@ impl Building {
             out.add(g, self.store.get(g));
         }
         out
+    }
+
+    /// The two rows or columns the water can push on: the cells beside the
+    /// run, on each of its long sides.
+    ///
+    /// A wall has a wet side and a dry side, and which is which is a fact
+    /// about the water rather than about the wall — so this answers with both
+    /// and `flood` takes whichever is wetter. Cells off the map are included
+    /// and read as dry, which is right: a wall on the edge is pushed on from
+    /// one side only.
+    pub fn sides(&self) -> [Vec<(i32, i32)>; 2] {
+        let (w, h) = self.size();
+        let (x0, y0) = (self.x as i32, self.y as i32);
+        match self.facing {
+            Facing::EastWest => [
+                (0..w).map(|d| (x0 + d, y0 - 1)).collect(),
+                (0..w).map(|d| (x0 + d, y0 + h)).collect(),
+            ],
+            Facing::NorthSouth => [
+                (0..h).map(|d| (x0 - 1, y0 + d)).collect(),
+                (0..h).map(|d| (x0 + w, y0 + d)).collect(),
+            ],
+        }
+    }
+
+    /// What this dike can take before it gives way.
+    pub fn stress_limit(&self) -> u32 {
+        dike_stress_limit(self.level)
+    }
+
+    /// How close this is to giving way, from 0 to 100.
+    ///
+    /// On screen rather than in the rules: a dike that breaks without warning
+    /// is a dike that broke arbitrarily as far as the player is concerned, and
+    /// the whole point of a pressure model is that you can watch it coming.
+    pub fn strain(&self) -> u32 {
+        if self.kind != Kind::Dike {
+            return 0;
+        }
+        (self.stress.saturating_mul(100) / self.stress_limit().max(1)).min(100)
     }
 
     /// How much this raises the ground under it. Only a standing Dike does.

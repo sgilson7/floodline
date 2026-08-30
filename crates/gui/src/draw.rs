@@ -77,7 +77,9 @@ fn buildings(w: &World, seen: (i32, i32, i32, i32)) {
         let x = MAP_X + b.x as f32 * CELL;
         let y = MAP_Y + b.y as f32 * CELL;
         let (pw, ph) = (bw as f32 * CELL, bh as f32 * CELL);
-        let colour = palette::player(b.owner);
+        // A dike carries its own load on its face. Everything else is drawn
+        // in its owner's colour flat.
+        let colour = palette::strained(palette::player(b.owner), b.strain());
 
         if b.standing_now() {
             draw_rectangle(x, y, pw, ph, colour);

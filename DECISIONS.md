@@ -1720,3 +1720,81 @@ have overlapped the first and leaves one cell either side. The test patches the
 seam with a short run across it, which is what a player watching the ghost skip
 would do, and then asserts there is no gap — an assertion the old cell-by-cell
 wall never needed and never made.
+
+---
+
+## 2026-08-30 — A wall is leaned on, not battered — and the plan's formula was wrong
+
+M3's third commit, and the one the milestone exists for. `Building::stress` is
+a `u32` that the water adds to and time takes away; past a limit set by the
+dike's level, the segment is rubble. Dikes leave `batter_buildings` entirely,
+so a wall has one model and not two disagreeing about the same building.
+
+**The plan said pressure is `depth * speed`, and measuring it said that is
+zero exactly where a wall earns its keep.** Water a dike has stopped is water
+that has stopped moving. `dike_pressure_on_flat_ground` found fifty-one
+sixteenths piled against a level-one wall travelling at a speed of *two*: the
+product is four hundred, which divided by any sane scale is nothing at all, and
+across eight hundred ticks of a held surge every wall in the game accrued
+exactly zero stress. A dam is loaded by the depth it holds; flow is what makes
+the leading edge worse than the pool behind it. So pressure is
+`depth * (STILL_PUSH + speed)` — speed is a term that adds rather than a factor
+that gates — and `balance::STILL_PUSH` carries that paragraph in its doc
+comment. This is a departure from the agreed plan, taken because the
+measurement is unambiguous and the alternative is a feature that does nothing.
+
+**The wet side is whichever side is wet.** A segment offers `sides()` — the row
+or column beside each of its long faces — and the flood takes the greater of
+the two pushes. A wall does not know which way round it was built, and asking
+the water is one rule rather than a facing convention nobody would remember.
+
+**Relief runs outside the water's guard.** `flood_bodies` returns early when
+there is no water on the map, and the first version of `press_dikes` sat inside
+that — so a wall shed stress only while it was being loaded, which is to say
+never. The half of this that matters between floods is the half that runs when
+the map is dry.
+
+**The numbers, measured on flat ground against a real surge.** A wall the water
+does not top takes about 26 000 scaled pressure-ticks from an age-one surge and
+about 35 000 from an age-three one. With limits of 6 000 / 30 000 / 45 000 /
+60 000 by level:
+
+| surge | level | peak | broke | segments left of 42 |
+|---|---|---|---|---|
+| age 1 (12) | 1 | 6 006 | tick 1064 | 8 |
+| age 1 (12) | 2 | 26 188 | no | 42 |
+| age 3 (20) | 1 | 6 007 | tick 920 | 5 |
+| age 3 (20) | 2 | 30 004 | tick 3019 | 26 |
+| age 3 (20) | 3 | 35 289 | no | 42 |
+
+A level one gives way to the first flood, a level two holds it and is in
+trouble by the third, and a level three holds everything the MVP can throw.
+**These are provisional and M5 owns them**: the plan's target is a fraction of
+each level broken, measured across seeds against the river, and flat ground is
+not a map.
+
+`STRESS_RELIEF` is two a tick, which is the number that decides whether "a dike
+that survives one surge is weaker for the next" means anything. The gap between
+floods is an age — 7 200 ticks — so a wall sheds 14 400 in it: a level one is
+clear again well before the next flood, and a level two that came through at
+nine-tenths of its limit meets the next surge still carrying two fifths of the
+last.
+
+**A strained dike darkens.** `Building::strain` is nought to a hundred and
+`palette::strained` multiplies the owner's colour down by it. Without something
+on the screen a wall that gives way has, from where the player sits, given way
+at random — which is the failure `batter_buildings` already had and the reason
+this milestone is three changes and not one.
+
+**Two tests were about an old world.** `wood_gives_way_before_stone` used a
+dike as its stone exemplar, and a dike is no longer battered at all; the only
+other stone thing a player can place is a road, which design §6 wants the flood
+to break. The comparison is now made where it lives (`RESIST_STONE` against
+`RESIST_WOOD`) with the water still saying the half a placeable building can
+answer, and `only_a_dike_is_pressed` holds the new rule next door.
+
+The five-strategy playtest is unchanged in outcome — one survivor for `dike`
+and one for `both`, the same as before the pressure model — while the stone
+left standing at the flood drops from 420 to 210–330, which is segments being
+lost. A model that changes what a wall costs without changing whether a wall
+works is the right thing to have at this point in the plan.

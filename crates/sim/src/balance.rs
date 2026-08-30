@@ -480,6 +480,73 @@ pub const RESIST_STONE: u16 = depth(3);
 /// sixteen units of moving water indefinitely.
 pub const FLOW_TOUGHNESS: u16 = 4;
 
+// ---- what the water does to a wall -----------------------------------------
+
+/// What standing water counts for, in the units `Water::speed_at` uses.
+///
+/// The plan said pressure on a dike is `depth * speed`, and measuring it said
+/// that is zero exactly where a wall earns its keep. Water dammed by a wall
+/// stops: `dike_pressure_on_flat_ground` found fifty-one sixteenths piled
+/// against a level-one wall moving at a speed of *two*, so the product was
+/// four hundred and it rounded to nothing. A dam is loaded by the depth it
+/// holds, and the flow is what makes the leading edge worse than the pool
+/// behind it — so speed is a term that adds, not a factor that gates.
+///
+/// Set to the speed at which moving water doubles the push of standing water,
+/// which is around the flow the surge front actually carries.
+pub const STILL_PUSH: u32 = 16;
+
+/// Pressure on one cell of a dike's wet side is `depth * (STILL_PUSH + speed)`,
+/// and the three cells of the side are summed. That product is large — a deep,
+/// fast cell is tens of thousands — so it is divided by this before it is
+/// added to `Building::stress`, which keeps a `u32` accumulator good for
+/// thousands of ticks of the worst flow the game can produce.
+///
+/// The division rounds down, so a side carrying less than this in total adds
+/// nothing at all. That is the intended shape and not a rounding bug: a wall
+/// is not worn away by an inch of water leaning on it.
+pub const PRESSURE_SCALE: u32 = 256;
+
+/// Stress a dike sheds each tick with no water against it.
+///
+/// Design's point, and the plan's: a dike that survives one surge is weaker
+/// for the next but not doomed. The gap between floods is an age, which is
+/// `DAYS_PER_AGE * TICKS_PER_DAY` = 7 200 ticks, so this is the number that
+/// decides whether "weaker for the next" means anything at all. At two a tick
+/// a wall sheds 14 400 over an age: a level-one segment (6 000) is clear again
+/// well before the next flood and a level-two one that came through at
+/// nine-tenths of its limit meets the next surge still carrying two fifths of
+/// the last. That is the shape design §5 wants; the exact number is M5's.
+pub const STRESS_RELIEF: u32 = 2;
+
+/// What a dike can take before it is rubble, in scaled pressure-ticks, by
+/// level.
+///
+/// **Provisional.** M5 of the plan measures these against the river and the
+/// target it names — most of a level-one wall gone at age one, most of a
+/// level-two wall standing — and replaces them with a table that says where
+/// the numbers came from. What is here is measured only against sustained flow
+/// on flat ground, in `dike_pressure_on_flat_ground`, and is enough to make
+/// "level one breaks, level two holds" true and testable in the meantime.
+///
+/// A level is not a linear amount of wall: it is height, and a taller bank is
+/// both thicker at the base and holding water that has to climb further. The
+/// squares are a guess at that shape and are the first thing M5 should argue
+/// with.
+/// Measured against a sustained age-one surge on flat ground, in
+/// `dike_pressure_on_flat_ground`. A wall the water does not top takes about
+/// 26 000 from an age-one surge and about 35 000 from an age-three one, so a
+/// level two holds the first and not the third, and a level one holds
+/// neither.
+pub const DIKE_STRESS_LIMIT: [u32; DIKE_MAX_LEVEL as usize] =
+    [6_000, 30_000, 45_000, 60_000];
+
+/// What a dike of this level can take. Levels are 1-based.
+pub fn dike_stress_limit(level: u8) -> u32 {
+    let i = (level.max(1) as usize - 1).min(DIKE_STRESS_LIMIT.len() - 1);
+    DIKE_STRESS_LIMIT[i]
+}
+
 /// The source corner is an 8 x 8 block (design §5).
 pub const SURGE_SIZE: i32 = 8;
 

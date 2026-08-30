@@ -61,6 +61,18 @@ pub fn player(p: sim::PlayerId) -> Color {
 }
 
 /// Buildings are rectangles with a glyph (design §1).
+/// A dike under load, darkening toward its break point.
+///
+/// The whole point of a pressure model is that a wall gives way *visibly*:
+/// without this the flood takes a segment out and the player learns only that
+/// walls sometimes vanish. Darkening rather than reddening because a wall is
+/// already the player's own colour and the map is busy in a flood; a bank
+/// going black under water reads as failing without another hue to tell apart.
+pub fn strained(base: Color, strain: u32) -> Color {
+    let k = 1.0 - 0.75 * (strain.min(100) as f32 / 100.0);
+    Color { r: base.r * k, g: base.g * k, b: base.b * k, a: base.a }
+}
+
 pub fn glyph(kind: sim::Kind) -> &'static str {
     use sim::Kind;
     match kind {

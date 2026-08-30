@@ -9,7 +9,8 @@ use sim::building::{BuildState, Facing, Good, Kind};
 use sim::citizen::PlayerId;
 use sim::command::Command;
 use sim::world::{RuleError, World};
-use sim::map::{Ground, CELLS};
+use sim::map::{Ground, CELLS, MAP_H};
+use sim::nav::Nav;
 use sim::BuildingId;
 
 const ME: PlayerId = PlayerId(0);
@@ -227,5 +228,250 @@ fn a_segment_is_raised_whole() {
     let bare = 40u16;
     for x in 20..=22 {
         assert_eq!(w.effective_height(x, 50), bare + DIKE_HEIGHT_PER_LEVEL * 2);
+    }
+}
+
+// ---- pressure ---------------------------------------------------------------
+
+/// Build a wall down the column at `wall_x`, `levels` high, and return its ids.
+fn wall(w: &mut World, wall_x: u8, levels: u8) -> Vec<BuildingId> {
+    let ids = w.lay_dike_line(ME, (wall_x, 0), (wall_x, (MAP_H - 1) as u8)).unwrap();
+    for &id in &ids {
+        for _ in 0..levels {
+            let owed = w.buildings[id.0 as usize].outstanding().stone;
+            w.deliver_to(id, Good::Stone, owed);
+            w.build_at(id, w.buildings[id.0 as usize].kind.build_ticks() * levels as u32);
+            if w.buildings[id.0 as usize].level < levels {
+                w.raise_dike(ME, id).unwrap();
+            }
+        }
+        assert_eq!(w.buildings[id.0 as usize].level, levels);
+        assert!(w.buildings[id.0 as usize].standing_now());
+    }
+    ids
+}
+
+/// Hold an age-one surge against the west edge for `ticks`, the way
+/// `inject_surge` does, and let the flood act on the world each tick.
+fn pour(w: &mut World, height: u16, ticks: u32) {
+    let mut nav = Nav::new();
+    for _ in 0..ticks {
+        for x in 0..SURGE_SIZE {
+            for y in 0..MAP_H {
+                w.water.raise_to(x, y, depth(height));
+            }
+        }
+        w.step_water();
+        w.flood_bodies();
+        let _ = &mut nav;
+    }
+}
+
+/// Let the water drain and the flood act, with nothing poured in.
+fn drain(w: &mut World, ticks: u32) {
+    for _ in 0..ticks {
+        w.step_water();
+        w.flood_bodies();
+    }
+}
+
+#[test]
+fn a_level_one_wall_gives_way_where_a_level_two_holds() {
+    // The plan's definition of done for M3, and the reason a dike has a
+    // pressure model at all: height has to buy something the player can watch.
+    for (level, expect_break) in [(1u8, true), (2u8, false)] {
+        let mut w = flat();
+        let ids = wall(&mut w, 40, level);
+        // The segment in the middle of the wall, which is the one the surge
+        // reaches squarest. How much of the rest goes with it is a question
+        // about a whole map, and M5's to answer.
+        let watch = ids[ids.len() / 2];
+        pour(&mut w, 12, SURGE_TICKS);
+        drain(&mut w, 1000);
+
+        let standing =
+            ids.iter().filter(|id| w.buildings[id.0 as usize].standing_now()).count();
+        let strain = w.buildings[watch.0 as usize].strain();
+        if expect_break {
+            assert!(
+                !w.buildings[watch.0 as usize].standing_now(),
+                "a level-{level} segment held an age-one surge at {strain}% strain"
+            );
+            assert!(standing < ids.len());
+        } else {
+            assert_eq!(
+                standing,
+                ids.len(),
+                "a level-{level} wall lost segments to an age-one surge"
+            );
+            assert!(strain > 0, "a level-{level} wall was not even leaned on");
+        }
+    }
+}
+
+#[test]
+fn a_wall_under_load_shows_it_before_it_goes() {
+    // Without this the failure is arbitrary as far as a player is concerned.
+    // `strain` is what the renderer darkens by, so it has to climb rather than
+    // jump from nothing to rubble.
+    let mut w = flat();
+    let ids = wall(&mut w, 40, 1);
+    let watch = ids[ids.len() / 2];
+    let mut seen = Vec::new();
+
+    for _ in 0..14 {
+        pour(&mut w, 12, 50);
+        drain(&mut w, 50);
+        seen.push(w.buildings[watch.0 as usize].strain());
+        if !w.buildings[watch.0 as usize].standing_now() {
+            break;
+        }
+    }
+
+    assert!(!w.buildings[watch.0 as usize].standing_now(), "the wall never gave way: {seen:?}");
+    assert!(
+        seen.iter().any(|&s| (20..80).contains(&s)),
+        "the wall went from sound to rubble with nothing in between: {seen:?}"
+    );
+    assert!(seen.windows(2).all(|p| p[0] <= p[1]), "strain went down under load: {seen:?}");
+}
+
+#[test]
+fn a_wall_sheds_its_stress_once_the_water_is_gone() {
+    let mut w = flat();
+    let ids = wall(&mut w, 40, 2);
+    let id = ids[ids.len() / 2];
+    pour(&mut w, 12, SURGE_TICKS);
+    drain(&mut w, 600);
+    let loaded = w.buildings[id.0 as usize].stress;
+    assert!(loaded > 0, "the surge did not lean on the wall at all");
+
+    w.water = sim::water::Water::dry();
+    drain(&mut w, 200);
+    let after = w.buildings[id.0 as usize].stress;
+    assert!(after < loaded, "stress did not bleed off: {loaded} then {after}");
+    assert_eq!(after, loaded.saturating_sub(200 * STRESS_RELIEF));
+
+    drain(&mut w, loaded / STRESS_RELIEF + 10);
+    assert_eq!(w.buildings[id.0 as usize].stress, 0, "and it does reach nothing");
+}
+
+#[test]
+fn a_wall_that_gives_way_stops_holding_the_water_up() {
+    let mut w = flat();
+    let ids = wall(&mut w, 40, 1);
+    let id = ids[ids.len() / 2];
+    let (bx, by) = (w.buildings[id.0 as usize].x as i32, w.buildings[id.0 as usize].y as i32);
+    let held = w.effective_height(bx, by);
+
+    pour(&mut w, 12, SURGE_TICKS);
+    drain(&mut w, 1000);
+
+    assert!(!w.buildings[id.0 as usize].standing_now());
+    assert!(
+        w.effective_height(bx, by) < held,
+        "rubble is still holding the water back"
+    );
+}
+
+#[test]
+fn only_a_dike_is_pressed() {
+    // One model for a wall and not two: `batter_buildings` takes the flow over
+    // a footprint, `press_dikes` takes the lean on a side, and a building is
+    // in exactly one of them.
+    let mut w = flat();
+    let ids = wall(&mut w, 40, 1);
+    let dike = ids[ids.len() / 2];
+    let hut = w.place(ME, Kind::Cottage, Facing::EastWest, 60, 60).unwrap();
+    w.deliver_to(hut, Good::Wood, Kind::Cottage.cost().wood);
+    w.build_at(hut, Kind::Cottage.build_ticks());
+
+    pour(&mut w, 12, SURGE_TICKS);
+    drain(&mut w, 300);
+    assert!(w.buildings[dike.0 as usize].stress > 0);
+    assert_eq!(w.buildings[hut.0 as usize].stress, 0, "a cottage does not accumulate stress");
+    assert_eq!(
+        w.buildings[dike.0 as usize].integrity,
+        Kind::Dike.integrity(),
+        "a dike is pressed, not battered: its integrity is untouched"
+    );
+}
+
+#[test]
+fn the_wet_side_is_whichever_side_is_wet() {
+    // A wall does not know which way round it was built, so the model asks
+    // the water. Turning the world round has to give the same answer.
+    let mut w = flat();
+    let id = w.lay_dike_line(ME, (40, 64), (40, 64)).unwrap()[0];
+    let b = &w.buildings[id.0 as usize];
+    let [near, far] = b.sides();
+    assert_eq!(near, vec![(40, 63), (41, 63), (42, 63)]);
+    assert_eq!(far, vec![(40, 65), (41, 65), (42, 65)]);
+
+    let id = w.lay_dike_line(ME, (60, 20), (60, 22)).unwrap()[0];
+    let b = &w.buildings[id.0 as usize];
+    let [near, far] = b.sides();
+    assert_eq!(near, vec![(59, 20), (59, 21), (59, 22)]);
+    assert_eq!(far, vec![(61, 20), (61, 21), (61, 22)]);
+}
+
+/// What the water actually does to a wall, on flat ground with nothing else in
+/// the way. A measurement, not an assertion: the numbers in
+/// `balance::DIKE_STRESS_LIMIT` come from here until M5 re-derives them
+/// against the river.
+#[test]
+#[ignore]
+fn dike_pressure_on_flat_ground() {
+    for height in [12u16, 20] {
+        println!();
+        println!("  a surge of {height} for {SURGE_TICKS} ticks, then left to drain");
+        println!("   level   peak stress   at tick   broke   standing at the end   sheds in");
+
+        for level in 1..=DIKE_MAX_LEVEL {
+            let mut w = flat();
+            let ids = wall(&mut w, 40, level);
+            let watch = ids[ids.len() / 2];
+
+            let mut peak = 0;
+            let mut peak_at = 0;
+            let mut broke = None;
+            for t in 1..=(SURGE_TICKS + 3 * TICKS_PER_DAY) {
+                if t <= SURGE_TICKS {
+                    pour(&mut w, height, 1);
+                } else {
+                    w.step_water();
+                    w.flood_bodies();
+                }
+                let b = &w.buildings[watch.0 as usize];
+                if b.stress > peak {
+                    peak = b.stress;
+                    peak_at = t;
+                }
+                if broke.is_none() && !b.standing_now() {
+                    broke = Some(t);
+                }
+            }
+            let standing =
+                ids.iter().filter(|id| w.buildings[id.0 as usize].standing_now()).count();
+
+            // And how long an intact one takes to shed a full load.
+            let mut dry = flat();
+            let one = wall(&mut dry, 40, level)[0];
+            dry.buildings[one.0 as usize].stress = dike_stress_limit(level) - 1;
+            let mut clear = 0;
+            while dry.buildings[one.0 as usize].stress > 0 && clear < 10 * TICKS_PER_DAY {
+                dry.flood_bodies();
+                clear += 1;
+            }
+
+            println!(
+                "   {level:>5}   {peak:>11}   {peak_at:>7}   {:>5}   {standing:>19}   {} ticks",
+                match broke {
+                    Some(t) => format!("t{t}"),
+                    None => "no".to_owned(),
+                },
+                clear,
+            );
+        }
     }
 }
