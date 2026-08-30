@@ -96,12 +96,14 @@ with sync_playwright() as p:
     click(630.0, 518.0)   # Host a game
     page.wait_for_timeout(1200)
     click(800.0, 652.0)   # Start
-    page.wait_for_timeout(1500)
+    page.wait_for_timeout(1200)
+    click(800.0, 400.0)   # dismiss the first-run card, which is modal
+    page.wait_for_timeout(800)
     before = shot("play-0-start")
 
     # --- selection and orders ------------------------------------------------
     # "choose all", then right-click a far corner: they should set off.
-    click(PANEL_L + 250, 686)
+    click(PANEL_L + 250, 703)
     page.wait_for_timeout(300)
     page.mouse.click(*cell_px(70, 70), button="right")
     page.wait_for_timeout(2500)
@@ -153,7 +155,7 @@ with sync_playwright() as p:
 
     # --- the trade dialog ----------------------------------------------------
     # Card at (340, 260) 620x420; the rows are input.rs's running total.
-    click(PANEL_L + 165, 756)                # "propose a trade"
+    click(PANEL_L + 165, 773)                # "propose a trade"
     page.wait_for_timeout(400)
     opened = shot("play-6-trade")
     check(at(opened, 650.0, 500.0) != at(before, 650.0, 500.0), "the trade dialog opened")

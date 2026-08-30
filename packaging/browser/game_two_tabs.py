@@ -151,7 +151,11 @@ with sync_playwright() as p:
         # more boxes above it.
         start_y = 534.0 if MODE == "room" else 652.0
         click_logical(host, CX, start_y)
-        time.sleep(3.0)
+        time.sleep(2.0)
+        # The first-run card is modal and covers the map on both tabs.
+        click_logical(host, CX, 400.0)
+        click_logical(join, CX, 400.0)
+        time.sleep(1.5)
 
     hi = shot(host, f"host-{MODE}")
     ji = shot(join, f"join-{MODE}")

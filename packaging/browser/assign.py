@@ -76,8 +76,8 @@ with sync_playwright() as p:
 
     def hover_line(img):
         """The panel's "what is under the cursor" row: `farm: 0 of 3 working`."""
-        x0, y0 = css(1252.0, 590.0)
-        x1, y1 = css(1590.0, 620.0)
+        x0, y0 = css(1252.0, 607.0)
+        x1, y1 = css(1590.0, 637.0)
         return img.crop((int(x0), int(y0), int(x1), int(y1))).tobytes()
 
     pg.goto(URL)
@@ -87,7 +87,9 @@ with sync_playwright() as p:
     pg.mouse.click(*css(630.0, 518.0))   # Host a game
     pg.wait_for_timeout(1500)
     pg.mouse.click(*css(800.0, 652.0))   # Start
-    pg.wait_for_timeout(2000)
+    pg.wait_for_timeout(1200)
+    pg.mouse.click(*css(800.0, 400.0))   # dismiss the first-run card
+    pg.wait_for_timeout(800)
 
     pts = own(shot())
     check(bool(pts), "found the city on screen")
@@ -131,7 +133,7 @@ with sync_playwright() as p:
     pg.wait_for_timeout(400)
     before_work = hover_line(shot())
 
-    pg.mouse.click(*css(1502.0, 686.0))                  # choose all
+    pg.mouse.click(*css(1502.0, 703.0))                  # choose all
     pg.wait_for_timeout(400)
     quiet = alarm_band(shot())
     pg.mouse.click(*cell(*farm), button="right")         # put them to work

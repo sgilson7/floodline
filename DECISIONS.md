@@ -1514,3 +1514,37 @@ walks outward from the hearth in a fixed order and hands each of them a cell
 somebody can actually stand on. That also removes the last reason for
 `step_off_a_building`, which stays anyway: a citizen can still end up inside
 something the flood dropped a building on.
+
+---
+
+## 2026-08-30 — The tutorial is one line that always knows what to do next
+
+Not a scripted sequence with a Next button. `tutorial::next_thing` reads the
+world and names the single most urgent thing this city needs, and the panel
+draws it. A player who does things out of order is never told to do something
+they have already done, and one who knows the game sees an empty line — which
+is the property a step counter cannot have.
+
+It is ordered by what kills you soonest, and the order is arithmetic rather
+than taste: a citizen empties at tick 1000 and dies 3600 later, so a city with
+nowhere to eat has until **day four**, and the water does not come until **day
+six**. Food first, always; then the two things that run out and used to have no
+answer at all; then the flood.
+
+There is also a card on the first run — three controls, two lists, and the two
+dates that matter — dismissed by any click or key and never shown again. It is
+modal, which is deliberate: a click that dismisses it must not also put a
+building down behind it.
+
+Every sentence in here is one somebody needed and did not have. The village
+that started this starved on day four with a farm standing in it, because
+"choose everybody and right-click the farm" was refused whole and nothing said
+so. The panel now says *"drag to choose your people, then right-click the
+farm"* until somebody is farming, and *"3 of 8 - that is all the room there
+is"* when they do.
+
+The line is wrapped to two rows and both rows are reserved whether there is
+anything in them or not. The panel is 330 pixels of usable width — about
+fifty-six characters — and a sentence that says what to do next does not fit in
+one; reserving the space means the buttons below do not move as a city's
+situation changes, which they did twice while this was being built.

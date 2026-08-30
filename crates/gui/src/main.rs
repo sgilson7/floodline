@@ -13,6 +13,7 @@ mod lobby;
 mod page;
 mod palette;
 mod screen;
+mod tutorial;
 mod ui;
 
 use macroquad::prelude::*;
@@ -97,6 +98,7 @@ async fn main() {
     let mut session: Option<game::Session> = None;
     let mut input = input::Input::default();
     let mut clock = Clock::default();
+    let mut welcome = tutorial::Welcome::default();
 
     loop {
         // Clear the whole window, letterbox bars included, then move into
@@ -163,6 +165,10 @@ async fn main() {
                 // Nothing left to command, and a build menu over a score
                 // screen would only invite clicks that fail.
                 draw::score(s.world());
+            } else if welcome.showing() {
+                // The card is modal: a click that dismisses it must not also
+                // put a building down behind it.
+                welcome.draw(&ui);
             } else {
                 input.frame(&ui, s, panel_ends);
             }

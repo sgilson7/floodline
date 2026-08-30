@@ -100,7 +100,9 @@ with sync_playwright() as p:
     click(630.0, 518.0)   # Host a game
     page.wait_for_timeout(1200)
     click(800.0, 652.0)   # Start
-    page.wait_for_timeout(1200)
+    page.wait_for_timeout(1000)
+    click(800.0, 400.0)   # dismiss the first-run card
+    page.wait_for_timeout(800)
 
     img = shot(page)
     got = map_bounds(img)

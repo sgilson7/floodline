@@ -220,10 +220,17 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
     // The row is always here, whether or not there is anything to put in it.
     // Reserving it costs twenty-five pixels of panel and buys buttons that do
     // not move under the cursor when a city's situation changes.
-    if let Some(trouble) = whats_wrong(w, me) {
-        draw_text(trouble, left, y, 17.0, palette::WARNING);
+    // Two lines, wrapped on words: the panel is 330 pixels of usable width,
+    // which is about fifty-six characters at this size, and a sentence that
+    // says what to do next does not fit in one. Both rows are reserved whether
+    // or not there is anything in them, so the buttons below do not move as a
+    // city's situation changes.
+    if let Some(next) = crate::tutorial::next_thing(w, me) {
+        for (i, row) in crate::ui::wrapped_words(next, 52).iter().take(2).enumerate() {
+            draw_text(row, left, y + i as f32 * 18.0, 15.0, palette::WARNING);
+        }
     }
-    y += 25.0;
+    y += 42.0;
 
     let (text, colour) = match status {
         net::Status::Lobby => ("in the lobby - press SPACE to start".to_owned(), palette::WARNING),
@@ -248,53 +255,6 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
     line(&format!("peers at {ticks:?}"), 15, palette::FAINT, &mut y);
     line(&format!("build {build}   seed {}", w.seed), 15, palette::FAINT, &mut y);
     ended
-}
-
-/// What this city is missing, in the order it will kill them.
-///
-/// One line, never a list: the point is to name the next thing to do, and a
-/// player who is told four things at once is told nothing.
-fn whats_wrong(w: &World, me: PlayerId) -> Option<&'static str> {
-    use sim::building::Kind;
-    if !w.players.contains(&me) || w.population(me) == 0 || w.finished().is_some() {
-        return None;
-    }
-    let standing = |k: Kind| {
-        w.buildings.iter().any(|b| b.owner == me && b.kind == k && b.standing_now())
-    };
-    if !standing(Kind::Granary) {
-        return Some("no granary: your people have nowhere to eat");
-    }
-    if !standing(Kind::Farm) {
-        return Some("no farm: nothing is growing any food");
-    }
-    let working_at = |k: Kind| {
-        w.citizens.iter().any(|c| {
-            c.owner == me && c.alive() && c.job == sim::citizen::Job::at(k)
-        })
-    };
-    if !working_at(Kind::Farm) {
-        return Some("nobody is farming: right-click the farm to put them to work");
-    }
-    if w.treasury(me).food == 0 {
-        return Some("the granary is empty");
-    }
-    // Food is in hand; now the two things that run out and used to have no
-    // answer at all.
-    let goods = w.treasury(me);
-    if goods.wood < Kind::Cottage.cost().wood && !standing(Kind::Forester) {
-        return Some("low on wood: a forester's hut (4) is the only way to make more");
-    }
-    if goods.stone < Kind::Dike.cost().stone * 4 && !standing(Kind::Quarry) {
-        return Some("low on stone: a quarry (5) needs rock beside it");
-    }
-    if standing(Kind::Forester) && !working_at(Kind::Forester) {
-        return Some("nobody is cutting wood");
-    }
-    if standing(Kind::Quarry) && !working_at(Kind::Quarry) {
-        return Some("nobody is working the quarry");
-    }
-    None
 }
 
 /// The score screen (design §4).
