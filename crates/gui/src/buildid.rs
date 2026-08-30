@@ -15,6 +15,17 @@
 mod imp {
     use sapp_jsutils::JsObject;
 
+    /// miniquad calls this on start-up and compares it with the `version` in
+    /// `web/quad_rtc.js`'s `miniquad_add_plugin` call, shouting into the
+    /// console if they disagree. It is the guard against a deployed page whose
+    /// JS plugin and whose Rust side have drifted apart — the phase 3 failure
+    /// that would otherwise present as "the handshake just hangs". Bump both
+    /// numbers together whenever the plugin's imports change.
+    #[no_mangle]
+    pub extern "C" fn quad_rtc_crate_version() -> u32 {
+        1
+    }
+
     extern "C" {
         fn fl_build_hash() -> JsObject;
         fn fl_log(msg: JsObject);

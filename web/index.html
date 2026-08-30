@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>FLOODLINE</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #08080c; color: #d8dae8;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  /* The canvas fills the window at 1:1 CSS pixels. The game letterboxes its
+     own fixed 1600x980 layout inside whatever it gets, so no CSS transform is
+     involved — which matters, because a transform would break mouse mapping. */
+  #glcanvas { display: block; width: 100vw; height: 100vh; outline: none; }
+  #loading {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px;
+    background: #08080c; z-index: 10;
+  }
+  #loading .title { font-size: 26px; letter-spacing: 6px; color: #78aadc; }
+  #loading .sub { font-size: 13px; color: #6a6a80; }
+</style>
+</head>
+<body>
+  <div id="loading">
+    <div class="title">FLOODLINE</div>
+    <div class="sub">loading…</div>
+  </div>
+  <canvas id="glcanvas" tabindex="1"></canvas>
+
+  <script>window.FLOODLINE_BUILD = "__BUILD__";</script>
+  <script src="config.js"></script>
+  <script src="mq_js_bundle.js"></script>
+  <!-- Both plugins register themselves and must be in place before load(). -->
+  <script src="sapp_jsutils.js"></script>
+  <script src="quad_rtc.js"></script>
+  <script>
+    load("floodline.wasm");
+    // The shim swaps to the canvas once the module is up; give it a beat,
+    // then clear the splash and hand it keyboard focus.
+    (function waitForStart() {
+      const canvas = document.getElementById("glcanvas");
+      if (canvas.width > 0 && canvas.height > 0) {
+        document.getElementById("loading").style.display = "none";
+        canvas.focus();
+      } else {
+        setTimeout(waitForStart, 100);
+      }
+    })();
+    // Right-click is an in-game verb (assign, move to), so don't let the
+    // browser menu eat it.
+    document.getElementById("glcanvas")
+      .addEventListener("contextmenu", e => e.preventDefault());
+  </script>
+</body>
+</html>
