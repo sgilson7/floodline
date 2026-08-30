@@ -210,8 +210,13 @@ impl Kind {
             Kind::Granary => 250,
             Kind::Stockpile => 150,
             Kind::Dike => 400,
-            Kind::Road => 100,
-            Kind::Bridge => 150,
+            // A road cell is a strip of packed stone and a bridge a few
+            // planks: far less building than a cottage, and design §6 wants
+            // the flood to take them. At a hundred a road was surviving an
+            // age-two surge by a whisker, which made "rebuilding the link
+            // after an age" a decision nobody ever had to make.
+            Kind::Road => 40,
+            Kind::Bridge => 60,
         }
     }
 
@@ -244,8 +249,11 @@ impl Kind {
     /// would.
     pub fn resist(self) -> u16 {
         match self {
-            Kind::Road => depth(9),
-            Kind::Bridge => depth(6),
+            // A road and a bridge are the thinnest things on the map: a
+            // hand's breadth of stone and a few planks. Design §6 wants "the
+            // flood breaks road cells it flows over", and at a wall's
+            // resistance a road came through a surge without a scratch.
+            Kind::Road | Kind::Bridge => depth(1),
             _ => match self.material() {
                 Material::Wood => RESIST_WOOD,
                 Material::Stone => RESIST_STONE,

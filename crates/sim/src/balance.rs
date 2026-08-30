@@ -83,7 +83,7 @@ pub const FOUNDING_CITIZENS: u32 = 8;
 /// So the ramp spans the full height scale by itself and the noise is a
 /// signed offset added on top. The low corner then reads as genuinely low
 /// because it is, rather than because it is a bit below average.
-pub const SLOPE_SPAN: i32 = 255;
+pub const SLOPE_SPAN: i32 = 40;
 
 /// How far the noise pushes a cell off the ramp, at the extremes. Large
 /// enough that a lowland has ponds in it and a highland has outcrops; small
@@ -103,7 +103,7 @@ pub const SLOPE_SPAN: i32 = 255;
 ///
 /// 110 is the largest value that never got it wrong. Re-run the sweep before
 /// changing this or the octave weights.
-pub const NOISE_AMPLITUDE: i32 = 110;
+pub const NOISE_AMPLITUDE: i32 = 16;
 
 /// How much of the map is each ground type, in percent of its cells.
 ///
@@ -313,22 +313,38 @@ pub const WATER_DRAG: i32 = 3;
 
 /// Flow a building shrugs off before the excess starts doing damage.
 ///
-/// Measured rather than guessed. A real surge produces flow speeds with a
-/// median around thirty, a ninetieth percentile of two hundred to two hundred
-/// and fifty, and a peak near three hundred and eighty at the front. The first
-/// numbers here were two and six units — below even the median — which would
-/// have dissolved every building in the game, stone dikes included, within
-/// seconds of the water arriving.
+/// Measured, and measured twice, because the answer depends on the source
+/// model and the source model changed underneath it. A surge whose corner
+/// block was topped up without limit produced flow with a median near thirty
+/// and a peak near three hundred and eighty; the capped surge that replaced it
+/// produces a median of four, a ninety-ninth percentile around seventy, and a
+/// peak near two hundred and fifty. Numbers calibrated against the first are
+/// nonsense against the second — they left every building standing through the
+/// front — and numbers for the second would have dissolved the whole map under
+/// the first.
 ///
-/// So: wood gives way in any strong current, stone only where the front itself
-/// is breaking. A dike that is doing its job sees still water piled against it
-/// and almost no flow at all, which is design §3.4's "a building behind a dike
-/// sees zero flow and takes nothing" applied to the dike as well.
-pub const RESIST_WOOD: u16 = depth(6);
-pub const RESIST_STONE: u16 = depth(16);
+/// Against the surge as it now is: still and slow water does nothing, a strong
+/// current takes wood apart, and only the front itself troubles stone. A dike
+/// that is doing its job has still water piled against it and almost no flow
+/// at all, which is design §3.4's "a building behind a dike sees zero flow and
+/// takes nothing" applied to the dike as well; a dike standing in the front
+/// does eventually go, which seems right — build it where the water arrives,
+/// not where it comes out.
+pub const RESIST_WOOD: u16 = depth(1);
+pub const RESIST_STONE: u16 = depth(3);
 
-/// Damage per tick per unit of excess flow.
-pub const FLOW_DAMAGE: u16 = 1;
+/// The excess flow over a building's resistance is divided by this to get the
+/// damage it takes that tick.
+///
+/// Calibrated so that design §5's "wooden buildings in the main flow break
+/// within a few seconds" is true of the flow the flood actually has. A surge
+/// fills a basin, and once it is in, the water is *deep and slow* —
+/// twenty-eight sixteenths a tick nine cells from the source, against a peak
+/// of two hundred and fifty that happens only at the leading edge and only for
+/// a moment. Dividing the excess by sixteen, as the first version did, made
+/// the damage zero everywhere except in that instant, and a cottage stood in
+/// sixteen units of moving water indefinitely.
+pub const FLOW_TOUGHNESS: u16 = 4;
 
 /// The source corner is an 8 x 8 block (design §5).
 pub const SURGE_SIZE: i32 = 8;

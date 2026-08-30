@@ -306,6 +306,7 @@ impl World {
         b.integrity = 0;
         b.store = Goods::NONE;
         b.workers.clear();
+        self.release_from(id);
         Ok(salvage)
     }
 
@@ -374,8 +375,31 @@ impl World {
         };
         if ruined {
             self.nav_generation += 1;
+            self.release_from(id);
         }
         ruined
+    }
+
+    /// Let go of everybody who depended on a building that is no longer there.
+    ///
+    /// Called wherever a building becomes rubble, rather than only where the
+    /// flood does it. The first version lived inside the flood, so a cottage
+    /// pulled down by its owner left its residents homed to a hole in the
+    /// ground until something else happened to notice.
+    pub(crate) fn release_from(&mut self, id: BuildingId) {
+        for i in 0..self.citizens.len() {
+            if self.citizens[i].workplace == Some(id) {
+                self.citizens[i].workplace = None;
+                self.citizens[i].job = None;
+                self.citizens[i].abandon();
+            }
+            if self.citizens[i].dest == Some(Dest::Building(id)) {
+                self.citizens[i].halt();
+            }
+            if self.citizens[i].home == Some(id) {
+                self.citizens[i].home = None;
+            }
+        }
     }
 
     /// Mark a building's cells as taken. Private, because the occupancy grid
@@ -767,14 +791,21 @@ impl World {
                     // cent of the map and stopped: once its neighbours are as
                     // deep as it is there is no gradient left to drive it.
                     //
-                    // So the source is a pump. Water is put down one cell
-                    // inland of the block as well as in it, every tick, which
-                    // is both the volume and the direction the design asks
-                    // for. The automaton then does what it is good at: turning
-                    // a strong source into a front, pooling it in low ground
-                    // and stacking it against dikes.
-                    self.water.add(x + tx * SURGE_SIZE, y, push);
-                    self.water.add(x, y + ty * SURGE_SIZE, push);
+                    // So the source is a pump: a second block, one block
+                    // inland, held at half the height. That is both the volume
+                    // and the direction the design asks for, and the automaton
+                    // then does what it is good at — turning a strong source
+                    // into a front, pooling it in low ground and stacking it
+                    // against dikes.
+                    //
+                    // Held *to* a depth, not topped up by one. Adding was the
+                    // first version and it accumulated without limit: three
+                    // hundred ticks of pumping piled water three hundred and
+                    // seventy units deep on flat ground beside a surge whose
+                    // stated height was twelve. §5 says the source "sets depth
+                    // = H", and a set is a cap.
+                    self.water.raise_to(x + tx * SURGE_SIZE, y, push);
+                    self.water.raise_to(x, y + ty * SURGE_SIZE, push);
                 }
             }
         }

@@ -633,3 +633,57 @@ arithmetic per tick is exactly what a debug build is worst at.
 determinism test nobody runs is worse than no determinism test, because it
 looks like cover. `debug-assertions` and `overflow-checks` are independent of
 `opt-level` and stay on, so the same panics still fire.
+
+---
+
+## 2026-08-30 — The surge is the sea rising, and terrain relief had to come down
+
+Two corrections to the flood, arrived at together because the first exposed the
+second.
+
+**The source is capped, and the sea comes in over the edges.** Pumping water
+inland without a limit made the flood deep rather than wide: three hundred
+ticks of it piled water three hundred and seventy units deep beside a surge
+whose stated height was twelve. Design §5 says the source "sets depth = H", and
+a set is a cap. But capping it alone left a flood that spread a dozen cells and
+stopped, because a source held at depth H can only raise its neighbours to H
+and then it has nothing left to push with.
+
+What was missing is that a storm surge is *the sea being high*, and a high sea
+does not wait politely at the corner it was poured from — it comes over every
+low edge it can reach. Water now flows in wherever a map edge sits below the
+surge's level. It stops by itself, since nothing can rise above sea level, and
+when the surge ends the sea falls and design §5's step 6 happens on its own.
+
+**Terrain relief is 40, not 255.** With the sea model, the flood's reach is
+arithmetic: surge height divided by the terrain's slope. At 255 units of relief
+over 128 cells that is two units a cell, so a height-twelve surge reaches *six
+cells* and an age-one flood covered two per cent of the map. The design fixes
+what a dike is worth (three units a level) and what a surge is worth (twelve to
+twenty-four) and never fixes the terrain's range — so the terrain is what was
+wrong. A three-unit dike against a two-hundred-and-fifty-five-unit landscape
+was never going to mean anything.
+
+This was tried once before at a relief of 64, abandoned because it seemed to
+buy little, and that judgement was made while the uncapped pump was masking the
+effect. At 40 the flood is what design §5 describes: an age-one surge takes
+fourteen to nineteen per cent of the map, an age-two twenty-three to thirty-two,
+an age-four thirty-six to fifty-two. That is an escalation table you can feel.
+
+The cost is paid in the map generator: forty distinct heights make the
+histogram its quantile bands walk coarse, so the bands land within a few per
+cent of where they are aimed rather than on it. `every_map_has_its_shallows_and_
+its_rock` now asserts the thing that actually matters — every seed has a river
+to bridge and rock to build around — instead of a percentage the discretisation
+cannot honour.
+
+---
+
+## 2026-08-30 — Losing a building lets its people go, wherever it happens
+
+The code that unhomed residents and unemployed workers when a building became
+rubble lived inside the flood, because the flood is what prompted writing it.
+So a cottage pulled down by its own owner left its residents homed to a hole in
+the ground until something else happened to notice. It is a property of a
+building ceasing to exist, not of the water, and it lives in `release_from` now,
+called from both `damage_building` and `demolish`.

@@ -36,6 +36,8 @@ pub struct Water {
     /// Everything that has run off the edges of the map. Kept so the
     /// conservation test can account for every unit ever created.
     pub drained: u64,
+    /// Everything the sea has pushed *in* over the edges during a surge.
+    pub poured: u64,
 }
 
 impl Water {
@@ -45,6 +47,7 @@ impl Water {
             flow_x: vec![0; CELLS],
             flow_y: vec![0; CELLS],
             drained: 0,
+            poured: 0,
         }
     }
 
@@ -72,6 +75,13 @@ impl Water {
     pub fn speed_at(&self, x: i32, y: i32) -> u16 {
         let (fx, fy) = self.flow_at(x, y);
         (fx.abs() + fy.abs()).min(u16::MAX as i32) as u16
+    }
+
+    /// Water conserves: what is here, plus what has run off, is what was
+    /// poured in — by the sea at the edges and by anything else that added to
+    /// it. Used by the tests to account for every sixteenth.
+    pub fn accounted(&self) -> u64 {
+        self.volume() + self.drained
     }
 
     /// Every unit of water currently on the map.
@@ -228,6 +238,40 @@ impl Water {
                     fy[i] += dy * share;
                 }
                 delta[i] -= given;
+            }
+        }
+
+        // The sea coming in.
+        //
+        // A storm surge is the sea being high, and a high sea does not politely
+        // wait at the corner it was poured from — it comes over every low edge
+        // it can reach. Without this the only water on the map is what a single
+        // eight-by-eight block can push through its own perimeter, which
+        // spreads about a dozen cells before it is too thin to drown anybody.
+        // With it, everything below the surge's level fills, which is what a
+        // surge does and what makes "get to high ground" the right advice.
+        //
+        // It stops by itself: water flows in only while the cell's surface is
+        // below the sea's, so nothing can rise above sea level.
+        if sea_surface > 0 {
+            let mut edges: Vec<(usize, i32)> = Vec::new();
+            for y in 0..MAP_H {
+                for x in 0..MAP_W {
+                    let on_edge = x == 0 || y == 0 || x == MAP_W - 1 || y == MAP_H - 1;
+                    if !on_edge {
+                        continue;
+                    }
+                    let i = Map::idx(x, y);
+                    let head = sea_surface - (surface(i) + delta[i]);
+                    if head > 0 {
+                        edges.push((i, (head / 2).min(MAX_TRANSFER as i32)));
+                    }
+                }
+            }
+            for (i, amount) in edges {
+                delta[i] += amount;
+                drained_now = drained_now.saturating_sub(0);
+                self.poured += amount as u64;
             }
         }
 

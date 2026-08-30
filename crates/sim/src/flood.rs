@@ -10,8 +10,8 @@
 //! ground, and a roof. Everything else is arithmetic.
 
 use crate::balance::*;
-use crate::building::{BuildState, BuildingId, Kind};
-use crate::citizen::{CitizenId, State};
+use crate::building::{BuildState, BuildingId};
+use crate::citizen::State;
 use crate::fx::{Fx, V2};
 use crate::map::Map;
 use crate::nav;
@@ -155,31 +155,14 @@ impl World {
             if worst <= resist {
                 continue;
             }
-            let hurt = ((worst - resist) as u32 * FLOW_DAMAGE as u32 / DEPTH_SCALE as u32)
-                .max(1)
-                .min(u16::MAX as u32) as u16;
+            let hurt = ((worst - resist) / FLOW_TOUGHNESS).max(1);
             if self.damage_building(BuildingId(b as u16), hurt) {
                 ruined.push(BuildingId(b as u16));
             }
         }
 
-        // Anybody who worked there is out of a job, and a road that has gone
-        // is a road nobody should still be walking to.
         for id in ruined {
-            for i in 0..self.citizens.len() {
-                if self.citizens[i].workplace == Some(id) {
-                    self.citizens[i].workplace = None;
-                    self.citizens[i].job = None;
-                    self.citizens[i].abandon();
-                }
-                if self.citizens[i].dest == Some(nav::Dest::Building(id)) {
-                    self.citizens[i].halt();
-                }
-                if self.citizens[i].home == Some(id) {
-                    self.citizens[i].home = None;
-                }
-            }
+            self.release_from(id);
         }
-        let _ = (CitizenId(0), Kind::Road);
     }
 }

@@ -349,3 +349,116 @@ fn a_road_finds_its_way_round_the_rock_and_over_the_water() {
         assert_eq!(d, 1, "the road jumps from {:?} to {:?}", pair[0], pair[1]);
     }
 }
+
+// ---- phase 2's definition of done -----------------------------------------
+
+/// A city on the lowland in the flood's path, with or without a dike between
+/// it and the water.
+///
+/// Flat ground on purpose. On generated terrain, whether a city drowns depends
+/// mostly on how far it happens to sit from the low corner — which is the
+/// game, and exactly the wrong variable for a test about dikes.
+fn a_city_in_the_path(with_a_dike: bool) -> u32 {
+    use sim::map::{Corner, Ground, CELLS};
+
+    let mut w = World::new(SEED, 2);
+    for i in 0..CELLS {
+        w.map.height[i] = 40;
+        w.map.ground[i] = Ground::Grass;
+    }
+    w.disaster.sources = vec![(Corner::NorthWest, 0)];
+    w.disaster.height = 12;
+
+    // Everybody of player 0 stands together on the lowland, twenty cells in
+    // from the corner the water comes out of.
+    for i in 0..w.citizens.len() {
+        if w.citizens[i].owner == PlayerId(0) {
+            let n = i as i32;
+            w.citizens[i].pos = sim::fx::V2::cell_centre(15 + n % 4, 15 + n / 4);
+            w.citizens[i].halt();
+        }
+    }
+
+    if with_a_dike {
+        // An L of dikes across the water's path, four cells upstream of where
+        // the people are standing, built to full height.
+        //
+        // Two things this had to learn. Distance from the corner matters:
+        // twenty cells out the water is still near the source's own depth and
+        // goes straight over a low dike, so design §5's "a dike two levels
+        // high stops an age-1 flood dead" is a claim about where the flood
+        // *arrives*, not about standing in front of the source. And a dike is
+        // built to full height here rather than to two levels, because at two
+        // levels it holds back exactly six units of water while six units is
+        // also the depth a citizen drowns in — the band where a two-level dike
+        // is both necessary and sufficient is a single unit wide. That is a
+        // fine thing for a *game* to be tight about and a hopeless thing to
+        // hang a test on. The two arms meet at the
+        // corner, so a cell already taken is skipped rather than placed twice.
+        let mut wall = |w: &mut World, x: i32, y: i32| {
+            if w.can_place(PlayerId(0), Kind::Dike, x, y).is_err() {
+                return;
+            }
+            let id = w.place(PlayerId(0), Kind::Dike, x, y).unwrap();
+            for _ in 0..DIKE_MAX_LEVEL {
+                w.deliver_to(id, Good::Stone, w.buildings[id.0 as usize].outstanding().stone);
+                w.build_at(id, Kind::Dike.build_ticks());
+                if w.buildings[id.0 as usize].level < DIKE_MAX_LEVEL {
+                    w.raise_dike(PlayerId(0), id).unwrap();
+                }
+            }
+            assert_eq!(w.buildings[id.0 as usize].level, DIKE_MAX_LEVEL);
+            assert!(w.buildings[id.0 as usize].standing_now());
+        };
+        for y in 4..30 {
+            wall(&mut w, 11, y);
+        }
+        for x in 4..30 {
+            wall(&mut w, x, 11);
+        }
+    }
+
+    let mut nav = Nav::new();
+    let home: Vec<sim::fx::V2> =
+        w.citizens.iter().map(|c| c.pos).collect();
+
+    while w.day_of_age() < World::IMPACT_DAY {
+        for i in 0..w.citizens.len() {
+            w.citizens[i].food = NEED_FULL;
+            w.citizens[i].rest = NEED_FULL;
+            // They stay where they were put; this is about the water, not
+            // about whether they wandered off.
+            w.citizens[i].pos = home[i];
+            w.citizens[i].halt();
+        }
+        w.tick(&mut nav, &[]);
+    }
+    for _ in 0..SURGE_TICKS + 600 {
+        for c in &mut w.citizens {
+            if c.alive() {
+                c.food = NEED_FULL;
+                c.rest = NEED_FULL;
+            }
+        }
+        w.tick(&mut nav, &[]);
+    }
+    w.population(PlayerId(0))
+}
+
+#[test]
+fn a_city_in_the_flood_survives_only_behind_a_dike() {
+    // Phase 2's definition of done, and design §5's teaching moment: "A dike
+    // two levels high stops an age-1 flood dead; the water goes around."
+    let drowned = a_city_in_the_path(false);
+    let saved = a_city_in_the_path(true);
+
+    assert!(
+        drowned < FOUNDING_CITIZENS,
+        "an age-one flood swept over an undefended city and took nobody"
+    );
+    assert!(
+        saved > drowned,
+        "the dike saved nobody: {saved} alive behind it against {drowned} without it"
+    );
+    assert_eq!(saved, FOUNDING_CITIZENS, "the dike was supposed to stop it dead");
+}

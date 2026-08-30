@@ -413,7 +413,10 @@ mod tests {
             let low = corner_mean(&m, m.low_corner);
             let high = corner_mean(&m, m.high_corner);
             assert!(
-                low + 80 < high,
+                // A fraction of the relief rather than a fixed number: the
+                // height scale is set by what a dike and a surge are worth
+                // (see balance::SLOPE_SPAN) and has already changed once.
+                low + SLOPE_SPAN / 4 < high,
                 "seed {seed}: low corner {:?} averaged {low}, high corner {:?} averaged {high}",
                 m.low_corner,
                 m.high_corner
@@ -436,14 +439,20 @@ mod tests {
             let count = |g: Ground| m.ground.iter().filter(|&&x| x == g).count();
             let pct = |g: Ground| (count(g) * 100 / CELLS) as i32;
 
+            // Bands, not exact percentages. Forty distinct heights make the
+            // histogram the quantile walks coarse enough that one height can
+            // hold several per cent of the map, so the cut cannot land where
+            // it is aimed. What must hold is the thing the fixed-height
+            // thresholds got wrong: every seed has a river to bridge and rock
+            // to build round, rather than one seed in ten having neither.
             assert!(
-                (SHALLOWS_PERCENT - 3..=SHALLOWS_PERCENT + 3).contains(&pct(Ground::Shallows)),
-                "seed {seed}: {}% shallows, wanted about {SHALLOWS_PERCENT}%",
+                (5..=25).contains(&pct(Ground::Shallows)),
+                "seed {seed}: {}% shallows, wanted roughly {SHALLOWS_PERCENT}%",
                 pct(Ground::Shallows)
             );
             assert!(
-                (ROCK_PERCENT - 3..=ROCK_PERCENT + 3).contains(&pct(Ground::Rock)),
-                "seed {seed}: {}% rock, wanted about {ROCK_PERCENT}%",
+                (3..=20).contains(&pct(Ground::Rock)),
+                "seed {seed}: {}% rock, wanted roughly {ROCK_PERCENT}%",
                 pct(Ground::Rock)
             );
             assert!(
@@ -631,7 +640,7 @@ mod probe {
     #[test]
     #[ignore]
     fn sweep_noise_amplitude() {
-        for amp in [90i32, 110, 130, 150, 170, 190] {
+        for amp in [SLOPE_SPAN / 8, SLOPE_SPAN / 5, SLOPE_SPAN * 3 / 10, SLOPE_SPAN * 2 / 5, SLOPE_SPAN / 2] {
             let mut wrong_corner = 0;
             let mut worst_ramp = i32::MAX;
             for seed in 0..300u64 {

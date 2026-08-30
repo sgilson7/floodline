@@ -283,12 +283,12 @@ fn the_surge_takes_the_low_country() {
     for seed in 0..5u64 {
         let (wet, deep, peak) = flood_a_real_map(seed, 12);
         assert!(
-            wet * 100 / CELLS >= 8,
+            wet * 100 / CELLS >= 10,
             "seed {seed}: an age-one flood covered only {}% of the map",
             wet * 100 / CELLS
         );
-        assert!(deep > 400, "seed {seed}: only {deep} cells got properly deep");
-        assert!(peak > 500_000, "seed {seed}: peak volume of only {peak}");
+        assert!(deep > 1_000, "seed {seed}: only {deep} cells got properly deep");
+        assert!(peak > 100_000, "seed {seed}: peak volume of only {peak}");
     }
 }
 
