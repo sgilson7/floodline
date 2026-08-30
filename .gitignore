@@ -1,0 +1,9 @@
+# Build output.
+target/
+dist/
+
+# Reference checkouts. Cloned by hand (see DECISIONS.md), read for their
+# conventions, never compiled as part of this workspace.
+reference/
+
+.DS_Store
