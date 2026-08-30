@@ -107,3 +107,36 @@ pub const MIN_SITE_SPACING: i32 = 40;
 /// The Hearth's footprint, and so the size of the flat pad the generator
 /// levels under each site.
 pub const HEARTH_SIZE: i32 = 3;
+
+// ---- buildings -------------------------------------------------------------
+
+/// What a city starts with, held at its Hearth.
+///
+/// Design §4 says "a stockpile of wood" and stops there, which leaves the MVP
+/// unfinishable: the plan's list of buildings has no Quarry and its list of
+/// jobs has no Quarrier, so there is no way to produce stone — and a Dike
+/// costs stone, and surviving the flood behind a Dike is the entire point of
+/// the vertical slice. So a city starts with stone as well. See DECISIONS.md.
+///
+/// Sized to cover roughly four Cottages and a Granary, plus three levels of
+/// Dike, with nothing spare. A player who spends it all on housing has made a
+/// choice about the flood, which is the choice the game is about.
+pub const STARTING_WOOD: u16 = 200;
+pub const STARTING_STONE: u16 = 120;
+
+/// How much of its materials a demolished or ruined building gives back
+/// (design §3.3: "rubble returns a fraction of its materials"), as a percent.
+pub const RUBBLE_REFUND_PERCENT: u16 = 50;
+
+/// Builder-ticks one builder contributes per tick at full rest. A tired
+/// citizen works at half speed (design §3.2).
+pub const BUILDER_EFFORT: u32 = 1;
+
+/// How many builders can crowd onto one construction site.
+pub const BUILDER_SLOTS: usize = 4;
+
+/// A Dike level raises the effective ground by this much (design §3.3), and a
+/// Dike can be built up to this many levels. Two levels stops an age-1 surge
+/// of height 12 dead, which is the teaching moment in design §5.
+pub const DIKE_HEIGHT_PER_LEVEL: u16 = 3;
+pub const DIKE_MAX_LEVEL: u8 = 4;

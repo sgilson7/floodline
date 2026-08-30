@@ -44,10 +44,16 @@ fn two_worlds_from_one_seed_stay_identical_for_ten_thousand_ticks() {
                 a.tick();
                 b.tick();
 
-                // Everything a tick can touch. The map is generated once and
-                // not written again until phase 2 brings water, so comparing
-                // it here would be sixteen thousand cells of nothing.
-                if a.tick != b.tick || a.rng != b.rng || a.citizens != b.citizens {
+                // Everything a tick can touch. The map and the occupancy grid
+                // are written when the world is built and then only by a
+                // placement, so comparing thirty-two thousand cells every tick
+                // would be cells of nothing; the periodic full comparison
+                // below covers them.
+                if a.tick != b.tick
+                    || a.rng != b.rng
+                    || a.citizens != b.citizens
+                    || a.buildings != b.buildings
+                {
                     panic!(
                         "seed {seed}, {players} players: diverged at tick {t} — {}",
                         first_difference(&a, &b)
@@ -133,9 +139,20 @@ fn first_difference(a: &World, b: &World) -> String {
     if a.rng != b.rng {
         return "the rng state".to_owned();
     }
+    if a.occupancy != b.occupancy {
+        return "the occupancy grid".to_owned();
+    }
     for (x, y) in a.citizens.iter().zip(&b.citizens) {
         if x != y {
             return format!("citizen {:?}: {x:?} vs {y:?}", x.id);
+        }
+    }
+    if a.buildings.len() != b.buildings.len() {
+        return format!("{} buildings vs {}", a.buildings.len(), b.buildings.len());
+    }
+    for (x, y) in a.buildings.iter().zip(&b.buildings) {
+        if x != y {
+            return format!("building {:?}: {x:?} vs {y:?}", x.id);
         }
     }
     for p in &a.players {

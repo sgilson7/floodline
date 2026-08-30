@@ -6,12 +6,39 @@
 //! the lockstep" — is why the mutating methods are the short list they are.
 
 use crate::balance::*;
+use crate::building::{BuildState, Building, BuildingId, Good, Goods, Kind};
 use crate::citizen::{Citizen, CitizenId, PlayerId};
 use crate::fx::V2;
 use crate::map::Map;
 use crate::names::NAMES;
 use crate::rng::Rng;
 use serde::{Deserialize, Serialize};
+
+/// Why a rule said no.
+///
+/// Design §7 has `World::apply` return one of these, and every peer must
+/// reject the same command for the same reason — a rule that is enforced on
+/// one machine and not another is a desync wearing a disguise.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum RuleError {
+    /// Commanding somebody else's city.
+    NotYours,
+    /// The footprint would hang off the edge of the map.
+    OffMap,
+    /// Something is already standing there.
+    Occupied,
+    /// Rock, or shallows under something that is not a bridge, or dry land
+    /// under a bridge.
+    WrongGround,
+    /// One Hearth per player, and the run starts with it.
+    OneHearthOnly,
+    NoSuchBuilding,
+    NoSuchCitizen,
+    /// The building is a site or rubble, and the command needed it standing.
+    NotStanding,
+    /// A dike cannot go above `DIKE_MAX_LEVEL`.
+    TooHigh,
+}
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct World {
@@ -24,6 +51,17 @@ pub struct World {
     pub map: Map,
     /// Indexed by `CitizenId`. The dead stay in it, so an id never moves.
     pub citizens: Vec<Citizen>,
+    /// Indexed by `BuildingId`. Rubble stays in it, for the same reason.
+    pub buildings: Vec<Building>,
+    /// Which building is on each cell, or none. Design §3.1 puts "an optional
+    /// building footprint" on the cell, and every walk, placement check and
+    /// flood rule wants that answer in one step rather than by scanning the
+    /// building list.
+    ///
+    /// Derived from `buildings`, and deliberately still part of the world and
+    /// so of the checksum: if it ever disagrees with the list, that is a bug
+    /// worth catching on the tick it happens rather than an invisible one.
+    pub occupancy: Vec<Option<BuildingId>>,
     pub players: Vec<PlayerId>,
 }
 
@@ -54,13 +92,168 @@ impl World {
             }
         }
 
-        World {
+        let mut world = World {
             seed,
             rng,
             tick: 0,
             map,
             citizens,
+            buildings: Vec::new(),
+            occupancy: vec![None; crate::map::CELLS],
             players: (0..players).map(|p| PlayerId(p as u8)).collect(),
+        };
+
+        // The Hearths are already there when the run begins (design §4), each
+        // holding what its city starts with. `level_pad` levelled a
+        // HEARTH_SIZE square under every site during generation, so these
+        // always fit.
+        for p in 0..players {
+            let (cx, cy) = world.map.hearth_sites[p as usize];
+            let (w, h) = Kind::Hearth.size();
+            let id = BuildingId(world.buildings.len() as u16);
+            let mut hearth =
+                Building::standing(id, PlayerId(p as u8), Kind::Hearth, cx - w / 2, cy - h / 2);
+            hearth.store = Goods::of(0, STARTING_WOOD, STARTING_STONE);
+            world.occupy(&hearth);
+            world.buildings.push(hearth);
+        }
+
+        world
+    }
+
+    // ---- buildings ---------------------------------------------------------
+
+    /// Which building covers a cell, if any.
+    pub fn building_at(&self, x: i32, y: i32) -> Option<&Building> {
+        if !Map::contains(x, y) {
+            return None;
+        }
+        self.occupancy[Map::idx(x, y)].map(|id| &self.buildings[id.0 as usize])
+    }
+
+    /// Whether `kind` may be placed with its top-left at `(x, y)`.
+    ///
+    /// Split from `place` so the GUI can grey out an illegal site without
+    /// issuing a command that will be rejected — and so the reason can be
+    /// tested one at a time.
+    pub fn can_place(
+        &self,
+        owner: PlayerId,
+        kind: Kind,
+        x: i32,
+        y: i32,
+    ) -> Result<(), RuleError> {
+        if !self.players.contains(&owner) {
+            return Err(RuleError::NotYours);
+        }
+        if kind == Kind::Hearth {
+            // The run starts with the only one a player gets.
+            return Err(RuleError::OneHearthOnly);
+        }
+        if !Building::fits_on_map(kind, x, y) {
+            return Err(RuleError::OffMap);
+        }
+        if !Building::ground_suits(kind, &self.map, x, y) {
+            return Err(RuleError::WrongGround);
+        }
+        for (cx, cy) in Building::footprint(kind, x, y) {
+            if self.occupancy[Map::idx(cx, cy)].is_some() {
+                return Err(RuleError::Occupied);
+            }
+        }
+        Ok(())
+    }
+
+    /// Start a construction site. Materials still have to be hauled to it and
+    /// builder-ticks spent on it before it is anything.
+    pub fn place(
+        &mut self,
+        owner: PlayerId,
+        kind: Kind,
+        x: i32,
+        y: i32,
+    ) -> Result<BuildingId, RuleError> {
+        self.can_place(owner, kind, x, y)?;
+        let id = BuildingId(self.buildings.len() as u16);
+        let b = Building::site(id, owner, kind, x, y);
+        self.occupy(&b);
+        self.buildings.push(b);
+        Ok(id)
+    }
+
+    /// Raise an existing dike by one level. Costs another dike's worth of
+    /// stone, hauled and built like the first.
+    pub fn raise_dike(&mut self, owner: PlayerId, id: BuildingId) -> Result<(), RuleError> {
+        let b = self.buildings.get_mut(id.0 as usize).ok_or(RuleError::NoSuchBuilding)?;
+        if b.owner != owner {
+            return Err(RuleError::NotYours);
+        }
+        if b.kind != Kind::Dike || b.state != BuildState::Standing {
+            return Err(RuleError::NotStanding);
+        }
+        if b.level >= DIKE_MAX_LEVEL {
+            return Err(RuleError::TooHigh);
+        }
+        b.level += 1;
+        b.state = BuildState::Site;
+        b.progress = 0;
+        Ok(())
+    }
+
+    /// Pull a building down. Its salvage goes to the owner's nearest store.
+    pub fn demolish(&mut self, owner: PlayerId, id: BuildingId) -> Result<Goods, RuleError> {
+        let b = self.buildings.get(id.0 as usize).ok_or(RuleError::NoSuchBuilding)?;
+        if b.owner != owner {
+            return Err(RuleError::NotYours);
+        }
+        let salvage = b.salvage();
+        let cells: Vec<(i32, i32)> = b.cells().collect();
+        for (cx, cy) in cells {
+            if Map::contains(cx, cy) {
+                self.occupancy[Map::idx(cx, cy)] = None;
+            }
+        }
+        let b = &mut self.buildings[id.0 as usize];
+        b.state = BuildState::Rubble;
+        b.integrity = 0;
+        b.store = Goods::NONE;
+        b.workers.clear();
+        Ok(salvage)
+    }
+
+    /// The ground a flood sees: terrain, plus whatever a standing dike adds.
+    pub fn effective_height(&self, x: i32, y: i32) -> u16 {
+        let base = self.map.height_at(x, y) as u16;
+        match self.building_at(x, y) {
+            Some(b) => base.saturating_add(b.ground_bonus()),
+            None => base,
+        }
+    }
+
+    /// Every standing store of `owner` that holds `good`, nearest first from
+    /// `(x, y)`. Ordered by distance and then by id, so ties break the same
+    /// way on every peer.
+    pub fn stores_for(&self, owner: PlayerId, good: Good, x: i32, y: i32) -> Vec<BuildingId> {
+        let mut found: Vec<(i32, BuildingId)> = self
+            .buildings
+            .iter()
+            .filter(|b| b.owner == owner && b.standing_now() && b.kind.stores(good))
+            .map(|b| {
+                let (bx, by) = b.centre();
+                ((bx - x).abs() + (by - y).abs(), b.id)
+            })
+            .collect();
+        found.sort_unstable();
+        found.into_iter().map(|(_, id)| id).collect()
+    }
+
+    /// Mark a building's cells as taken. Private, because the occupancy grid
+    /// and the building list must only ever change together.
+    fn occupy(&mut self, b: &Building) {
+        for (cx, cy) in b.cells() {
+            if Map::contains(cx, cy) {
+                self.occupancy[Map::idx(cx, cy)] = Some(b.id);
+            }
         }
     }
 
@@ -118,6 +311,7 @@ pub fn fnv1a(bytes: &[u8]) -> u64 {
 mod tests {
     use super::*;
     use crate::citizen::State;
+    use crate::map::{Ground, MAP_H, MAP_W};
 
     #[test]
     fn fnv1a_matches_the_published_vectors() {
@@ -186,11 +380,21 @@ mod tests {
 
     #[test]
     fn a_snapshot_is_small_enough_to_send() {
-        // Design §8 budgets 50–150 KB for a late joiner's Welcome at 500
-        // citizens. This is the empty end of that: mostly the 16 k map cells.
+        // Design §8 budgets 50–150 KB for a late joiner's `Welcome` at 500
+        // citizens. A fresh world is the empty end of that and is almost
+        // entirely the two 16 k-cell grids — heights, ground, and the mostly
+        // empty occupancy index, which postcard writes as one byte per free
+        // cell. Worth keeping an eye on: it is the floor, and every building
+        // and citizen adds to it.
         let w = World::new(1, 6);
         let bytes = postcard::to_allocvec(&w).unwrap().len();
-        assert!(bytes < 150_000, "a fresh six-player world encodes to {bytes} bytes");
+        assert!(
+            bytes < 150_000,
+            "a fresh six-player world encodes to {bytes} bytes, over the §8 budget"
+        );
+        // And it really is dominated by the grids rather than by anything
+        // that grows with the game.
+        assert!(bytes > crate::map::CELLS * 2, "suspiciously small: {bytes} bytes");
     }
 
     #[test]
@@ -302,6 +506,331 @@ mod tests {
             c.tick_needs();
         }
         assert_eq!(c, before, "a corpse does not get hungrier");
+    }
+
+    // ---- buildings ---------------------------------------------------------
+
+    /// A cell of buildable ground with nothing on it, owned by nobody,
+    /// searched outward from a player's hearth. For tests that need somewhere
+    /// legal to build without caring where.
+    fn free_spot(w: &World, p: usize, kind: Kind) -> (i32, i32) {
+        let (hx, hy) = w.map.hearth_sites[p];
+        for r in 3..60i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (x, y) = (hx + dx, hy + dy);
+                    if w.can_place(PlayerId(p as u8), kind, x, y).is_ok() {
+                        return (x, y);
+                    }
+                }
+            }
+        }
+        panic!("no legal spot for {kind:?} near hearth {p}");
+    }
+
+    #[test]
+    fn a_run_begins_with_one_hearth_per_player_holding_its_stores() {
+        for players in 2..=6u32 {
+            let w = World::new(4, players);
+            assert_eq!(w.buildings.len(), players as usize);
+            for (p, b) in w.buildings.iter().enumerate() {
+                assert_eq!(b.kind, Kind::Hearth);
+                assert_eq!(b.owner, PlayerId(p as u8));
+                assert!(b.standing_now(), "a hearth is not a building site");
+                assert_eq!(b.store, Goods::of(0, STARTING_WOOD, STARTING_STONE));
+
+                // Centred on the site the map generator levelled for it.
+                let (cx, cy) = w.map.hearth_sites[p];
+                assert_eq!(b.centre(), (cx, cy));
+                for (x, y) in b.cells() {
+                    assert_eq!(
+                        w.occupancy[Map::idx(x, y)],
+                        Some(b.id),
+                        "the hearth's own cell is not marked as its"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_occupancy_grid_agrees_with_the_building_list() {
+        let mut w = World::new(5, 3);
+        let (x, y) = free_spot(&w, 0, Kind::Cottage);
+        let id = w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
+
+        let mut counted = 0;
+        for (i, slot) in w.occupancy.iter().enumerate() {
+            if let Some(bid) = slot {
+                let b = &w.buildings[bid.0 as usize];
+                assert!(
+                    b.cells().any(|(cx, cy)| Map::idx(cx, cy) == i),
+                    "cell {i} claims {bid:?}, which does not cover it"
+                );
+                counted += 1;
+            }
+        }
+        let expected: usize = w.buildings.iter().map(|b| b.cells().count()).sum();
+        assert_eq!(counted, expected, "every occupied cell is accounted for");
+        assert_eq!(w.building_at(x, y).map(|b| b.id), Some(id));
+    }
+
+    #[test]
+    fn placing_refuses_a_footprint_that_hangs_off_the_map() {
+        let mut w = World::new(1, 2);
+        assert_eq!(
+            w.can_place(PlayerId(0), Kind::Farm, MAP_W - 1, 5),
+            Err(RuleError::OffMap)
+        );
+        assert_eq!(w.can_place(PlayerId(0), Kind::Cottage, -1, 5), Err(RuleError::OffMap));
+        assert!(w.place(PlayerId(0), Kind::Farm, MAP_W - 1, 5).is_err());
+        assert_eq!(w.buildings.len(), 2, "a rejected placement builds nothing");
+    }
+
+    #[test]
+    fn placing_refuses_an_occupied_footprint() {
+        let mut w = World::new(6, 2);
+        let (x, y) = free_spot(&w, 0, Kind::Cottage);
+        w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
+
+        // Exactly on top.
+        assert_eq!(w.can_place(PlayerId(0), Kind::Cottage, x, y), Err(RuleError::Occupied));
+        // And merely overlapping by one cell, in each direction.
+        for (dx, dy) in [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1)] {
+            assert_eq!(
+                w.can_place(PlayerId(0), Kind::Cottage, x + dx, y + dy),
+                Err(RuleError::Occupied),
+                "overlap at ({dx},{dy}) was allowed"
+            );
+        }
+        // Another player's building is in the way too — the map is shared.
+        assert_eq!(w.can_place(PlayerId(1), Kind::Cottage, x, y), Err(RuleError::Occupied));
+    }
+
+    #[test]
+    fn placing_refuses_the_wrong_ground() {
+        let mut w = World::new(2, 2);
+        let rock = (0..MAP_H)
+            .flat_map(|y| (0..MAP_W).map(move |x| (x, y)))
+            .find(|&(x, y)| w.map.ground_at(x, y) == Ground::Rock)
+            .expect("every map has rock");
+        assert_eq!(
+            w.can_place(PlayerId(0), Kind::Dike, rock.0, rock.1),
+            Err(RuleError::WrongGround)
+        );
+
+        let wet = (0..MAP_H)
+            .flat_map(|y| (0..MAP_W).map(move |x| (x, y)))
+            .find(|&(x, y)| w.map.ground_at(x, y) == Ground::Shallows)
+            .expect("every map has shallows");
+        assert_eq!(
+            w.can_place(PlayerId(0), Kind::Cottage, wet.0, wet.1),
+            Err(RuleError::WrongGround),
+            "a cottage in the river"
+        );
+        assert_eq!(
+            w.can_place(PlayerId(0), Kind::Bridge, wet.0, wet.1),
+            Ok(()),
+            "but a bridge belongs there"
+        );
+
+        let dry = free_spot(&w, 0, Kind::Dike);
+        assert_eq!(
+            w.can_place(PlayerId(0), Kind::Bridge, dry.0, dry.1),
+            Err(RuleError::WrongGround),
+            "and nowhere else"
+        );
+        let _ = w.place(PlayerId(0), Kind::Bridge, wet.0, wet.1).unwrap();
+    }
+
+    #[test]
+    fn nobody_gets_a_second_hearth_and_nobody_commands_a_city_that_is_not_theirs() {
+        let w = World::new(3, 2);
+        let (x, y) = free_spot(&w, 0, Kind::Cottage);
+        assert_eq!(
+            w.can_place(PlayerId(0), Kind::Hearth, x, y),
+            Err(RuleError::OneHearthOnly)
+        );
+        assert_eq!(
+            w.can_place(PlayerId(9), Kind::Cottage, x, y),
+            Err(RuleError::NotYours),
+            "a player who is not in this run"
+        );
+    }
+
+    #[test]
+    fn a_building_goes_up_by_hauling_then_building() {
+        let mut w = World::new(8, 2);
+        let (x, y) = free_spot(&w, 0, Kind::Granary);
+        let id = w.place(PlayerId(0), Kind::Granary, x, y).unwrap();
+
+        // Take the wood out of the hearth, as a hauler would.
+        let hearth = w.buildings[0].id;
+        let carried = w.buildings[hearth.0 as usize].store.take(Good::Wood, 50);
+        assert_eq!(carried, 50);
+        assert_eq!(w.buildings[hearth.0 as usize].store.wood, STARTING_WOOD - 50);
+
+        let b = &mut w.buildings[id.0 as usize];
+        assert_eq!(b.deliver(Good::Wood, carried), 50);
+        assert!(b.ready_to_build());
+        for _ in 0..Kind::Granary.build_ticks() {
+            b.build(BUILDER_EFFORT);
+        }
+        assert!(w.buildings[id.0 as usize].standing_now());
+    }
+
+    #[test]
+    fn demolishing_frees_the_ground_and_returns_something() {
+        let mut w = World::new(12, 2);
+        let (x, y) = free_spot(&w, 0, Kind::Cottage);
+        let id = w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
+        w.buildings[id.0 as usize].deliver(Good::Wood, 30);
+        w.buildings[id.0 as usize].build(Kind::Cottage.build_ticks());
+
+        assert_eq!(w.demolish(PlayerId(1), id), Err(RuleError::NotYours));
+        let salvage = w.demolish(PlayerId(0), id).unwrap();
+        assert_eq!(salvage, Goods::wood(15), "half the wood back");
+        assert_eq!(w.buildings[id.0 as usize].state, BuildState::Rubble);
+        assert!(w.building_at(x, y).is_none(), "the ground is free again");
+        assert_eq!(w.can_place(PlayerId(0), Kind::Cottage, x, y), Ok(()));
+        assert_eq!(w.demolish(PlayerId(0), BuildingId(999)), Err(RuleError::NoSuchBuilding));
+    }
+
+    #[test]
+    fn rubble_keeps_its_id() {
+        // The reason buildings are never removed from the vector: an id is an
+        // index for the whole run, so nothing has to be remapped when a flood
+        // takes half a city.
+        let mut w = World::new(13, 2);
+        let (x, y) = free_spot(&w, 0, Kind::Cottage);
+        let first = w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
+        w.demolish(PlayerId(0), first).unwrap();
+        let second = w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
+        assert_ne!(first, second, "the id is not reused");
+        assert_eq!(w.buildings[first.0 as usize].state, BuildState::Rubble);
+        for (i, b) in w.buildings.iter().enumerate() {
+            assert_eq!(b.id, BuildingId(i as u16), "ids are still indices");
+        }
+    }
+
+    #[test]
+    fn a_dike_raises_the_ground_only_once_it_stands() {
+        let mut w = World::new(15, 2);
+        let (x, y) = free_spot(&w, 0, Kind::Dike);
+        let base = w.map.height_at(x, y) as u16;
+        let id = w.place(PlayerId(0), Kind::Dike, x, y).unwrap();
+        assert_eq!(w.effective_height(x, y), base, "a site holds nothing back");
+
+        w.buildings[id.0 as usize].deliver(Good::Stone, 40);
+        w.buildings[id.0 as usize].build(Kind::Dike.build_ticks());
+        assert_eq!(w.effective_height(x, y), base + DIKE_HEIGHT_PER_LEVEL);
+
+        // Raising it puts it back under construction until the stone arrives.
+        w.raise_dike(PlayerId(0), id).unwrap();
+        assert_eq!(w.effective_height(x, y), base, "and it is a site again while it grows");
+        assert_eq!(w.buildings[id.0 as usize].outstanding(), Goods::stone(40));
+        w.buildings[id.0 as usize].deliver(Good::Stone, 40);
+        w.buildings[id.0 as usize].build(Kind::Dike.build_ticks());
+        assert_eq!(w.effective_height(x, y), base + DIKE_HEIGHT_PER_LEVEL * 2);
+
+        // A level-2 dike stops an age-1 surge of height 12 (design §5), and
+        // this is the arithmetic that has to hold for that to be true.
+        assert!(DIKE_HEIGHT_PER_LEVEL * 2 * 2 >= 12);
+    }
+
+    #[test]
+    fn a_dike_cannot_grow_forever() {
+        let mut w = World::new(16, 2);
+        let (x, y) = free_spot(&w, 0, Kind::Dike);
+        let id = w.place(PlayerId(0), Kind::Dike, x, y).unwrap();
+        w.buildings[id.0 as usize].deliver(Good::Stone, 40);
+        w.buildings[id.0 as usize].build(Kind::Dike.build_ticks());
+
+        for _ in 1..DIKE_MAX_LEVEL {
+            w.raise_dike(PlayerId(0), id).unwrap();
+            let cost = w.buildings[id.0 as usize].outstanding();
+            w.buildings[id.0 as usize].deliver(Good::Stone, cost.stone);
+            w.buildings[id.0 as usize].build(Kind::Dike.build_ticks());
+        }
+        assert_eq!(w.buildings[id.0 as usize].level, DIKE_MAX_LEVEL);
+        assert_eq!(w.raise_dike(PlayerId(0), id), Err(RuleError::TooHigh));
+        assert_eq!(w.raise_dike(PlayerId(1), id), Err(RuleError::NotYours));
+
+        // Only a standing dike can be raised, and only a dike.
+        let (cx, cy) = free_spot(&w, 0, Kind::Cottage);
+        let cottage = w.place(PlayerId(0), Kind::Cottage, cx, cy).unwrap();
+        assert_eq!(w.raise_dike(PlayerId(0), cottage), Err(RuleError::NotStanding));
+    }
+
+    #[test]
+    fn stores_are_listed_nearest_first() {
+        let mut w = World::new(21, 2);
+        let hearth = &w.buildings[0];
+        let (hx, hy) = hearth.centre();
+
+        let mut ids = Vec::new();
+        for target in [6, 14] {
+            let mut placed = None;
+            'search: for r in target..target + 12i32 {
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        if dx.abs() != r && dy.abs() != r {
+                            continue;
+                        }
+                        let (x, y) = (hx + dx, hy + dy);
+                        if w.can_place(PlayerId(0), Kind::Stockpile, x, y).is_ok() {
+                            placed = Some(w.place(PlayerId(0), Kind::Stockpile, x, y).unwrap());
+                            break 'search;
+                        }
+                    }
+                }
+            }
+            let id = placed.expect("somewhere to put a stockpile");
+            w.buildings[id.0 as usize].build(Kind::Stockpile.build_ticks());
+            ids.push(id);
+        }
+
+        // The hearth stores wood too, and it is the closest thing to itself.
+        let near = w.stores_for(PlayerId(0), Good::Wood, hx, hy);
+        assert_eq!(near.first(), Some(&BuildingId(0)));
+        assert_eq!(near.len(), 3);
+
+        // Distances are non-decreasing down the list — the property a hauler
+        // relies on.
+        let dist = |id: BuildingId, x: i32, y: i32| {
+            let (bx, by) = w.buildings[id.0 as usize].centre();
+            (bx - x).abs() + (by - y).abs()
+        };
+        for pair in near.windows(2) {
+            assert!(dist(pair[0], hx, hy) <= dist(pair[1], hx, hy));
+        }
+
+        // Both new stockpiles are on the list, and the other player's hearth
+        // is not — a store belongs to a city, not to the map.
+        assert!(near.contains(&ids[0]) && near.contains(&ids[1]));
+        assert_eq!(
+            w.stores_for(PlayerId(1), Good::Wood, hx, hy),
+            vec![BuildingId(1)],
+            "player 1 has only their own hearth"
+        );
+        // And a granary holds food, not wood.
+        assert!(!Kind::Granary.stores(Good::Wood));
+    }
+
+    #[test]
+    fn a_site_is_not_a_store() {
+        let mut w = World::new(22, 2);
+        let (x, y) = free_spot(&w, 0, Kind::Stockpile);
+        let id = w.place(PlayerId(0), Kind::Stockpile, x, y).unwrap();
+        assert!(
+            !w.stores_for(PlayerId(0), Good::Wood, x, y).contains(&id),
+            "an unfinished stockpile is a hole in the ground"
+        );
+        w.buildings[id.0 as usize].build(Kind::Stockpile.build_ticks());
+        assert!(w.stores_for(PlayerId(0), Good::Wood, x, y).contains(&id));
     }
 
     #[test]

@@ -6,6 +6,7 @@
 //! is. Everything here is integer and ordered, like the rest of `sim`.
 
 use crate::balance::*;
+use crate::building::BuildingId;
 use crate::fx::V2;
 use serde::{Deserialize, Serialize};
 
@@ -18,11 +19,6 @@ pub struct CitizenId(pub u16);
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub struct PlayerId(pub u8);
-
-/// Placeholder until phase 1 item 4 builds the real thing. Declared here so
-/// `Citizen` has its final shape and the checksum does not change under it.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
-pub struct BuildingId(pub u16);
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Job {
