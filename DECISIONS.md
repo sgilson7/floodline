@@ -1252,3 +1252,99 @@ it spent the same eight people on both.
 The tests that asserted "forty" now ask `Kind::Dike.cost()` instead. What they
 were for is that a dike pays per level and starts holding water back only when
 it stands, and neither of those is a fact about the number.
+
+---
+
+## 2026-08-30 — Three ways a room stopped working, and one gesture that did nothing
+
+Found by playing, not by testing: a real evening in which two people could not
+get into the same game and a single-player village starved before the flood.
+Every one of them was reproduced from scratch before it was touched, and every
+one now has a test.
+
+### The room that would not let anybody in
+
+Joining an abandoned room looked exactly like joining a room that does not
+exist. Logging the bytes on the channels settled it in a minute:
+
+```
+in   1 byte  [72] = 'H'    the host's role byte
+out  1 byte  [74] = 'J'    ours
+out 16 bytes              Hello, with the build hash
+                          <- nothing. ever.
+```
+
+WebRTC had connected. The host had received a `Hello` and answered with
+silence. Three separate faults, all of them fatal on their own.
+
+**The plugin outlived the game.** Leaving the lobby set `session = None`, which
+dropped the Rust `Session` — and `WebPeer` had no `Drop`, so nothing ever told
+the browser. The tab stayed in the Trystero room for as long as it was open,
+exchanging role bytes with anybody who arrived and queueing their `Hello`s for
+a game that no longer existed. `WebPeer` now closes the room when it is
+dropped.
+
+That needs a session generation, and the generation is not belt and braces: a
+new session is built *before* the old one is dropped, so hosting a second game
+opened a room and then had the previous session's teardown close it half a
+frame later. `rtc_host` and `rtc_join` hand back which session they made and
+`rtc_close` takes it, so a stale handle closes nothing.
+
+**A seat was never given back.** Player ids came from a counter that only went
+up, so a two-seat game accepted exactly one joiner *for the host's whole life*.
+The first one takes player 1; they close the tab; every `Hello` after that is
+answered "this game is full". Two people who fumbled their first attempt could
+never play at all. Seats are now the lowest free one — and freed **only in the
+lobby**, because a player who drops mid-run leaves a city standing and handing
+their seat on would hand over the city with it.
+
+**Any departure was the host leaving.** `peer_left` did not look at *which*
+peer had gone, so a joiner that met another joiner and let it go announced "the
+host left the game". In a Trystero room, where everybody meets everybody, that
+is not an edge case. It now checks, and a joiner that loses a host which never
+answered goes back to waiting and greets whoever turns up next — which is the
+way out of the failure above, if one is ever left behind again.
+
+**And the screen said the same thing either way.** A joiner's `connected()` was
+always 1, because `peer_of` is a host's bookkeeping, so the lobby could not
+tell a finished handshake from a dead relay: "looking for the host on the
+public relays" whether it had found one or not. `Roster` used to carry
+`world.players` — every seat on the map, occupied or not — and joiners ignored
+it. It now carries who is actually connected, joiners keep it, and the lobby
+says which of the three things is happening. A joiner that has been connected
+for five hundred frames with no `Welcome` says so, and suggests a fresh room
+code.
+
+### The gesture that did nothing
+
+Choose the whole city, right-click the farm. That is the most natural thing a
+player does and it was refused *whole*: a farm has three job slots, eight is
+more than three, and a command is all-or-nothing (which is right, and stays).
+So nobody farmed, the farm stood empty, and the city starved on day four — with
+a red line under the map that faded in three seconds as the only sign. The
+flood, which is the entire game, was never reached at all.
+
+`World::will_take` and `World::will_house` answer "how many of these would you
+actually take", using the same arithmetic `assign` and `SetHome` use and living
+next to them, so the two cannot drift. The mouse asks first and sends what
+fits: three go to work, and the game says *"3 of 8 - that is all the room there
+is"*.
+
+Three things went with it, because the failure was as much about not being told
+as about not working. The panel has the warning line phase 5 asked for and it
+names the one thing that will kill this city next — "no granary: your people
+have nowhere to eat" is the sentence that would have saved the evening. The
+panel says what is under the cursor, so a farm's three slots are visible before
+the click rather than as a refusal after it. And a refusal is drawn on a plate
+and held at full strength before it fades, instead of dissolving into the
+terrain from the first frame.
+
+### And one number that was wrong because of another
+
+`STARTING_STONE` went to 720 last session and the Hearth's capacity stayed at
+500. A hauler that carried twenty stone to a site wanting ten had nowhere to
+put the other ten — the Hearth was over its own capacity, so `has_room_for`
+refused it — and the leftovers stayed in its arms for the rest of the run. A
+hundred and forty stone, a fifth of the game's entire supply, quietly gone.
+`the_hearth_can_hold_what_a_city_starts_with` now makes that a rule rather than
+a coincidence.

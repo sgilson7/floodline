@@ -627,3 +627,174 @@ fn a_transport_complaint_in_the_lobby_is_advice_and_not_the_end() {
     host.advance(&mut wire);
     assert_eq!(host.status, Status::Ended("the connection failed".into()));
 }
+
+#[test]
+fn a_seat_a_joiner_left_in_the_lobby_is_given_to_the_next_one() {
+    // The bug that made a room single-use. Seats were handed out by a counter
+    // that only went up, so a two-seat game accepted exactly one joiner *for
+    // the host's whole life*: the first one takes player 1, closes the tab,
+    // and every later `Hello` is answered "this game is full". Two people who
+    // fumbled their first attempt could never play at all.
+    let net = Loopback::new(3, Conditions::default());
+    let mut peers: Vec<LoopbackPeer> = (0..3).map(|i| net.peer(PeerId(i))).collect();
+    let mut host = Lockstep::host(31, 2, BUILD);
+    let mut first = Lockstep::join(BUILD);
+
+    let run = |host: &mut Lockstep, other: &mut Lockstep, oi: usize, n: u32,
+                   peers: &mut Vec<LoopbackPeer>| {
+        for _ in 0..n {
+            host.advance(&mut peers[0]);
+            other.advance(&mut peers[oi]);
+            net.step();
+        }
+    };
+
+    run(&mut host, &mut first, 1, 20, &mut peers);
+    assert_eq!(first.me, PlayerId(1), "the first joiner was never welcomed");
+    assert_eq!(host.connected(), 2);
+
+    // They close the tab, still in the lobby.
+    net.disconnect(PeerId(1));
+    run(&mut host, &mut first, 1, 10, &mut peers);
+    assert_eq!(host.connected(), 1, "the host still thinks they are here");
+
+    // Somebody else takes the empty chair.
+    let mut second = Lockstep::join(BUILD);
+    run(&mut host, &mut second, 2, 20, &mut peers);
+    assert_eq!(second.me, PlayerId(1), "the freed seat was not given away");
+    assert_eq!(host.connected(), 2);
+    assert!(!second.status.is_stopped(), "{:?}", second.status);
+}
+
+#[test]
+fn a_seat_left_empty_mid_run_is_not_handed_to_somebody_else() {
+    // The other half of the rule. Once the run has started a player who drops
+    // leaves a city standing, and giving their seat away would give the city
+    // away with it.
+    let net = Loopback::new(3, Conditions::default());
+    let mut peers: Vec<LoopbackPeer> = (0..3).map(|i| net.peer(PeerId(i))).collect();
+    let mut host = Lockstep::host(31, 2, BUILD);
+    let mut first = Lockstep::join(BUILD);
+
+    for _ in 0..20 {
+        host.advance(&mut peers[0]);
+        first.advance(&mut peers[1]);
+        net.step();
+    }
+    assert_eq!(first.me, PlayerId(1));
+    host.start();
+    for _ in 0..40 {
+        host.advance(&mut peers[0]);
+        first.advance(&mut peers[1]);
+        net.step();
+    }
+    assert!(host.tick() > 0, "the run never started");
+
+    net.disconnect(PeerId(1));
+    let mut second = Lockstep::join(BUILD);
+    for _ in 0..60 {
+        host.advance(&mut peers[0]);
+        second.advance(&mut peers[2]);
+        net.step();
+    }
+    match &second.status {
+        Status::Ended(reason) => assert!(
+            reason.contains("full") || reason.contains("started"),
+            "refused, but for the wrong reason: {reason}"
+        ),
+        other => panic!("a mid-run seat was handed out again: {other:?}"),
+    }
+}
+
+#[test]
+fn another_joiner_leaving_is_not_the_host_leaving() {
+    // Trystero rooms are meshes: a joiner meets every other joiner, and used
+    // to announce "the host left the game" when any of them went away.
+    let mut wire = LateHost {
+        inbox: std::collections::VecDeque::new(),
+        sent: Vec::new(),
+        connected: Vec::new(),
+    };
+    let mut joiner = Lockstep::join(BUILD);
+
+    wire.connected.push(HOST);
+    wire.inbox.push_back(net::Event::Peer(HOST));
+    joiner.advance(&mut wire);
+    assert_eq!(wire.sent.len(), 1, "the host was never greeted");
+
+    // Somebody else comes and goes.
+    wire.inbox.push_back(net::Event::Peer(PeerId(7)));
+    wire.inbox.push_back(net::Event::Left(PeerId(7)));
+    joiner.advance(&mut wire);
+    assert!(joiner.in_lobby(), "a stranger's departure ended the game: {:?}", joiner.status);
+
+    // The host going is a different matter — but this joiner was never
+    // welcomed, so it has lost a candidate rather than a game. It waits, and
+    // greets whoever turns up next. That is the way out of an abandoned lobby:
+    // the tab that was squatting the room closes, a real host appears, and the
+    // joiner says `Hello` to it instead of sitting on a dead connection.
+    wire.inbox.push_back(net::Event::Left(HOST));
+    joiner.advance(&mut wire);
+    assert!(joiner.in_lobby(), "gave up on a game it had never been let into");
+    assert_eq!(wire.sent.len(), 1, "it greeted somebody who had already gone");
+
+    wire.inbox.push_back(net::Event::Peer(PeerId(3)));
+    joiner.advance(&mut wire);
+    assert_eq!(wire.sent.len(), 2, "the next peer was never greeted");
+    assert_eq!(wire.sent[1].0, PeerId(3));
+}
+
+#[test]
+fn a_host_that_connects_and_says_nothing_is_reported_rather_than_waited_on_for_ever() {
+    // What an abandoned lobby looks like from the outside: the tab is still in
+    // the room, so the connection completes and the `Hello` goes out, and then
+    // nothing. The screen used to say "looking for the host on the public
+    // relays" either way, which is why this took an evening to find.
+    let mut wire = LateHost {
+        inbox: std::collections::VecDeque::new(),
+        sent: Vec::new(),
+        connected: vec![HOST],
+    };
+    let mut joiner = Lockstep::join(BUILD);
+    wire.inbox.push_back(net::Event::Peer(HOST));
+    joiner.advance(&mut wire);
+    assert!(joiner.trouble.is_none(), "gave up before it had waited at all");
+
+    for _ in 0..2000 {
+        joiner.advance(&mut wire);
+    }
+    let said = joiner.trouble.clone().expect("never said anything about the silence");
+    assert!(said.contains("not answering"), "{said}");
+    assert!(joiner.in_lobby(), "it is a warning, not the end");
+}
+
+#[test]
+fn a_joiner_is_told_who_else_is_in_the_lobby() {
+    // `Roster` carried `world.players` — every seat on the map, whether
+    // anybody was in it or not — and joiners ignored it. So a joiner could not
+    // tell a finished handshake from a dead relay, and neither could its lobby.
+    let net = Loopback::new(3, Conditions::default());
+    let mut peers: Vec<LoopbackPeer> = (0..3).map(|i| net.peer(PeerId(i))).collect();
+    let mut host = Lockstep::host(31, 3, BUILD);
+    let mut a = Lockstep::join(BUILD);
+    let mut b = Lockstep::join(BUILD);
+
+    for _ in 0..30 {
+        host.advance(&mut peers[0]);
+        a.advance(&mut peers[1]);
+        b.advance(&mut peers[2]);
+        net.step();
+    }
+    assert_eq!(host.roster(), &[PlayerId(0), PlayerId(1), PlayerId(2)]);
+    assert_eq!(a.roster(), host.roster(), "the joiner was not told");
+    assert!(a.welcomed() && b.welcomed());
+
+    net.disconnect(PeerId(2));
+    for _ in 0..20 {
+        host.advance(&mut peers[0]);
+        a.advance(&mut peers[1]);
+        net.step();
+    }
+    assert_eq!(host.roster(), &[PlayerId(0), PlayerId(1)]);
+    assert_eq!(a.roster(), host.roster(), "the roster did not shrink");
+}

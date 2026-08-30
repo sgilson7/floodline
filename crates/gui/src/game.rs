@@ -163,13 +163,34 @@ impl Session {
     }
 
     /// How many players have connected, host included.
+    ///
+    /// From the host's own count if we are the host, and from the `Roster` it
+    /// broadcasts if we are not — a joiner's `peer_of` is empty by
+    /// construction, so this used to answer 1 for ever and the lobby could not
+    /// tell a finished handshake from a dead relay.
     pub fn connected(&self) -> usize {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             Session::Local(l) => l.steps.len(),
             #[cfg(target_arch = "wasm32")]
-            Session::Web(w) => w.step.connected(),
+            Session::Web(w) => {
+                if w.step.is_host() {
+                    w.step.connected()
+                } else {
+                    w.step.roster().len()
+                }
+            }
         }
+    }
+
+    /// Whether the host has given this peer a city.
+    pub fn welcomed(&self) -> bool {
+        self.step().welcomed()
+    }
+
+    /// Whether the host has yet said who is in the lobby.
+    pub fn roster_empty(&self) -> bool {
+        self.step().roster().is_empty()
     }
 
     /// Host: begin the run. On the loopback every peer is its own lockstep, so

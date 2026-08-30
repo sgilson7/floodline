@@ -208,7 +208,23 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
         y += 24.0;
     }
 
+    // The one thing wrong with this city that will kill it, if there is one.
+    //
+    // The plan's phase 5 asks the panel for a "warning line" and this is it.
+    // It exists because a city with no granary is doomed and nothing said so:
+    // food can only be stored in a granary and eaten at one, so a player whose
+    // granary placement was refused - a fading red line they may not have been
+    // looking at - watches everybody starve on day four with a farm working
+    // beside them and no idea why.
     y += 14.0;
+    // The row is always here, whether or not there is anything to put in it.
+    // Reserving it costs twenty-five pixels of panel and buys buttons that do
+    // not move under the cursor when a city's situation changes.
+    if let Some(trouble) = whats_wrong(w, me) {
+        draw_text(trouble, left, y, 17.0, palette::WARNING);
+    }
+    y += 25.0;
+
     let (text, colour) = match status {
         net::Status::Lobby => ("in the lobby - press SPACE to start".to_owned(), palette::WARNING),
         net::Status::Playing => ("playing".to_owned(), palette::FAINT),
@@ -232,6 +248,38 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
     line(&format!("peers at {ticks:?}"), 15, palette::FAINT, &mut y);
     line(&format!("build {build}   seed {}", w.seed), 15, palette::FAINT, &mut y);
     ended
+}
+
+/// What this city is missing, in the order it will kill them.
+///
+/// One line, never a list: the point is to name the next thing to do, and a
+/// player who is told four things at once is told nothing.
+fn whats_wrong(w: &World, me: PlayerId) -> Option<&'static str> {
+    use sim::building::Kind;
+    if !w.players.contains(&me) || w.population(me) == 0 || w.finished().is_some() {
+        return None;
+    }
+    let standing = |k: Kind| {
+        w.buildings.iter().any(|b| b.owner == me && b.kind == k && b.standing_now())
+    };
+    if !standing(Kind::Granary) {
+        return Some("no granary: your people have nowhere to eat");
+    }
+    if !standing(Kind::Farm) {
+        return Some("no farm: nothing is growing any food");
+    }
+    let farmers = w
+        .citizens
+        .iter()
+        .filter(|c| c.owner == me && c.alive() && c.job == Some(sim::citizen::Job::Farmer))
+        .count();
+    if farmers == 0 {
+        return Some("nobody is farming: right-click the farm to put them to work");
+    }
+    if w.treasury(me).food == 0 {
+        return Some("the granary is empty");
+    }
+    None
 }
 
 /// The score screen (design §4).

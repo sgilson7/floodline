@@ -101,7 +101,7 @@ with sync_playwright() as p:
 
     # --- selection and orders ------------------------------------------------
     # "choose all", then right-click a far corner: they should set off.
-    click(PANEL_L + 250, 601)
+    click(PANEL_L + 250, 644)
     page.wait_for_timeout(300)
     page.mouse.click(*cell_px(70, 70), button="right")
     page.wait_for_timeout(2500)
@@ -145,7 +145,7 @@ with sync_playwright() as p:
 
     # --- the trade dialog ----------------------------------------------------
     # Card at (340, 260) 620x420; the rows are input.rs's running total.
-    click(PANEL_L + 165, 671)                # "propose a trade"
+    click(PANEL_L + 165, 714)                # "propose a trade"
     page.wait_for_timeout(400)
     opened = shot("play-6-trade")
     check(at(opened, 650.0, 500.0) != at(before, 650.0, 500.0), "the trade dialog opened")

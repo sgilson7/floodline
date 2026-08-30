@@ -52,10 +52,29 @@ impl Lobby {
         }
     }
 
-    pub fn with_notice(notice: String) -> Lobby {
+    /// Back to the first screen with a line saying what happened — and with
+    /// the room code still in the box. Losing it meant retyping `brisk-otter-42`
+    /// after every refusal, which is exactly when somebody is already annoyed.
+    pub fn with_notice(notice: String, room: Option<String>) -> Lobby {
         match Lobby::new() {
-            Lobby::Start { mode, seats, room, .. } => Lobby::Start { mode, seats, room, notice },
+            Lobby::Start { mode, seats, room: from_url, .. } => Lobby::Start {
+                mode,
+                seats,
+                room: match room {
+                    Some(r) if !r.is_empty() => Field::with(&r),
+                    _ => from_url,
+                },
+                notice,
+            },
             other => other,
+        }
+    }
+
+    /// The room this screen is about, if it is about one.
+    pub fn room(&self) -> Option<String> {
+        match self {
+            Lobby::Start { room, .. } => Some(room.text.clone()),
+            Lobby::Hosting { room, .. } | Lobby::Joining { room, .. } => Some(room.clone()),
         }
     }
 
@@ -243,12 +262,17 @@ impl Lobby {
             Mode::Relay => {
                 ui::centred(&format!("room {room}"), y, 30.0, palette::WARNING);
                 y += 50.0;
-                ui::centred(
-                    "looking for the host on the public relays...",
-                    y,
-                    19.0,
-                    palette::FAINT,
-                );
+                // Three different things, which all used to read "looking for
+                // the host on the public relays" — including the one where the
+                // host had abandoned its lobby and was never going to answer.
+                let (text, colour) = if session.welcomed() {
+                    ("you are in. waiting for the host to start", palette::INK)
+                } else if session.connected() > 0 && !session.roster_empty() {
+                    ("found the host, asking for a city...", palette::INK)
+                } else {
+                    ("looking for the host on the public relays...", palette::FAINT)
+                };
+                ui::centred(text, y, 19.0, colour);
                 y += 60.0;
             }
             Mode::Code => {
@@ -280,8 +304,17 @@ impl Lobby {
         if let Some(act) = trouble(ui, session, *mode, build) {
             return act;
         }
-        if session.connected() > 1 || !session.in_lobby() {
-            ui::centred("connected - waiting for the host to start", y, 20.0, palette::INK);
+        if session.welcomed() {
+            let here = session.connected();
+            ui::centred(
+                &match here {
+                    0 | 1 => "you and the host".to_owned(),
+                    n => format!("{n} players here, you among them"),
+                },
+                y,
+                20.0,
+                palette::INK,
+            );
         }
         y += 46.0;
         if ui.button(Rect::new(cx - 110.0, y, 220.0, 40.0), "back", true) {

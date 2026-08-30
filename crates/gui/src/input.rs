@@ -80,7 +80,7 @@ impl Default for Input {
 }
 
 /// How long a refusal stays on screen.
-const NOTICE_SECONDS: f64 = 3.0;
+const NOTICE_SECONDS: f64 = 4.5;
 
 impl Input {
     /// One frame: draw the tools, read the mouse, issue what it meant.
@@ -138,6 +138,41 @@ impl Input {
     fn issue(&mut self, session: &mut Session, cmd: Command) {
         if let Err(e) = session.issue(cmd) {
             self.say(e.to_message());
+        }
+    }
+
+    /// Send the ones that fit, and say what happened to the rest.
+    ///
+    /// A command is all-or-nothing (DECISIONS.md), which is right on the wire
+    /// and wrong under a mouse: choosing a whole city of eight and
+    /// right-clicking a farm asks to put eight people in three slots, and the
+    /// rules answer `Full` — so *nobody* is assigned, the farm stands empty,
+    /// and the city starves on day four. That is the most natural gesture in
+    /// the game and it did nothing at all, with a red line under the map that
+    /// fades in three seconds as the only sign.
+    ///
+    /// So the mouse asks first, and only sends what will be taken. The rule in
+    /// `sim` does not move: `will_take` and `will_house` are the same
+    /// arithmetic `assign` and `SetHome` use, next to them, so this cannot
+    /// drift out of step with what the rules will accept.
+    fn send_as_many_as_fit(
+        &mut self,
+        session: &mut Session,
+        citizens: Vec<CitizenId>,
+        room: usize,
+        what: &str,
+        cmd: impl Fn(Vec<CitizenId>) -> Command,
+    ) {
+        if room == 0 {
+            self.say(format!("no {what} left there"));
+            return;
+        }
+        let wanted = citizens.len();
+        let taken: Vec<CitizenId> = citizens.into_iter().take(room).collect();
+        let sent = taken.len();
+        self.issue(session, cmd(taken));
+        if sent < wanted {
+            self.say(format!("{sent} of {wanted} - that is all the {what} there is"));
         }
     }
 
@@ -234,9 +269,17 @@ impl Input {
                 // Somebody else's building is not a place to work.
                 Some((id, owner, kind)) if owner == me => match kind {
                     Kind::Cottage => {
-                        self.issue(session, Command::SetHome { citizens, cottage: id })
+                        let room = session.world().will_house(me, id, &citizens);
+                        self.send_as_many_as_fit(session, citizens, room, "beds", |c| {
+                            Command::SetHome { citizens: c, cottage: id }
+                        });
                     }
-                    _ => self.issue(session, Command::Assign { citizens, building: id }),
+                    _ => {
+                        let room = session.world().will_take(me, id, &citizens);
+                        self.send_as_many_as_fit(session, citizens, room, "room", |c| {
+                            Command::Assign { citizens: c, building: id }
+                        });
+                    }
                 },
                 _ => self.issue(session, Command::MoveTo {
                     citizens,
@@ -353,7 +396,15 @@ impl Input {
             14.0,
             palette::FAINT,
         );
-        y += 26.0;
+        y += 22.0;
+        // What the cursor is over, so a farm's three slots are visible before
+        // the click rather than as a refusal after it. Its own line, kept
+        // clear whether or not there is anything under the mouse, so nothing
+        // below it moves as the cursor crosses a building.
+        if let Some(line) = self.under_the_cursor(session.world(), me, ui) {
+            draw_text(&line, left, y, 15.0, palette::INK);
+        }
+        y += 22.0;
 
         // Who is chosen, and the one order that has no gesture of its own.
         draw_line(left, y, left + wide, y, 1.0, palette::RULE);
@@ -396,6 +447,41 @@ impl Input {
         y += 42.0;
         y = self.offers(ui, session, me, left, wide, y);
         let _ = y;
+    }
+
+    /// The building under the mouse, and how full it is.
+    fn under_the_cursor(&self, w: &World, me: PlayerId, ui: &Ui) -> Option<String> {
+        let (x, y) = draw::cell_at(ui.mouse.x, ui.mouse.y)?;
+        let b = w.building_at(x, y)?;
+        let name = kind_name(b.kind);
+        if b.owner != me {
+            return Some(format!("city {}'s {name}", b.owner.0));
+        }
+        if !b.standing_now() {
+            let want = b.outstanding();
+            return Some(if want.is_empty() {
+                format!("{name}: being built")
+            } else {
+                format!("{name}: waiting for {}", cost_line(want))
+            });
+        }
+        let here = |f: fn(&sim::Citizen, sim::BuildingId) -> bool| {
+            w.citizens.iter().filter(|c| c.alive() && f(c, b.id)).count()
+        };
+        Some(match b.kind {
+            Kind::Farm => format!(
+                "{name}: {} of {} working",
+                here(|c, id| c.workplace == Some(id)),
+                Kind::Farm.slots_for(sim::citizen::Job::Farmer)
+            ),
+            Kind::Cottage => format!(
+                "{name}: {} of {} beds taken",
+                here(|c, id| c.home == Some(id)),
+                Kind::Cottage.beds()
+            ),
+            Kind::Dike => format!("{name}: level {} of {}", b.level, sim::balance::DIKE_MAX_LEVEL),
+            _ => format!("{name}: {}", goods_line(b.store)),
+        })
     }
 
     /// Roads and trades that are waiting on this player to say yes.
@@ -551,9 +637,18 @@ impl Input {
             self.notice = None;
             return;
         }
-        let fade = 1.0 - (age / NOTICE_SECONDS) as f32;
+        // Held at full strength for most of its life and then faded, on a
+        // dark plate. It used to fade from the first frame straight into the
+        // terrain, which made the one piece of feedback the game gives when a
+        // command is refused into something you could look straight past —
+        // and did.
+        let fade = (1.0 - (age / NOTICE_SECONDS) as f32).min(0.35) / 0.35;
         let m = measure_text(text, None, 22, 1.0);
         let x = (LOGICAL_W - PANEL_W) / 2.0 - m.width / 2.0;
+        let plate = Rect::new(x - 18.0, LOGICAL_H - 52.0, m.width + 36.0, 36.0);
+        draw_rectangle(plate.x, plate.y, plate.w, plate.h, Color { a: 0.82 * fade, ..palette::PANEL });
+        draw_rectangle_lines(plate.x, plate.y, plate.w, plate.h, 1.0,
+                             Color { a: fade, ..palette::ALARM });
         draw_text(text, x, LOGICAL_H - 26.0, 22.0, Color { a: fade, ..palette::ALARM });
     }
 }
@@ -572,6 +667,29 @@ fn citizen_at(c: &sim::Citizen) -> Vec2 {
 
 fn rect_between(a: Vec2, b: Vec2) -> Rect {
     Rect::new(a.x.min(b.x), a.y.min(b.y), (a.x - b.x).abs(), (a.y - b.y).abs())
+}
+
+fn kind_name(k: Kind) -> &'static str {
+    match k {
+        Kind::Hearth => "hearth",
+        Kind::Cottage => "cottage",
+        Kind::Farm => "farm",
+        Kind::Granary => "granary",
+        Kind::Stockpile => "stockpile",
+        Kind::Dike => "dike",
+        Kind::Road => "road",
+        Kind::Bridge => "bridge",
+    }
+}
+
+/// What a store is holding, or that it is empty.
+fn goods_line(g: sim::building::Goods) -> String {
+    let line = cost_line(g);
+    if line == "free" {
+        "empty".to_owned()
+    } else {
+        line
+    }
 }
 
 fn good_name(g: Good) -> &'static str {

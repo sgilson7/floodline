@@ -21,9 +21,9 @@ pub enum Mode {
 }
 
 extern "C" {
-    fn rtc_host(room: JsObject, mode: u32);
-    fn rtc_join(room: JsObject, mode: u32);
-    fn rtc_close();
+    fn rtc_host(room: JsObject, mode: u32) -> u32;
+    fn rtc_join(room: JsObject, mode: u32) -> u32;
+    fn rtc_close(session: u32);
     fn rtc_poll() -> JsObject;
     fn rtc_send(peer: u32, reliable: u32, bytes: JsObject);
     fn rtc_code_local() -> JsObject;
@@ -34,19 +34,26 @@ extern "C" {
 pub struct WebPeer {
     roster: Roster,
     host: bool,
+    /// Which session in the plugin this is.
+    ///
+    /// Carried so that dropping a finished `WebPeer` cannot close the one that
+    /// replaced it. Rust builds the new session before it drops the old, so
+    /// without this, hosting a second game opened a room and then tore it down
+    /// half a frame later.
+    session: u32,
 }
 
 impl WebPeer {
     /// Be the hub of the star. `room` is ignored in `Mode::Code`, where the
     /// invitation is the room.
     pub fn host(room: &str, mode: Mode) -> WebPeer {
-        unsafe { rtc_host(JsObject::string(room), mode as u32) };
-        WebPeer { roster: Roster::new(), host: true }
+        let session = unsafe { rtc_host(JsObject::string(room), mode as u32) };
+        WebPeer { roster: Roster::new(), host: true, session }
     }
 
     pub fn join(room: &str, mode: Mode) -> WebPeer {
-        unsafe { rtc_join(JsObject::string(room), mode as u32) };
-        WebPeer { roster: Roster::new(), host: false }
+        let session = unsafe { rtc_join(JsObject::string(room), mode as u32) };
+        WebPeer { roster: Roster::new(), host: false, session }
     }
 
     /// `Mode::Code`: the blob for this player to send to the other one — an
@@ -76,7 +83,22 @@ impl WebPeer {
     }
 
     pub fn close(&mut self) {
-        unsafe { rtc_close() };
+        unsafe { rtc_close(self.session) };
+    }
+}
+
+/// Leaving a game leaves the room.
+///
+/// Without this the plugin stayed in the Trystero room after the game above it
+/// was gone: pressing *back* in the lobby dropped the Rust session and nothing
+/// told the browser, so the tab went on answering strangers at the transport
+/// level for as long as it was open. Joiners connected to it, said `Hello`,
+/// and waited on a game that did not exist — while their screen said "looking
+/// for the host", the same thing it says when there is no room at all. It cost
+/// an evening of play and it is four lines.
+impl Drop for WebPeer {
+    fn drop(&mut self) {
+        self.close();
     }
 }
 

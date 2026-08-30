@@ -124,11 +124,19 @@ pub struct Field {
     /// field watches what the clipboard holds instead and takes it when it
     /// changes, which is true of every platform and every shortcut.
     seen: Option<String>,
+    /// Filled in for the player rather than by them, and not yet touched.
+    ///
+    /// The first character typed replaces it, the way a browser's address bar
+    /// does with a selected URL. Without this, a room code carried over from a
+    /// refusal or from `?room=` has to be deleted a character at a time before
+    /// a different one can be typed, and the usual result is
+    /// `brisk-otter-42keen-marten-11`.
+    fresh: bool,
 }
 
 impl Field {
     pub fn with(text: &str) -> Field {
-        Field { text: text.to_owned(), seen: None }
+        Field { text: text.to_owned(), seen: None, fresh: true }
     }
 
     /// Take this frame's keystrokes and any paste. Returns true on Enter.
@@ -140,16 +148,22 @@ impl Field {
                 continue;
             }
             if !c.is_control() && self.text.chars().count() <= limit {
+                if self.fresh {
+                    self.text.clear();
+                    self.fresh = false;
+                }
                 self.text.push(c);
             }
         }
         if is_key_pressed(KeyCode::Backspace) {
+            self.fresh = false;
             self.text.pop();
         }
         let clipboard = crate::page::paste();
         if clipboard.is_some() && clipboard != self.seen {
             self.seen = clipboard.clone();
             self.text = clipboard.unwrap().trim().to_owned();
+            self.fresh = false;
         }
         is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter)
     }

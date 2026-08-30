@@ -80,8 +80,11 @@ async fn main() {
                     lobby = None;
                 }
                 lobby::Act::Cancel(why) => {
+                    let room = screen.room();
+                    // Dropping the session closes the room. Before `WebPeer`
+                    // had a `Drop` this left the tab squatting it for ever.
                     session = None;
-                    lobby = Some(lobby::Lobby::with_notice(why));
+                    lobby = Some(lobby::Lobby::with_notice(why, room));
                 }
             }
             // A joiner has no Start button. It leaves the lobby when the
@@ -112,7 +115,7 @@ async fn main() {
                 };
                 session = None;
                 input = input::Input::default();
-                lobby = Some(lobby::Lobby::with_notice(why));
+                lobby = Some(lobby::Lobby::with_notice(why, None));
             }
         }
 

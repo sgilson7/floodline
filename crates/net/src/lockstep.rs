@@ -30,6 +30,13 @@ pub const DROP_AFTER_TICKS: u32 = 30 * sim::balance::TICKS_PER_SECOND;
 /// The most players design §6 allows.
 pub const MAX_PLAYERS: usize = 6;
 
+/// Frames a joiner waits for a `Welcome` before saying the host is not
+/// answering. Frames rather than seconds because nothing ticks in the lobby;
+/// at anything from 20 to 60 a second this is between eight and twenty-five,
+/// which is long enough for a hundred-kilobyte `Welcome` on a slow link and
+/// short enough to be an answer rather than a hang.
+const SILENCE_FRAMES: u32 = 500;
+
 /// What the game is doing, for the panel to show.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Status {
@@ -92,10 +99,26 @@ pub struct Lockstep {
     /// is made, or the host would deadlock waiting for the very player it is
     /// trying to drop.
     dropping: BTreeSet<PlayerId>,
-    next_player: u8,
 
+    // ---- joiner only ------------------------------------------------------
     /// Joiner: a `Hello` is still owed to whichever peer turns up first.
     greet: bool,
+    /// Joiner: the peer we said `Hello` to and are waiting on.
+    ///
+    /// Kept because `peer_left` used to end the game for *any* departure, so a
+    /// joiner that met another joiner and let it go announced "the host left
+    /// the game". In a Trystero room, where everybody meets everybody, that is
+    /// not an edge case.
+    host_peer: Option<PeerId>,
+    /// Frames since the `Hello` went out with no answer.
+    ///
+    /// Frames, not seconds: nothing in the lobby ticks, and until the frame
+    /// loop has a clock of its own there is no better unit. It only has to be
+    /// long enough not to fire on a slow `Welcome`, which carries the whole
+    /// world and can be a hundred kilobytes.
+    unanswered: u32,
+    /// Everyone the host says is actually connected, host included.
+    roster: Vec<PlayerId>,
 
     /// The last thing the transport complained about while nothing had gone
     /// irrecoverably wrong.
@@ -131,8 +154,10 @@ impl Lockstep {
             waited: BTreeMap::new(),
             dropping: BTreeSet::new(),
             active_from: BTreeMap::new(),
-            next_player: 1,
             greet: false,
+            host_peer: None,
+            unanswered: 0,
+            roster: vec![PlayerId(0)],
             trouble: None,
             world,
         }
@@ -155,12 +180,53 @@ impl Lockstep {
         ls
     }
 
+    /// The lowest seat nobody is sitting in, or `None` if the game is full.
+    ///
+    /// A counter that only went up was what made a room single-use: with two
+    /// seats, the first joiner took player 1, and after they closed the tab
+    /// every later `Hello` was answered "this game is full" for the rest of
+    /// the host's life. Seats are recycled *only in the lobby* — see
+    /// `peer_left`, which is where a seat is given back.
+    fn free_seat(&self) -> Option<PlayerId> {
+        self.world
+            .players
+            .iter()
+            .copied()
+            .find(|p| {
+                *p != self.me
+                    && !self.peer_of.contains_key(p)
+                    && !self.dropping.contains(p)
+                    && !self.world.dropped.contains(p)
+            })
+    }
+
+    /// Host: tell everyone who is actually here.
+    fn announce_roster(&mut self, peer: &mut impl Peer) {
+        let mut here: Vec<PlayerId> = self.peer_of.keys().copied().collect();
+        here.push(self.me);
+        here.sort_unstable();
+        self.roster = here.clone();
+        peer.broadcast(&encode(&Message::Roster { players: here }), true);
+    }
+
+    /// Everyone the host has said is connected, host included.
+    pub fn roster(&self) -> &[PlayerId] {
+        &self.roster
+    }
+
+    /// Whether this peer has been given a city yet.
+    pub fn welcomed(&self) -> bool {
+        self.host || self.me != PlayerId(u8::MAX)
+    }
+
     /// Joiner: say `Hello` to the host now that there is a host to say it to.
     fn greet(&mut self, to: PeerId, peer: &mut impl Peer) {
         if !self.greet {
             return;
         }
         self.greet = false;
+        self.host_peer = Some(to);
+        self.unanswered = 0;
         let hello = encode(&Message::Hello {
             proto_version: PROTO_VERSION,
             build_hash: self.build_hash.clone(),
@@ -226,6 +292,7 @@ impl Lockstep {
     /// bundle has arrived.
     pub fn advance(&mut self, peer: &mut impl Peer) {
         self.drain(peer);
+        self.mind_the_silence();
         if self.status.is_stopped() || self.status == Status::Lobby {
             return;
         }
@@ -234,6 +301,28 @@ impl Lockstep {
             self.bundle_up(peer);
         }
         self.apply_bundle();
+    }
+
+    /// A joiner that connected to somebody who is not answering should be
+    /// told so, rather than reading "looking for the host" for ever.
+    ///
+    /// This is the failure that cost a whole evening: a host that had left its
+    /// own lobby was still in the room at the transport level, so joiners
+    /// connected, said `Hello`, and waited on a game that was not there. The
+    /// screen said the same thing it says while looking for a room that does
+    /// not exist.
+    fn mind_the_silence(&mut self) {
+        if self.host || self.welcomed() || self.host_peer.is_none() {
+            return;
+        }
+        self.unanswered += 1;
+        if self.unanswered == SILENCE_FRAMES {
+            self.trouble = Some(
+                "connected to the host, but it is not answering. It may have left its \
+                 lobby - ask for a fresh room code, or try Join by code."
+                    .to_owned(),
+            );
+        }
     }
 
     // ---- reading the wire --------------------------------------------------
@@ -273,8 +362,7 @@ impl Lockstep {
                         theirs: build_hash.clone(),
                         ours: self.build_hash.clone(),
                     })
-                } else if self.next_player as usize >= self.world.players.len()
-                    || self.player_of.len() + 1 >= MAX_PLAYERS
+                } else if self.free_seat().is_none() || self.player_of.len() + 1 >= MAX_PLAYERS
                 {
                     Some(Refusal::GameFull)
                 } else if self.world.age() > 1 || self.world.day_of_age() > 1 {
@@ -289,8 +377,7 @@ impl Lockstep {
                     return;
                 }
 
-                let player = PlayerId(self.next_player);
-                self.next_player += 1;
+                let player = self.free_seat().expect("checked just above");
                 self.player_of.insert(from, player);
                 self.peer_of.insert(player, from);
                 self.active_from.insert(player, self.next_tick + DELAY + 1);
@@ -315,8 +402,7 @@ impl Lockstep {
                     }),
                     true,
                 );
-                let roster = encode(&Message::Roster { players: self.world.players.clone() });
-                peer.broadcast(&roster, true);
+                self.announce_roster(peer);
             }
 
             Message::Welcome { player, seed, tick, players, snapshot } if !self.host => {
@@ -342,7 +428,13 @@ impl Lockstep {
             // `world.players`, which is fixed when the world is generated —
             // an empty seat is a city standing there with nobody commanding
             // it, not a hole in the world.
-            Message::Roster { .. } => {}
+            //
+            // It used to be ignored, and it used to carry `world.players`,
+            // which made it useless twice over: a joiner could not tell how
+            // many people were in the lobby with it, and the screen it was
+            // looking at could not tell a completed handshake from a dead
+            // relay. Both said "looking for the host" either way.
+            Message::Roster { players } if !self.host => self.roster = players,
 
             Message::Turn { player, tick, commands, checked_tick, checksum } if self.host => {
                 self.collected.entry(tick).or_default().insert(player, commands);
@@ -496,17 +588,43 @@ impl Lockstep {
         self.reported.remove(&self.next_tick.saturating_sub(DELAY + 2));
     }
 
-    fn peer_left(&mut self, who: PeerId, _peer: &mut impl Peer) {
+    fn peer_left(&mut self, who: PeerId, peer: &mut impl Peer) {
         if !self.host {
-            // The star has one edge, and it was that one.
-            self.status = Status::Ended("the host left the game".into());
+            // Only the peer we were actually talking to. In a Trystero room
+            // everybody meets everybody, so a joiner sees other joiners come
+            // and go, and announcing "the host left the game" for any of them
+            // ends a game that is perfectly alive.
+            if self.host_peer != Some(who) {
+                return;
+            }
+            self.host_peer = None;
+            if self.welcomed() {
+                // The star has one edge, and it was that one.
+                self.status = Status::Ended("the host left the game".into());
+            } else {
+                // They never answered. Whoever turns up next gets the `Hello`
+                // instead of us waiting on somebody who has gone.
+                self.greet = true;
+                self.unanswered = 0;
+            }
             return;
         }
-        if let Some(player) = self.player_of.remove(&who) {
-            self.peer_of.remove(&player);
-            let tick = self.next_tick;
-            self.give_up_on(player, tick);
+        let Some(player) = self.player_of.remove(&who) else {
+            return;
+        };
+        self.peer_of.remove(&player);
+        if self.status == Status::Lobby {
+            // Nothing has been simulated, so nobody has a city to lose: give
+            // the seat back. Outside the lobby this must not happen — a player
+            // who drops mid-run leaves a city standing, and handing their seat
+            // to somebody else would hand over the city with it.
+            self.active_from.remove(&player);
+            self.waited.remove(&player);
+            self.announce_roster(peer);
+            return;
         }
+        let tick = self.next_tick;
+        self.give_up_on(player, tick);
     }
 
     /// Host: give up on a player, now.

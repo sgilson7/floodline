@@ -117,3 +117,26 @@ default = []
     assert!(!found.contains("default"), "[features] is not a dependency table");
     assert!(!found.contains("name"), "neither is [package]");
 }
+
+#[test]
+fn the_hearth_can_hold_what_a_city_starts_with() {
+    // A city's whole opening stock is put in its Hearth. If that is more than
+    // the Hearth will hold, every hauler that comes back with leftovers finds
+    // no room, keeps them, and the goods are gone from the city for good — a
+    // fifth of the run's stone disappeared this way when the starting stone
+    // went up and this number stayed where it was.
+    use sim::balance::{STARTING_STONE, STARTING_WOOD};
+    use sim::building::Kind;
+
+    let room = Kind::Hearth.capacity();
+    assert!(
+        room.wood >= STARTING_WOOD,
+        "a city starts with {STARTING_WOOD} wood and its hearth holds {}",
+        room.wood
+    );
+    assert!(
+        room.stone >= STARTING_STONE,
+        "a city starts with {STARTING_STONE} stone and its hearth holds {}",
+        room.stone
+    );
+}

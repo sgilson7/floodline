@@ -536,3 +536,78 @@ fn people_told_to_go_somewhere_stay_there() {
     });
     assert!(moved, "nobody went back to work after being released");
 }
+
+#[test]
+fn a_building_says_how_many_it_will_take_before_the_command_is_refused() {
+    // The bug this exists to stop: select a whole city of eight, right-click a
+    // farm, and `Assign` answers `Full` — not "three of them start farming",
+    // but nobody does anything at all, because a command is all-or-nothing.
+    // The only sign is a line under the map that fades after three seconds,
+    // and the city starves on day four with an empty farm standing in it.
+    use sim::building::Kind;
+    use sim::{Command, PlayerId, World};
+
+    let mut w = World::new(31, 2);
+    let me = PlayerId(0);
+    let (hx, hy) = w.map.hearth_sites[0];
+
+    let put = |w: &mut World, kind: Kind| {
+        for r in 3..30i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (x, y) = (hx + dx, hy + dy);
+                    if w.can_place(me, kind, x, y).is_ok() {
+                        w.apply(me, &Command::Place { kind, x: x as u8, y: y as u8 }).unwrap();
+                        return w.buildings.last().unwrap().id;
+                    }
+                }
+            }
+        }
+        panic!("nowhere for a {kind:?}");
+    };
+    let farm = put(&mut w, Kind::Farm);
+    let cottage = put(&mut w, Kind::Cottage);
+
+    let all: Vec<sim::CitizenId> =
+        w.citizens.iter().filter(|c| c.owner == me).map(|c| c.id).collect();
+    assert_eq!(all.len(), sim::balance::FOUNDING_CITIZENS as usize);
+
+    // A site wants builders, and there are four builder slots.
+    assert_eq!(w.will_take(me, farm, &all), sim::balance::BUILDER_SLOTS);
+    // A cottage sleeps four.
+    assert_eq!(w.will_house(me, cottage, &all), 0, "it is not built yet");
+
+    // Finish them both.
+    for id in [farm, cottage] {
+        for g in sim::building::Good::ALL {
+            let want = w.buildings[id.0 as usize].outstanding().get(g);
+            if want > 0 {
+                w.deliver_to(id, g, want);
+            }
+        }
+        let ticks = w.buildings[id.0 as usize].kind.build_ticks();
+        assert!(w.build_at(id, ticks));
+    }
+
+    // Now the farm has three job slots and the cottage four beds.
+    assert_eq!(w.will_take(me, farm, &all), 3);
+    assert_eq!(w.will_house(me, cottage, &all), 4);
+
+    // And what it says fits, fits — where the whole selection does not.
+    assert!(w.apply(me, &Command::Assign { citizens: all.clone(), building: farm }).is_err());
+    let three: Vec<sim::CitizenId> = all.iter().copied().take(3).collect();
+    w.apply(me, &Command::Assign { citizens: three.clone(), building: farm }).unwrap();
+
+    // Slots already held by somebody not in the list are gone from the budget.
+    let others: Vec<sim::CitizenId> = all.iter().copied().skip(3).collect();
+    assert_eq!(w.will_take(me, farm, &others), 0, "three farmers already hold all three");
+    // But naming the people who are already there frees their own slots again.
+    assert_eq!(w.will_take(me, farm, &all), 3);
+
+    // Somebody else's building takes nobody, and neither does a hole.
+    assert_eq!(w.will_take(PlayerId(1), farm, &all), 0);
+    assert_eq!(w.will_take(me, sim::BuildingId(999), &all), 0);
+}

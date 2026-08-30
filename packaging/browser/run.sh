@@ -45,6 +45,16 @@ say "play.py"
 "$VENV/bin/python" "$ROOT/packaging/browser/play.py" \
   "http://localhost:$PORT/index.html" || fail=1
 
+# Putting people to work: the gesture that used to do nothing at all.
+say "assign.py"
+"$VENV/bin/python" "$ROOT/packaging/browser/assign.py" \
+  "http://localhost:$PORT/index.html" || fail=1
+
+# A room that can be joined more than once, and a lobby that lets go of it.
+say "rejoin.py"
+"$VENV/bin/python" "$ROOT/packaging/browser/rejoin.py" \
+  "http://localhost:$PORT/index.html" || fail=1
+
 # The whole stack: two tabs of the real game, both ways into a room.
 for mode in room code; do
   say "game_two_tabs.py by $mode"

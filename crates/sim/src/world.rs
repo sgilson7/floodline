@@ -288,6 +288,63 @@ impl World {
         Ok(())
     }
 
+    /// How many of `citizens` this building would actually take.
+    ///
+    /// Split out of `assign` for the same reason `can_place` is split out of
+    /// `place`: so the GUI can offer what will work instead of a command the
+    /// rules will refuse. It matters more here, because a refusal is
+    /// all-or-nothing (see DECISIONS.md). Selecting a whole city of eight and
+    /// right-clicking a farm asks to put eight people in three slots, and the
+    /// answer is not "three of them start farming" but `Full` — *nobody* is
+    /// assigned, the only sign is a line under the map that fades, and the
+    /// city starves on day four with a farm standing empty in the middle of
+    /// it. That is the single most natural gesture in the game and it did
+    /// nothing at all.
+    ///
+    /// Counts the way `assign` counts: whoever is already there and is *not*
+    /// named in the list still holds their slot.
+    pub fn will_take(&self, owner: PlayerId, building: BuildingId, citizens: &[CitizenId]) -> usize {
+        let Some(b) = self.buildings.get(building.0 as usize) else {
+            return 0;
+        };
+        if b.owner != owner {
+            return 0;
+        }
+        let job = match b.state {
+            BuildState::Site => Job::Builder,
+            BuildState::Standing if b.kind == Kind::Farm => Job::Farmer,
+            BuildState::Standing if b.kind.is_store() => Job::Hauler,
+            _ => return 0,
+        };
+        let slots = b.kind.slots_for(job);
+        if slots == usize::MAX {
+            return citizens.len();
+        }
+        let held = self
+            .citizens
+            .iter()
+            .filter(|c| c.alive() && c.workplace == Some(building) && !citizens.contains(&c.id))
+            .count();
+        citizens.len().min(slots.saturating_sub(held))
+    }
+
+    /// The same question for a cottage's beds, which `SetHome` limits the same
+    /// way and would refuse the same way.
+    pub fn will_house(&self, owner: PlayerId, cottage: BuildingId, citizens: &[CitizenId]) -> usize {
+        let Some(b) = self.buildings.get(cottage.0 as usize) else {
+            return 0;
+        };
+        if b.owner != owner || b.kind != Kind::Cottage || !b.standing_now() {
+            return 0;
+        }
+        let held = self
+            .citizens
+            .iter()
+            .filter(|c| c.alive() && c.home == Some(cottage) && !citizens.contains(&c.id))
+            .count();
+        citizens.len().min(Kind::Cottage.beds().saturating_sub(held))
+    }
+
     /// Start a construction site. Materials still have to be hauled to it and
     /// builder-ticks spent on it before it is anything.
     pub fn place(

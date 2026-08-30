@@ -49,6 +49,9 @@
 
   // The one session this page has, or null.
   var S = null;
+  // Which session that is. Rust hands it back when it closes one, so a stale
+  // handle cannot close a live session — see `close(gen)`.
+  var GENERATION = 0;
 
   function cfg() {
     return window.FLOODLINE_CONFIG || {};
@@ -517,7 +520,9 @@
 
   function open(isHost, mode, room) {
     close();
+    GENERATION += 1;
     S = {
+      gen: GENERATION,
       isHost: isHost,
       mode: mode,
       room: room || "",
@@ -542,8 +547,17 @@
     return s;
   }
 
-  function close() {
+  // `gen` is which session the caller means. Omitted, it means "whatever is
+  // open"; given, it closes only that one.
+  //
+  // The generation is not defensive programming, it is required. Rust closes
+  // the transport when it drops a session, and it drops the *old* session
+  // after constructing the new one — so hosting a second game would open a
+  // room and then immediately have the previous session's teardown close it.
+  // Which is the bug this whole change exists to fix, wearing a hat.
+  function close(gen) {
     if (!S) return;
+    if (gen !== undefined && gen !== S.gen) return;
     var s = S;
     S = null;
     s.closed = true;
@@ -684,13 +698,13 @@
     };
 
     importObject.env.rtc_host = function (room, mode) {
-      open(true, mode, consume_js_object(room));
+      return open(true, mode, consume_js_object(room)).gen;
     };
     importObject.env.rtc_join = function (room, mode) {
-      open(false, mode, consume_js_object(room));
+      return open(false, mode, consume_js_object(room)).gen;
     };
-    importObject.env.rtc_close = function () {
-      close();
+    importObject.env.rtc_close = function (gen) {
+      close(gen);
     };
     importObject.env.rtc_poll = function () {
       return js_object(S && S.queue.length ? S.queue.shift() : null);
@@ -710,6 +724,7 @@
   // `quad_rtc_crate_version()` and console.errors if it disagrees with this
   // number. That is the guard that catches a deployed page whose JS plugin and
   // whose Rust side have drifted apart — the failure that would otherwise
-  // present as "the handshake just hangs". Bumped to 2 with phase 4's imports.
-  miniquad_add_plugin({ register_plugin: register_plugin, version: 2, name: "quad_rtc" });
+  // present as "the handshake just hangs". Three since `rtc_host`, `rtc_join`
+  // and `rtc_close` started passing a session generation.
+  miniquad_add_plugin({ register_plugin: register_plugin, version: 3, name: "quad_rtc" });
 })();

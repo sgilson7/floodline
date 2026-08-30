@@ -478,3 +478,89 @@ fn a_city_in_the_flood_survives_only_behind_a_dike() {
     );
     assert_eq!(saved, FOUNDING_CITIZENS, "the dike was supposed to stop it dead");
 }
+
+#[test]
+fn the_opening_a_player_would_play_reaches_the_flood() {
+    // Place a farm, place a granary, put three people on the farm. That is the
+    // whole of the opening, and until `will_take` existed it could not be done
+    // with a mouse: choosing all eight citizens and right-clicking the farm
+    // asked three slots to take eight, which the rules refuse *whole*, so
+    // nobody farmed and the city starved on day four with the farm standing
+    // empty. The flood — the thing the game is about — was never reached.
+    //
+    // This is that opening, in commands, run to the water.
+    use sim::citizen::Job;
+
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+    let me = PlayerId(0);
+    let farm = found_site(&mut w, me, Kind::Farm);
+    let _granary = found_site(&mut w, me, Kind::Granary);
+
+    // Nobody is assigned to build them: a citizen with nothing to carry picks
+    // up a shovel, which is what makes an unattended city buildable at all.
+    for _ in 0..TICKS_PER_DAY / 2 {
+        w.tick(&mut nav, &[]);
+    }
+    assert!(w.buildings[farm.0 as usize].standing_now(), "the farm was never built");
+
+    // The gesture: everybody selected, right-click the farm. The GUI asks how
+    // many will fit and sends that many; `will_take` is the same arithmetic
+    // `assign` uses, so what it offers is always accepted.
+    let all: Vec<CitizenId> = w.citizens.iter().filter(|c| c.owner == me).map(|c| c.id).collect();
+    let room = w.will_take(me, farm, &all);
+    assert_eq!(room, 3, "a farm has three slots");
+    let sent: Vec<CitizenId> = all.iter().copied().take(room).collect();
+    w.apply(me, &Command::Assign { citizens: sent, building: farm }).expect("refused what it offered");
+
+    // Now run to the flood.
+    let mut wettest = 0;
+    let (hx, hy) = w.map.hearth_sites[0];
+    while w.finished().is_none() && w.age() == 1 {
+        w.tick(&mut nav, &[]);
+        for dy in (-12..=12).step_by(4) {
+            for dx in (-12..=12i32).step_by(4) {
+                wettest = wettest.max(w.water.depth_at(hx + dx, hy + dy));
+            }
+        }
+    }
+
+    let farmers = w
+        .citizens
+        .iter()
+        .filter(|c| c.owner == me && c.alive() && c.job == Some(Job::Farmer))
+        .count();
+    assert!(farmers > 0, "nobody ended up farming");
+    assert!(
+        w.population(me) > 0,
+        "the city starved before the water came: it reached day {} of age {}",
+        w.day_of_age(),
+        w.age()
+    );
+    assert!(
+        wettest > 0,
+        "the city lived to age two without a drop of water reaching it"
+    );
+}
+
+/// Place `kind` near this player's hearth and hand back its id. Unlike
+/// `found`, it does *not* finish it: the point of the test above is that a
+/// city builds what it was told to build.
+fn found_site(w: &mut World, p: PlayerId, kind: Kind) -> BuildingId {
+    let (hx, hy) = w.map.hearth_sites[p.0 as usize];
+    for r in 3..30i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (x, y) = (hx + dx, hy + dy);
+                if w.can_place(p, kind, x, y).is_ok() {
+                    w.apply(p, &Command::Place { kind, x: x as u8, y: y as u8 }).unwrap();
+                    return w.buildings.last().unwrap().id;
+                }
+            }
+        }
+    }
+    panic!("nowhere for a {kind:?}");
+}

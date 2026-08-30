@@ -17,6 +17,8 @@ after that it is about a minute. `.venv-test/` is gitignored.
 | `echo_room.py` | the Trystero path with three tabs: two joiners reach the host, and each joiner sees exactly *one* peer even though Trystero introduced it to the other joiner |
 | `echo_more.py` | the BitTorrent strategy, and a tab on a different build failing to find the game (design 9.4's room-name prefix) |
 | `game.py` | the real game loads, letterboxes where it says it will, and keeps drawing once started |
+| `rejoin.py` | a seat a joiner left is given to the next one, an abandoned lobby leaves its room, and hosting a second game does not close the one it just opened |
+| `assign.py` | choosing a whole city and right-clicking a farm puts three people on it and says so, instead of being refused whole |
 | `play.py` | the mouse reaching the simulation: choosing citizens, ordering them about, a cottage, a road, a ping, a trade, and a refusal that says so |
 | `game_two_tabs.py` | the whole stack: two tabs reach the lobby, join by room code or by pasted code, and both leave the lobby into the same world |
 

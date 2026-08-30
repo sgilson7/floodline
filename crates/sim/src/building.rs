@@ -292,7 +292,16 @@ impl Kind {
             // Hearth that took food would sit nearer the farm than the granary
             // on most layouts, quietly become the city's pantry, and leave the
             // granary empty while everybody ate at the fire.
-            Kind::Hearth => Goods::of(0, 500, 500),
+            //
+            // Roomier than the starting stores, and that is a rule rather than
+            // a comfortable margin — `the_hearth_can_hold_what_a_city_starts_with`
+            // enforces it. At 500 against a starting 720 of stone, a hauler
+            // that carried twenty to a site wanting ten had nowhere to put the
+            // other ten: the Hearth was over its own capacity, so `has_room_for`
+            // refused it, and the leftovers stayed in its arms for the rest of
+            // the run. A hundred and forty stone went missing from the panel
+            // that way, which is a fifth of the game's entire supply.
+            Kind::Hearth => Goods::of(0, 900, 900),
             Kind::Granary => Goods::of(500, 0, 0),
             Kind::Stockpile => Goods::of(0, 500, 500),
             // Not a store — an output buffer. See `is_store`.
