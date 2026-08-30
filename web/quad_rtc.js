@@ -628,6 +628,54 @@
       console.error(consume_js_object(msg));
     };
 
+    // The lobby's three questions about the page it is running in. Not part
+    // of the transport, but they are the only other things Rust cannot know
+    // without asking the browser, and a second plugin for three functions
+    // would be a second thing to keep in step with the wasm.
+    importObject.env.fl_url_room = function () {
+      var room = "";
+      try {
+        room = new URLSearchParams(location.search).get("room") || "";
+      } catch (e) {
+        /* no URL to speak of */
+      }
+      return js_object(room);
+    };
+
+    importObject.env.fl_share_link = function (room) {
+      var code = consume_js_object(room);
+      return js_object(
+        location.origin + location.pathname + "?room=" + encodeURIComponent(code)
+      );
+    };
+
+    // Copying has to happen while the click that asked for it still counts as
+    // a user gesture. macroquad handles input inside its animation frame,
+    // milliseconds after the click, which is inside Chrome's five-second
+    // transient activation window — but not inside Safari's stricter one, so
+    // the old execCommand path stays as the fallback rather than as history.
+    importObject.env.fl_copy = function (text) {
+      var s = consume_js_object(text);
+      try {
+        navigator.clipboard.writeText(s);
+        return;
+      } catch (e) {
+        /* fall through */
+      }
+      try {
+        var box = document.createElement("textarea");
+        box.value = s;
+        box.style.position = "fixed";
+        box.style.opacity = "0";
+        document.body.appendChild(box);
+        box.select();
+        document.execCommand("copy");
+        document.body.removeChild(box);
+      } catch (e2) {
+        console.error("could not copy: " + e2);
+      }
+    };
+
     importObject.env.rtc_host = function (room, mode) {
       open(true, mode, consume_js_object(room));
     };

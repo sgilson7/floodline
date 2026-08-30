@@ -15,5 +15,5 @@ pub mod peer;
 
 pub use loopback::{Conditions, Loopback, HOST};
 pub use peer::{Event, Peer, PeerId};
-pub use lockstep::{Lockstep, Status, DELAY};
+pub use lockstep::{Lockstep, Status, DELAY, MAX_PLAYERS};
 pub use wire::{Message, Refusal, PROTO_VERSION};

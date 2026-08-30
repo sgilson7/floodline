@@ -16,9 +16,10 @@ after that it is about a minute. `.venv-test/` is gitignored.
 | `echo_code.py` | the pasted-code path: one invitation, one reply, bytes on both channels, a closed tab seen as `Left`, and a fresh invitation waiting for the next joiner |
 | `echo_room.py` | the Trystero path with three tabs: two joiners reach the host, and each joiner sees exactly *one* peer even though Trystero introduced it to the other joiner |
 | `echo_more.py` | the BitTorrent strategy, and a tab on a different build failing to find the game (design 9.4's room-name prefix) |
-| `game.py` | two tabs of the real game: the lobby, a joined run, and the two peers simulating the same world |
+| `game.py` | the real game loads, letterboxes where it says it will, and keeps drawing once started |
+| `game_two_tabs.py` | the whole stack: two tabs reach the lobby, join by room code or by pasted code, and both leave the lobby into the same world |
 
-All but the last drive `web/echo.html`, which drives `window.FLOODLINE_RTC`
+The three `echo_*` scripts drive `web/echo.html`, which drives `window.FLOODLINE_RTC`
 directly — no wasm, no `sim`, no lockstep. That separation is design 9.6's and
 it earns its keep: if `echo_room.py` passes and `game.py` does not, the fault is
 above the transport, and the converse.

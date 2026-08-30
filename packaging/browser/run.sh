@@ -40,4 +40,11 @@ for dpr in 1 2; do
     "http://localhost:$PORT/index.html" "$dpr" || fail=1
 done
 
+# The whole stack: two tabs of the real game, both ways into a room.
+for mode in room code; do
+  say "game_two_tabs.py by $mode"
+  "$VENV/bin/python" "$ROOT/packaging/browser/game_two_tabs.py" \
+    "http://localhost:$PORT/index.html" 1 "$mode" || fail=1
+done
+
 exit $fail

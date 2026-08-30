@@ -74,3 +74,8 @@ pub fn glyph(kind: sim::Kind) -> &'static str {
         Kind::Bridge => "",
     }
 }
+
+/// Lobby chrome. A button is a shade lighter than the panel it sits on and a
+/// field a shade darker, which is the whole of the depth in this interface.
+pub const BUTTON: Color = Color::new(0.11, 0.11, 0.15, 1.0);
+pub const FIELD: Color = Color::new(0.04, 0.04, 0.06, 1.0);

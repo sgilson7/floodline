@@ -85,6 +85,23 @@ with sync_playwright() as p:
     page.wait_for_function("document.getElementById('glcanvas').width > 0", timeout=30000)
     page.wait_for_timeout(1500)
 
+    # Into a game. Hosting by pasted code needs no relays and no second tab, so
+    # this stays a test of the letterbox and nothing else.
+    #
+    # These are logical-canvas coordinates from crates/gui/src/lobby.rs, put
+    # through the same letterbox arithmetic the game does — in CSS pixels, with
+    # no device pixel ratio anywhere, because that is what `mouse_position()`
+    # reports and getting *that* wrong is the other half of the trap.
+    scale = min(WINDOW_W / LOGICAL_W, WINDOW_H / LOGICAL_H)
+    ox = (WINDOW_W - LOGICAL_W * scale) / 2.0
+    oy = (WINDOW_H - LOGICAL_H * scale) / 2.0
+    click = lambda lx, ly: page.mouse.click(ox + lx * scale, oy + ly * scale)
+    click(970.0, 353.0)   # by pasted code
+    click(630.0, 518.0)   # Host a game
+    page.wait_for_timeout(1200)
+    click(800.0, 652.0)   # Start
+    page.wait_for_timeout(1200)
+
     img = shot(page)
     got = map_bounds(img)
     lx, ly, lw, lh, scale = letterbox(img)
@@ -131,15 +148,12 @@ with sync_playwright() as p:
             if r + g + bl > 60:
                 errors.append(f"something is drawn in the letterbox bar at dpr {DPR:g}")
 
-    # And it runs. Space starts the lockstep; the panel's tick counter moving
-    # is the only proof from outside that the two peers are simulating.
-    page.click("#glcanvas")
-    page.keyboard.press("Space")
+    # And it keeps running.
     page.wait_for_timeout(2500)
     if map_bounds(shot(page)) is None:
-        errors.append("the map stopped being drawn once the game started")
+        errors.append("the map stopped being drawn")
     else:
-        print("          still drawing after Space")
+        print("          still drawing a few seconds in")
 
     b.close()
 

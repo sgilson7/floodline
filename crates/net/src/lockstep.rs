@@ -171,6 +171,12 @@ impl Lockstep {
         }
     }
 
+    /// Whether this peer is the hub of the star — the one with the Start
+    /// button and the seed.
+    pub fn is_host(&self) -> bool {
+        self.host
+    }
+
     /// Whether the game is waiting in the lobby.
     pub fn in_lobby(&self) -> bool {
         self.status == Status::Lobby
@@ -304,7 +310,13 @@ impl Lockstep {
                 self.next_tick = self.world.tick.max(tick);
                 self.turn_tick = self.next_tick;
                 self.nav = Nav::new();
-                self.status = Status::Playing;
+                // Still `Lobby`. Being welcomed is not the same as the game
+                // having begun: the host has a Start button and until it is
+                // pressed there is nothing to simulate, so a joiner that
+                // called itself Playing here would sit in front of a world
+                // that never moved and no longer had a lobby to explain why.
+                // The first `Bundle` is what starts the run, and it arrives on
+                // the same tick for everybody.
             }
 
             // The roster is who has actually connected. It does not change
