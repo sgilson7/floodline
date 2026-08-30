@@ -230,7 +230,11 @@ pub const HEARTH_SIZE: i32 = 3;
 /// eighteen cells at four. Nothing produces stone, so that is the whole run's
 /// worth of it, and where to put it and how high to build it is the decision
 /// the flood is asking. Farms cost ten stone each, which is a real bite out of
-/// the same purse and is meant to be.
+/// the same purse and is meant to be — and so, now, is the forty stone a
+/// forester's hut costs. The two producers are bought with what the other one
+/// makes: a city starts holding the stone and wanting the wood, so stone buys
+/// the hut that cuts timber and wood buys the quarry that cuts stone. Before
+/// that, both cost wood, which meant the wood shortage funded its own cure.
 pub const STARTING_WOOD: u16 = 200;
 pub const STARTING_STONE: u16 = 720;
 

@@ -1548,3 +1548,22 @@ anything in them or not. The panel is 330 pixels of usable width — about
 fifty-six characters — and a sentence that says what to do next does not fit in
 one; reserving the space means the buttons below do not move as a city's
 situation changes, which they did twice while this was being built.
+
+---
+
+## 2026-08-30 — Each producer is bought with what the other one makes
+
+A forester's hut costs forty stone. It cost thirty wood, and so did the quarry,
+which meant the wood shortage funded its own cure: the one building that ends
+it was bought with the thing there was none of. It also left the seven hundred
+stone a city starts with nowhere to go but dikes.
+
+A city begins holding the stone and wanting the wood. So stone buys the hut
+that cuts timber, and the wood it cuts buys the quarry that cuts stone back.
+Forty is a fifth of what is in the Hearth on day one, so the hut is never the
+building the shortage stops you building, and
+`the_two_producers_are_bought_with_what_the_other_one_makes` holds both halves:
+neither producer may be bought with its own output, and a granary, a farm and a
+hut must all still fit inside the opening stock with room left for the quarry.
+
+First of the seven milestones agreed for the river-and-gold plan.

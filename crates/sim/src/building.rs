@@ -172,12 +172,17 @@ impl Kind {
             Kind::Hearth => Goods::NONE,
             Kind::Cottage => Goods::wood(30),
             Kind::Farm => Goods::of(0, 40, 10),
-            // Both cost wood and no stone, so a city that has spent its stone
-            // on dikes can still dig itself out. A forester's hut has to be
-            // affordable out of the founding two hundred alongside a farm and
-            // a granary, or the one building that ends the wood shortage is
-            // the one the shortage stops you building.
-            Kind::Forester => Goods::wood(30),
+            // Each one is bought with what the other makes, and that is the
+            // whole point of the pair.
+            //
+            // Both cost wood to begin with, which meant the wood shortage
+            // funded its own cure and the seven hundred stone a city starts
+            // with had nowhere to go but dikes. A city starts with the stone
+            // and needs the wood: so stone buys the hut that makes wood, and
+            // wood buys the quarry that makes stone. Forty stone is a fifth of
+            // what is in the Hearth on day one, so the hut is never the
+            // building the shortage stops you building.
+            Kind::Forester => Goods::stone(40),
             Kind::Quarry => Goods::wood(40),
             Kind::Granary => Goods::wood(50),
             // Free — it is a patch of ground somebody agreed to keep tidy.

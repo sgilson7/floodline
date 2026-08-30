@@ -562,3 +562,39 @@ fn a_quarry_needs_rock_beside_it_and_a_forester_does_not() {
     });
     assert!(anywhere, "a forester's hut could not be placed at all");
 }
+
+#[test]
+fn the_two_producers_are_bought_with_what_the_other_one_makes() {
+    // A city starts holding stone and wanting wood. The forester's hut costs
+    // stone, so the thing you have buys the thing you need; the quarry costs
+    // wood, so the wood it makes buys the stone back. Before this the hut cost
+    // wood too, which meant the wood shortage funded its own cure and the
+    // seven hundred stone in the Hearth had nowhere to go but dikes.
+    use sim::balance::{STARTING_STONE, STARTING_WOOD};
+    use sim::building::Kind;
+
+    let hut = Kind::Forester.cost();
+    let quarry = Kind::Quarry.cost();
+    assert_eq!(hut.wood, 0, "a forester's hut must not be bought with the thing it makes");
+    assert!(hut.stone > 0);
+    assert_eq!(quarry.stone, 0, "a quarry must not be bought with the thing it makes");
+    assert!(quarry.wood > 0);
+
+    // And the opening is still affordable: a granary, a farm and a hut on the
+    // first day, out of what a city is handed.
+    let (granary, farm) = (Kind::Granary.cost(), Kind::Farm.cost());
+    let opening_wood = granary.wood + farm.wood + hut.wood;
+    let opening_stone = granary.stone + farm.stone + hut.stone;
+    assert!(
+        opening_wood <= STARTING_WOOD && opening_stone <= STARTING_STONE,
+        "a granary, a farm and a forester's hut cost {opening_wood} wood and \
+         {opening_stone} stone against {STARTING_WOOD} and {STARTING_STONE}"
+    );
+    // With room left for the quarry that pays the stone back.
+    let rest = STARTING_WOOD - opening_wood;
+    assert!(
+        rest >= quarry.wood,
+        "only {rest} wood left after the opening, and a quarry is {}",
+        quarry.wood
+    );
+}
