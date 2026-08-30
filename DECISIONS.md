@@ -425,3 +425,41 @@ something, because pulling it off that errand would drop the load. One merely
 on its way to *pick something up* has nothing to lose and is fair game. If a
 city's haulers are all busy, that day's trade is short, which is a reasonable
 thing for a city to be bad at rather than a bug to fix.
+
+---
+
+## 2026-08-30 — A day is 1200 ticks, and the balance moved with it
+
+Design §4 says an age is "6 days, about 12 real minutes at 10 ticks/s with 200
+ticks per day", and those three numbers cannot all be true: six days of two
+hundred ticks is twelve hundred ticks, which at ten a second is two minutes.
+Design §11 flags age length as an open guess, so this was asked rather than
+decided, and the answer was to honour the prose — twelve minutes an age, so
+`TICKS_PER_DAY` is 1200 and an MVP run of three ages is a little over half an
+hour.
+
+It also settles a second collision that item 9 walked straight into. §5 wants
+the surge to pour for about thirty seconds, which is three hundred ticks —
+longer than a two-hundred-tick day, so the flood literally could not fit inside
+its own impact day. At twelve hundred it has room to spread, pool behind a dike
+and drain, which is most of what makes the flood readable.
+
+A day six times longer makes every number keyed to it mean something different,
+so they moved together rather than being left to rot:
+
+* Food decays 1 a tick rather than 4, so a citizen empties in a thousand ticks
+  — a little under a day, deliberately not exactly one, or the whole city would
+  queue at the granary at the same hour.
+* Rest decays 1 point every 2 ticks. An *interval* rather than a smaller
+  number, because there is none: design §3.2 fixes needs at 0..=1000, so the
+  only way to say "slower than one point a tick" is to skip ticks. It empties
+  in two thousand, so hunger and sleep drift out of phase instead of always
+  arriving together.
+* A farmer takes 32 ticks a unit rather than 8, so one still feeds about three
+  people and a three-slot farm still feeds nine. Left at 8 it would have fed
+  thirty-six and made farms a formality.
+* Sleeping recovers 2 a tick rather than 20, so a night is about a third of a
+  day rather than four seconds.
+
+Phase 5's playtesting is where these get answered with a stopwatch instead of
+arithmetic. They are all in `balance.rs` for exactly that reason.

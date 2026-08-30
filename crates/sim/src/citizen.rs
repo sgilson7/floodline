@@ -212,18 +212,23 @@ impl Citizen {
         Fx(v)
     }
 
-    /// One tick of getting hungrier and more tired.
+    /// One tick of getting hungrier and more tired. `tick` is the world's, so
+    /// that a need slower than one point a tick can be expressed at all.
     ///
     /// Needs fall while eating and sleeping too — the filling happens in the
     /// building's own rule and has to beat the decay to be worth walking to,
     /// which is what stops a citizen parking at a granary forever.
-    pub fn tick_needs(&mut self) {
+    pub fn tick_needs(&mut self, tick: u32) {
         if !self.alive() {
             return;
         }
 
         self.food = self.food.saturating_sub(FOOD_DECAY);
-        self.rest = self.rest.saturating_sub(REST_DECAY);
+        // Rest is the slower need, and "slower than one point a tick" can only
+        // be said by skipping ticks.
+        if tick % REST_DECAY_INTERVAL == 0 {
+            self.rest = self.rest.saturating_sub(REST_DECAY);
+        }
 
         if self.food == 0 {
             self.starved_for += 1;

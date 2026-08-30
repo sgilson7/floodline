@@ -5,6 +5,7 @@
 //! "`gui` never constructs a `World` change except by handing a `Command` to
 //! the lockstep" — is why the mutating methods are the short list they are.
 
+use crate::age::{Disaster, DisasterKind};
 use crate::balance::*;
 use crate::building::{BuildState, Building, BuildingId, Good, Goods, Kind};
 use crate::citizen::{Citizen, CitizenId, Errand, Job, PlayerId, State};
@@ -97,6 +98,17 @@ pub struct World {
     /// Players who have called for a pause. Design §6: it takes everyone's
     /// `Resume` to lift, so this is a list rather than a flag.
     pub paused_by: Vec<PlayerId>,
+    /// Which age it is, counting from one.
+    pub age: u32,
+    /// The tick the current age began.
+    pub age_start_tick: u32,
+    /// This age's disaster, drawn at age start and deliberately not shown
+    /// until the village has some reason to know it (design §4).
+    pub disaster: Disaster,
+    /// The tick the run ended, if it has.
+    pub finished: Option<u32>,
+    /// The most citizens each city has ever had, for the score screen.
+    pub peak_population: Vec<u32>,
     /// Roads that have been laid, in the order they were laid.
     pub roads: Vec<Road>,
     /// Standing trade agreements, proposed and accepted.
@@ -153,12 +165,22 @@ impl World {
             buildings: Vec::new(),
             occupancy: vec![None; crate::map::CELLS],
             paused_by: Vec::new(),
+            age: 1,
+            age_start_tick: 0,
+            disaster: Disaster { kind: DisasterKind::Flood, sources: Vec::new(), height: 0 },
+            finished: None,
+            peak_population: vec![0; players as usize],
             roads: Vec::new(),
             trades: Vec::new(),
             pings: Vec::new(),
             nav_generation: 0,
             players: (0..players).map(|p| PlayerId(p as u8)).collect(),
         };
+
+        // Age one's disaster is drawn now, from the same seeded Rng that
+        // built the map, so the whole run is a function of the seed.
+        world.disaster = Disaster::draw(1, &world.map, &mut world.rng);
+        world.peak_population = vec![FOUNDING_CITIZENS; players as usize];
 
         // The Hearths are already there when the run begins (design §4), each
         // holding what its city starts with. `level_pad` levelled a
@@ -414,6 +436,11 @@ impl World {
         // the same reason on the same tick, which is the property that
         // matters; the sender's own GUI can call `apply` itself to find out
         // why before it ever issues one.
+        if self.finished.is_some() {
+            // The run is over. Nothing more happens, on any peer.
+            return;
+        }
+
         for (player, cmd) in commands {
             let _ = self.apply(*player, cmd);
         }
@@ -426,7 +453,7 @@ impl World {
 
         for i in 0..self.citizens.len() {
             let was_alive = self.citizens[i].alive();
-            self.citizens[i].tick_needs();
+            self.citizens[i].tick_needs(self.tick);
             if was_alive && !self.citizens[i].alive() {
                 self.clear_from_rosters(CitizenId(i as u16));
             }
@@ -439,6 +466,7 @@ impl World {
         if self.tick % TICKS_PER_DAY == 0 {
             self.trade_day();
         }
+        self.tick_clock();
         self.pings.retain(|p| self.tick.saturating_sub(p.at) < PING_LIFETIME);
     }
 
@@ -1064,8 +1092,8 @@ mod tests {
         let mut c = World::new(1, 2).citizens.remove(0);
         c.state = State::Dead;
         let before = c.clone();
-        for _ in 0..1000 {
-            c.tick_needs();
+        for t in 0..1000 {
+            c.tick_needs(t);
         }
         assert_eq!(c, before, "a corpse does not get hungrier");
     }
@@ -1516,15 +1544,20 @@ mod tests {
         w.tick(&mut nav, &[]);
         assert_eq!(nav.len(), 1, "eight citizens built {} fields", nav.len());
 
-        for _ in 0..400 {
+        // Long enough to run out of food, which must not have stopped anybody
+        // getting there: starving is a condition, not an activity. Expressed
+        // against the constant rather than as a number, because the length of
+        // a day is a thing design §11 leaves open and has already changed once.
+        let past_empty = (NEED_FULL / FOOD_DECAY) as u32 + 50;
+        for _ in 0..past_empty {
             w.tick(&mut nav, &[]);
         }
         for i in 0..8 {
             assert_eq!(w.citizens[i].state, State::Idle, "citizen {i} never arrived");
-            // Four hundred ticks is past the point where food runs out, and
-            // that must not have stopped anybody: starving is a condition, not
-            // an activity.
-            assert!(w.citizens[i].starving(), "nobody has eaten in four hundred ticks");
+            assert!(
+                w.citizens[i].starving(),
+                "citizen {i} has not eaten in {past_empty} ticks and is not starving"
+            );
         }
         assert_eq!(nav.len(), 1, "and still one field at the end");
     }

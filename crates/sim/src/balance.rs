@@ -12,12 +12,29 @@
 /// Simulation ticks per second (design §3.1).
 pub const TICKS_PER_SECOND: u32 = 10;
 
-/// Ticks in an in-game day (design §4): 20 seconds of wall clock.
-pub const TICKS_PER_DAY: u32 = 200;
+/// Ticks in an in-game day: two minutes of wall clock.
+///
+/// Design §4 says "6 days, about 12 real minutes at 10 ticks/s with 200 ticks
+/// per day", and those numbers contradict each other — six days of two hundred
+/// ticks is twelve hundred ticks, which at ten a second is two minutes, not
+/// twelve. §11 flags age length as an open guess, so this was asked rather
+/// than decided, and the answer was to honour the prose: twelve minutes an
+/// age, so a day is twelve hundred ticks.
+///
+/// It also settles a second contradiction. §5 wants the surge to pour for
+/// about thirty seconds, and thirty seconds is three hundred ticks — longer
+/// than a two-hundred-tick day, so the flood could not have fitted inside its
+/// own impact day. At twelve hundred it has room to spread, pool behind a
+/// dike and drain, which is most of what makes the flood readable.
+pub const TICKS_PER_DAY: u32 = 1200;
 
-/// Days in an age. Design §4 guesses six, and design §11 flags the guess as
-/// open — twelve real minutes an age may be too slow for an evening with
-/// friends. Left at six until phase 5 can time a real run.
+/// Days in an age. Six, from design §4 — so an age is twelve minutes and a
+/// full three-age MVP run is a little over half an hour.
+///
+/// §11 worries this is too slow for an evening with friends, and phase 5's
+/// playtesting is where that gets answered with a stopwatch rather than
+/// arithmetic. If it does turn out too long, this is the constant to change:
+/// nothing else in `sim` assumes a particular number of days.
 pub const DAYS_PER_AGE: u32 = 6;
 
 // ---- citizens --------------------------------------------------------------
@@ -25,15 +42,23 @@ pub const DAYS_PER_AGE: u32 = 6;
 /// Needs run 0..=NEED_FULL (design §3.2).
 pub const NEED_FULL: u16 = 1000;
 
-/// Food falls by this much a tick, so a full citizen empties in 250 ticks —
-/// a day and a quarter. Slightly longer than a day on purpose: a citizen who
-/// has to eat exactly once a day would have every citizen in a city queue at
-/// the granary at the same hour, which looks like a bug and plays like one.
-pub const FOOD_DECAY: u16 = 4;
+/// Food falls by this much a tick, so a full citizen empties in a thousand
+/// ticks — a little over four fifths of a day. Slightly less than a day on
+/// purpose: a citizen who had to eat exactly once a day would put every
+/// citizen in the city at the granary at the same hour, which looks like a bug
+/// and plays like one.
+pub const FOOD_DECAY: u16 = 1;
 
-/// Rest falls a little slower, emptying in 333 ticks, so sleep and hunger
-/// drift out of phase with each other rather than arriving together.
-pub const REST_DECAY: u16 = 3;
+/// Rest falls by one point every `REST_DECAY_INTERVAL` ticks, so it empties in
+/// two thousand — well over a day, and at a different rate from hunger, so the
+/// two needs drift out of phase rather than always arriving together.
+///
+/// An interval rather than a smaller per-tick number because there is no
+/// smaller whole number than one. Design §3.2 fixes the needs at 0..=1000, so
+/// the only way to make a need slower than "one point a tick" is to skip
+/// ticks.
+pub const REST_DECAY: u16 = 1;
+pub const REST_DECAY_INTERVAL: u32 = 2;
 
 /// A citizen on empty starves after three days (design §3.2).
 pub const STARVE_TICKS: u32 = 3 * TICKS_PER_DAY;
@@ -163,11 +188,14 @@ pub const NAV_CACHE_MAX: usize = 24;
 /// haulers carry. At 100, a citizen eats about eight units a day.
 pub const FOOD_PER_UNIT: u16 = 100;
 
-/// Farmer-ticks per unit of food produced. One farmer makes twenty-five units
-/// a day, which feeds about three people; a three-slot farm feeds nine. A city
-/// of eight is therefore one farm and some room to grow, not a city where
-/// everybody farms.
-pub const FARM_TICKS_PER_UNIT: u32 = 8;
+/// Farmer-ticks per unit of food produced.
+///
+/// A citizen burns a thousand points of food need a day and one unit fills a
+/// hundred, so eating costs about twelve units a day. At thirty-two ticks a
+/// unit a farmer makes thirty-seven a day and so feeds about three people, and
+/// a three-slot farm feeds nine. A founding party of eight is therefore one
+/// farm and some room to grow, rather than a city where everybody farms.
+pub const FARM_TICKS_PER_UNIT: u32 = 32;
 
 /// How much a farm holds before its farmers stop, waiting for a hauler. Small
 /// on purpose: a farm that could stockpile a week of food would make haulers
@@ -177,10 +205,15 @@ pub const FARM_BUFFER: u16 = 60;
 /// Units a citizen can carry at once.
 pub const CARRY_CAPACITY: u16 = 20;
 
-/// Units of food eaten per tick at a granary, and rest recovered per tick in a
-/// bed. Sleep has to beat `REST_DECAY` by enough to be worth the walk.
+/// Units of food eaten per tick at a granary: a meal from hungry to full is
+/// six units and six ticks, which is long enough to see somebody standing
+/// there and short enough not to be a queue.
 pub const EAT_RATE: u16 = 1;
-pub const SLEEP_RATE: u16 = 20;
+
+/// Rest recovered per tick in a bed. Two a tick takes an exhausted citizen
+/// from `TIRED` to `RESTED_ENOUGH` in about three hundred and seventy ticks —
+/// roughly a third of a day, which is a night.
+pub const SLEEP_RATE: u16 = 2;
 
 /// A citizen stops eating once this full, rather than at the brim, so it does
 /// not spend its life at the granary topping up.
@@ -210,3 +243,15 @@ pub const ROAD_JOIN_REACH: i32 = 6;
 /// between them, so a bigger trade is a longer line of people rather than one
 /// citizen carrying a mountain.
 pub const CARAVAN_SIZE: usize = 3;
+
+// ---- ages ------------------------------------------------------------------
+
+/// The last age of an MVP run. The plan: "Ages 1–3 exist (flood, escalating
+/// height); the run ends when both cities fall or after age 3, whichever
+/// first."
+pub const MAX_AGE: u32 = 3;
+
+/// How long the source corner keeps pouring water in, in ticks. Design §5:
+/// about thirty seconds. The surge is not a scripted wave — it is a source
+/// strong enough that the automaton produces a front.
+pub const SURGE_TICKS: u32 = 30 * TICKS_PER_SECOND;

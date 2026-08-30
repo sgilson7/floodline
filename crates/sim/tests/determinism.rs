@@ -11,7 +11,7 @@
 //! and needs — and the scripted `Command` stream covering every variant
 //! arrives with `Command` in item 7.
 
-use sim::balance::{FOUNDING_CITIZENS, TICKS_PER_DAY};
+use sim::balance::{FOUNDING_CITIZENS, NEED_FULL, TICKS_PER_DAY};
 use sim::building::{Good, Kind};
 use sim::citizen::{Job, PlayerId};
 use sim::citizen::CitizenId;
@@ -561,6 +561,14 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
     assert!(w.trades[0].accepted, "the trade was never accepted");
     assert!(w.buildings[dike.0 as usize].level > 1, "the dike was never raised");
     assert_eq!(w.buildings[farm.0 as usize].kind, Kind::Farm, "ids drifted");
-    assert_eq!(w.population(PlayerId(0)), 0, "a city with no food somehow survived");
+    // Fifteen hundred ticks is a little over a day now, so nobody has starved
+    // yet — food empties after a thousand and death follows three days later.
+    // They are all hungry, which is the observable that survives a change to
+    // the length of a day.
+    assert_eq!(w.population(PlayerId(0)), FOUNDING_CITIZENS);
+    assert!(
+        w.citizens.iter().filter(|c| c.owner == PlayerId(0)).all(|c| c.food < NEED_FULL),
+        "a city with no granary is not even hungry"
+    );
     let _ = (CitizenId(0), granary);
 }
