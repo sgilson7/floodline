@@ -13,7 +13,7 @@ comes next**. Read `CLAUDE.md`, then `HANDOFF.md`, then this.
 have finished a run together and survived the first flood — the first time
 anybody has played it.
 
-x, no warnings. `make test` ~17s,
+250 cargo tests, 14 browser checks, no warnings. `make test` ~17s,
 `make browser-test` ~6 minutes.
 
 The plan is an artifact, and it is the plan of record:
@@ -23,8 +23,8 @@ The plan is an artifact, and it is the plan of record:
 |---|---|---|
 | M1 | Forester costs stone | **done** |
 | M2 | A camera over the map | **done** |
-| M3 | Dikes: 3×1, drawn, breakable | ← **you are here** |
-| M4 | The river and the wave | |
+| M3 | Dikes: 3×1, drawn, breakable | **done** |
+| M4 | The river and the wave | ← **you are here** |
 | M5 | Tuning: which dikes break | |
 | M6 | Gold, the trading hut, mules | |
 | M7 | Levels, and moving buildings | |
@@ -32,8 +32,8 @@ The plan is an artifact, and it is the plan of record:
 | M9 | Families, children, a nursery, a households tab | |
 | M10 | Two agents, one game, played to the end | |
 
-Nothing is half-written. Every commit is green and pushed; `main` and the
-deployed build agree.
+Nothing is half-written. Every commit is green; `main` is four commits ahead
+of the deployed build, so **push before believing what the Pages build does**.
 
 ---
 
@@ -67,30 +67,70 @@ before changing anything they touch.
 
 ---
 
-## Starting M3: dikes
+## M3, as built — and where it differs from the plan
+
+Three commits, each green on its own:
+
+1. **`Building::facing`** and a `Facing` argument on `Kind::size`, rippling
+   through `footprint`, `fits_on_map`, `ground_suits`, `neighbours_suit`,
+   `can_place` and `place`. `Command::Place` carries a facing for every kind.
+   `Building::site` normalises it away for a kind that does not turn.
+2. **`Command::DikeLine { from, to }`** and a click-drag with a ghost. The run
+   snaps to the longer axis and to whole segments; a refused segment is skipped
+   rather than failing the line. `plan_dike_line` is what both the ghost and
+   the placement walk.
+3. **`Building::stress`**, `flood::press_dikes`, and a dike that darkens under
+   load. Dikes have left `batter_buildings`.
+
+**Two things came out differently from the plan, both measured:**
+
+* **The pressure formula.** `depth × speed` is *zero* where a wall earns its
+  keep, because water a dike has stopped is water that has stopped moving —
+  fifty-one sixteenths piled against a wall travelling at a speed of two. It is
+  `depth × (STILL_PUSH + speed)` now. See `balance::STILL_PUSH` and the
+  DECISIONS entry.
+* **A segment is priced per cell.** Ten stone for three cells would have made a
+  wall a third of the price `STARTING_STONE` was measured against. The
+  five-strategy playtest is what noticed; no assertion would have.
+
+**And one cost, deliberately not paid here.** `playtest.rs` used to wall a
+diagonal one cell at a time, which against a four-neighbour automaton seals
+perfectly for one cell of stone per cell of front. Straight segments cannot
+draw a diagonal, so it draws a staircase and half of it runs along the flow.
+Survivors for the `dike` strategy went 2 → 1 and for `both` 4 → 1. M4 replaces
+the corner flood with a river, where a bank *is* a straight line; M5 re-derives
+all of it. Do not tune this against a flood that is about to be replaced.
+
+`balance::DIKE_STRESS_LIMIT` is provisional and says so: measured only against
+sustained flow on flat ground, enough to make "a level one breaks, a level two
+holds" true and testable.
+
+---
+
+## Starting M4: the river
 
 The plan artifact has the full write-up. The short version and the traps:
 
-1. **Orientation.** `Kind::size()` is a constant per kind. A 3×1 dike needs
-   `Building::facing`, and `Command::Place` has to carry it. That ripples
-   through `footprint`, `fits_on_map`, `ground_suits`, `neighbours_suit`,
-   `occupy`, `can_place` and `place`. Wire format changes — fine, the build
-   hash gates it.
-2. **`Command::DikeLine { from, to }`**, beside `Command::Road` and not reusing
-   it: a road takes the cheapest path, a wall is a straight line. GUI is a
-   click-drag with a ghost of the run and a running cost.
-3. **`Building::stress: u32`.** Each tick, for the three cells on the wet side,
-   `depth × speed` — both already kept by the water automaton — summed, scaled,
-   accumulated. Past a per-level threshold the dike is rubble. Stress bleeds
-   off while the water is away. Dikes leave `batter_buildings` and use this
-   instead, so there is one model and not two.
-4. **Do not pick the thresholds.** They are M5's job, measured against the
-   river, to hit "many level ones break, most level twos hold".
-
-Every existing dike test assumes 1×1 and places cell by cell. They all get
-rewritten; expect the diff to look larger than the feature.
-
----
+1. **`map::river`** — entry and exit on opposite edges from the seed, three to
+   five control points offset perpendicular to the straight line, walked with
+   integer interpolation, corridor lowered below the shallows band and tapered.
+   **Carved before the ground bands are computed**, so the river counts as the
+   shallows it is.
+2. **`SHORE_DISTANCE` changes meaning** — from "from the low corner" to "from
+   the river bank". Hearth sites go on both banks, spread along the channel,
+   and the spacing guarantee has to be re-measured. This is the constant that
+   already decided the game once.
+3. **`Disaster::sources`** stops being corners and becomes the upstream mouth.
+   The existing surge pump generalises: the mouth held at H, the next reach
+   downstream at H/2.
+4. **The ford** is a fourth passability rule in a system that has had one.
+   `nav::passable` is read by pathing, the crowd, the flood and road-laying —
+   change all four together, and remember M8 needs the same edit.
+5. **Everything measured against a corner flood is now wrong**: the flood-reach
+   table, the city placement, the five strategies, and M3's stress limits.
+   `cargo test -p sim --release --test playtest -- --ignored --nocapture` and
+   `cargo test -p sim --release --test dikes -- --ignored --nocapture` are the
+   two probes to re-run.
 
 ## Things that will bite you, that are new since `HANDOFF.md`
 
