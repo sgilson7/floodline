@@ -111,6 +111,7 @@ opening in `sim` and asserts the city lives to see water.
 
 ### Next action
 
-Phase 5's done-condition: two people, two machines, a full run to age 3 on the
-Pages build. Everything known to stop that is fixed; what stops it next is the
-thing to fix after.
+See `HANDOFF-M2.md`. Two people have now played together and survived the first
+flood, and a ten-milestone plan is agreed and under way — M1 and M2 are done,
+M3 (dikes) is next. The plan of record is an artifact:
+<https://claude.ai/code/artifact/f51d6368-d9a0-48f2-9213-c41f1eba59b1>
