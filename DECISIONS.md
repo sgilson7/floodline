@@ -383,3 +383,45 @@ a way the checksum will catch a tick later and nobody will be able to explain.
 `a_rejected_command_leaves_the_world_byte_identical` is the test, and it
 compares checksums rather than fields so it cannot miss a corner of the world
 that a hand-written comparison would forget.
+
+---
+
+## 2026-08-30 — Roads are laid as sites, and a road is not a link until it is whole
+
+`Command::Road` marks out the cheapest path and places a construction *site* on
+every cell of it, rather than conjuring a finished road. Design §6 says
+"builders from the ordering city construct it", and this is what that means:
+laying a road across the map is a route drawn on the ground and then several
+days of somebody's builders and haulers, which is what makes the decision to
+lay one cost something.
+
+Road planning does not use `nav`'s flow fields, and the two cost functions are
+deliberately different. A field answers "how does a citizen walk to X", and a
+citizen cannot cross shallows; a road can, by becoming a bridge. The road
+planner is also four-connected where the walking one is eight — a diagonal road
+is two cells touching at a corner, and a hauler can no more walk that than it
+can squeeze between two buildings.
+
+`Road::intact` requires every cell to be a standing road or bridge, and
+`linked` requires intact *and* joined. So one cell broken by a surge stops the
+trade while leaving the agreement standing, and rebuilding that cell restores
+it without anybody having to negotiate again. That is design §6's "the flood
+breaks road cells, which is what makes rebuilding the link after an age a
+decision", and it is a test rather than a hope.
+
+---
+
+## 2026-08-30 — A caravan is people walking, not a transfer
+
+A day's trade could have been two numbers moving between two treasuries. It is
+instead an errand given to real haulers who walk the road with it, because
+design §6 says "a hauler that drowns loses the cargo" and there is no way to
+lose cargo that was never on anybody's back. It also means a trade during a
+flood is a gamble, which is the interesting version.
+
+Caravans take unassigned citizens only — a farmer is not pulled off the field
+to walk to another city — and never take one that is already carrying
+something, because pulling it off that errand would drop the load. One merely
+on its way to *pick something up* has nothing to lose and is fair game. If a
+city's haulers are all busy, that day's trade is short, which is a reasonable
+thing for a city to be bad at rather than a bug to fix.

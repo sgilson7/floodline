@@ -191,3 +191,22 @@ pub const RESTED_ENOUGH: u16 = 950;
 /// look where somebody is pointing, short enough that the list of them cannot
 /// grow into the snapshot.
 pub const PING_LIFETIME: u32 = 3 * TICKS_PER_SECOND;
+
+// ---- roads and trade -------------------------------------------------------
+
+/// Cost of laying a road over a cell, relative to reusing an existing one,
+/// which costs 1. Crossing water needs a bridge and is priced accordingly —
+/// three times the ground, so a road goes round a wide river and across a
+/// narrow one, which is what a road would do.
+pub const ROAD_COST_GROUND: u32 = 10;
+pub const ROAD_COST_WATER: u32 = 30;
+
+/// How near another city's buildings a road has to end before that city can
+/// accept it. Generous, because the alternative is a player being told their
+/// road stopped one cell short.
+pub const ROAD_JOIN_REACH: i32 = 6;
+
+/// Haulers each city sends out per day per live trade. The goods are split
+/// between them, so a bigger trade is a longer line of people rather than one
+/// citizen carrying a mountain.
+pub const CARAVAN_SIZE: usize = 3;

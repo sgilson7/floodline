@@ -7,13 +7,14 @@
 
 use crate::balance::*;
 use crate::building::{BuildState, Building, BuildingId, Good, Goods, Kind};
-use crate::citizen::{Citizen, CitizenId, Job, PlayerId, State};
+use crate::citizen::{Citizen, CitizenId, Errand, Job, PlayerId, State};
 use crate::command::Command;
 use crate::fx::V2;
 use crate::fx::Fx;
-use crate::map::Map;
+use crate::map::{Ground, Map};
 use crate::names::NAMES;
 use crate::nav::{self, Dest, FlowField, Nav};
+use crate::road::{self, Road, RoadId, Trade, TradeId};
 use crate::rng::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -59,6 +60,16 @@ pub enum RuleError {
     NotACottage,
     /// A coordinate outside the map.
     NoSuchCell,
+    /// No way to lay a road between those two cells.
+    NoRoute,
+    NoSuchRoad,
+    NoSuchTrade,
+    /// A road that ends nowhere near your city is not yours to accept.
+    NotYourRoad,
+    /// Trading with yourself, or with somebody who is not playing.
+    NoSuchPartner,
+    /// Already agreed.
+    AlreadyAccepted,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -86,6 +97,10 @@ pub struct World {
     /// Players who have called for a pause. Design §6: it takes everyone's
     /// `Resume` to lift, so this is a list rather than a flag.
     pub paused_by: Vec<PlayerId>,
+    /// Roads that have been laid, in the order they were laid.
+    pub roads: Vec<Road>,
+    /// Standing trade agreements, proposed and accepted.
+    pub trades: Vec<Trade>,
     /// Recent pings, for the GUI to draw. A command rather than a chat
     /// message so it lands on the same tick everywhere and replays with the
     /// game; pruned each tick so it cannot grow without bound.
@@ -138,6 +153,8 @@ impl World {
             buildings: Vec::new(),
             occupancy: vec![None; crate::map::CELLS],
             paused_by: Vec::new(),
+            roads: Vec::new(),
+            trades: Vec::new(),
             pings: Vec::new(),
             nav_generation: 0,
             players: (0..players).map(|p| PlayerId(p as u8)).collect(),
@@ -419,6 +436,9 @@ impl World {
         self.resolve_arrivals();
         self.produce();
         self.tick += 1;
+        if self.tick % TICKS_PER_DAY == 0 {
+            self.trade_day();
+        }
         self.pings.retain(|p| self.tick.saturating_sub(p.at) < PING_LIFETIME);
     }
 
@@ -515,6 +535,45 @@ impl World {
                 self.pings.push(Ping { by: player, x: *x, y: *y, at: self.tick });
                 Ok(())
             }
+            Command::Road { from, to } => self.lay_road(player, *from, *to).map(|_| ()),
+            Command::AcceptRoad { road } => {
+                let r = self.roads.get_mut(road.0 as usize).ok_or(RuleError::NoSuchRoad)?;
+                if r.reaches != Some(player) {
+                    return Err(RuleError::NotYourRoad);
+                }
+                if r.joined {
+                    return Err(RuleError::AlreadyAccepted);
+                }
+                r.joined = true;
+                Ok(())
+            }
+            Command::Trade { with, give, take } => {
+                if *with == player || !self.players.contains(with) {
+                    return Err(RuleError::NoSuchPartner);
+                }
+                let id = TradeId(self.trades.len() as u16);
+                self.trades.push(Trade {
+                    id,
+                    from: player,
+                    with: *with,
+                    give: *give,
+                    take: *take,
+                    accepted: false,
+                });
+                Ok(())
+            }
+            Command::AcceptTrade { trade } => {
+                let t = self.trades.get_mut(trade.0 as usize).ok_or(RuleError::NoSuchTrade)?;
+                // Only the other party, and only once.
+                if t.with != player {
+                    return Err(RuleError::NotYours);
+                }
+                if t.accepted {
+                    return Err(RuleError::AlreadyAccepted);
+                }
+                t.accepted = true;
+                Ok(())
+            }
             Command::Pause => {
                 if !self.paused_by.contains(&player) {
                     self.paused_by.push(player);
@@ -525,6 +584,127 @@ impl World {
                 self.paused_by.retain(|&p| p != player);
                 Ok(())
             }
+        }
+    }
+
+    // ---- roads and trade ---------------------------------------------------
+
+    /// Lay a road along the cheapest path between two cells.
+    ///
+    /// Every cell of the path that is not already a way becomes a *site* —
+    /// design §6 says "builders from the ordering city construct it", so this
+    /// marks out the route and the city's builders and haulers do the rest.
+    /// Cells that already carry traffic are reused and cost nothing.
+    fn lay_road(
+        &mut self,
+        player: PlayerId,
+        from: (u8, u8),
+        to: (u8, u8),
+    ) -> Result<RoadId, RuleError> {
+        let a = (from.0 as i32, from.1 as i32);
+        let b = (to.0 as i32, to.1 as i32);
+        if !Map::contains(a.0, a.1) || !Map::contains(b.0, b.1) {
+            return Err(RuleError::NoSuchCell);
+        }
+        let path = road::plan(self, a, b).ok_or(RuleError::NoRoute)?;
+
+        let mut cells = Vec::with_capacity(path.len());
+        for (x, y) in path {
+            cells.push((x as u8, y as u8));
+            if self.building_at(x, y).is_some() {
+                continue; // an existing way, reused
+            }
+            // A bridge where it must cross water, a road everywhere else.
+            let kind = if self.map.ground_at(x, y) == Ground::Shallows {
+                Kind::Bridge
+            } else {
+                Kind::Road
+            };
+            // `plan` already established every cell is layable, so this cannot
+            // fail for a reason the player could act on.
+            let _ = self.place(player, kind, x, y);
+        }
+
+        let end = (b.0, b.1);
+        let reaches = road::city_at(self, player, end.0, end.1);
+        let id = RoadId(self.roads.len() as u16);
+        self.roads.push(Road { id, by: player, reaches, joined: false, cells });
+        Ok(id)
+    }
+
+    /// Whether two cities have a road between them that is joined and whole.
+    pub fn linked(&self, a: PlayerId, b: PlayerId) -> bool {
+        self.roads.iter().any(|r| r.links(a, b) && r.intact(self))
+    }
+
+    /// A day's trade: send the caravans out.
+    ///
+    /// Once a day, not every tick, because a standing agreement is a daily
+    /// exchange (design §6). Nothing is teleported: haulers are given the
+    /// errand and they walk it, so a hauler that drowns on the way loses the
+    /// cargo exactly as the design says.
+    fn trade_day(&mut self) {
+        for i in 0..self.trades.len() {
+            let t = self.trades[i];
+            if !t.accepted || !self.linked(t.from, t.with) {
+                continue;
+            }
+            self.send_caravan(t.from, t.with, t.give.0, t.give.1);
+            self.send_caravan(t.with, t.from, t.take.0, t.take.1);
+        }
+    }
+
+    /// Load up to `amount` of `good` onto idle haulers of `from`, bound for a
+    /// store of `to`.
+    fn send_caravan(&mut self, from: PlayerId, to: PlayerId, good: Good, amount: u16) {
+        if amount == 0 {
+            return;
+        }
+        let source = self
+            .buildings
+            .iter()
+            .find(|b| b.owner == from && b.standing_now() && b.kind.stores(good) && b.store.get(good) > 0)
+            .map(|b| b.id);
+        let Some(source) = source else {
+            return;
+        };
+        let (sx, sy) = self.buildings[source.0 as usize].centre();
+        let Some(&target) = self
+            .stores_for(to, good, sx, sy)
+            .iter()
+            .find(|id| {
+                let b = &self.buildings[id.0 as usize];
+                b.kind.has_room_for(good, &b.store)
+            })
+        else {
+            return;
+        };
+
+        // Split the load between a few carriers, so a bigger trade is a longer
+        // line of people rather than one citizen with a mountain on their back.
+        let per = (amount as usize).div_ceil(CARAVAN_SIZE).max(1) as u16;
+        let mut left = amount;
+        for i in 0..self.citizens.len() {
+            if left == 0 {
+                break;
+            }
+            let c = &self.citizens[i];
+            // Unassigned citizens only — a farmer is not pulled off the field
+            // to walk to another city. A hauler already carrying something is
+            // left alone, because taking it off that errand would drop the
+            // load; one merely on its way to pick something up has nothing to
+            // lose and is fair game.
+            if c.owner != from || !c.alive() || c.job.is_some() {
+                continue;
+            }
+            if c.busy() && !c.carrying.is_empty() {
+                continue;
+            }
+            self.citizens[i].abandon();
+            self.citizens[i].errand =
+                Some(Errand::Collect { from: source, good, to: target });
+            self.citizens[i].walk_to(Dest::Building(source));
+            left = left.saturating_sub(per);
         }
     }
 

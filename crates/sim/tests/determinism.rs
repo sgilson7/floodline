@@ -415,6 +415,21 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
         spots
     };
 
+    // Somewhere to lay a road from and to, beside each hearth rather than on
+    // it — a road does not go through a building.
+    let (road_from, road_to) = {
+        let w = World::new(31, 2);
+        let beside = |p: usize| {
+            let (hx, hy) = w.map.hearth_sites[p];
+            (1..8i32)
+                .flat_map(|r| [(r, 0), (-r, 0), (0, r), (0, -r)].into_iter())
+                .map(|(dx, dy)| (hx + dx, hy + dy))
+                .find(|&(x, y)| w.building_at(x, y).is_none() && w.map.buildable(x, y))
+                .expect("nowhere beside a hearth")
+        };
+        (beside(0), beside(1))
+    };
+
     // Ids are assigned in placement order after the two hearths.
     let farm = BuildingId(2);
     let granary = BuildingId(3);
@@ -441,6 +456,20 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
         (100, PlayerId(1), "pause".to_owned()),
         (140, PlayerId(0), "resume".to_owned()),
         (140, PlayerId(1), "resume".to_owned()),
+        // The road runs from one city to the other and is accepted, and a
+        // standing trade is agreed over it. Placed after the buildings above
+        // so their ids are not shifted by the hundred road cells.
+        (
+            10,
+            PlayerId(0),
+            format!(
+                "road {} {} {} {}",
+                road_from.0, road_from.1, road_to.0, road_to.1
+            ),
+        ),
+        (12, PlayerId(1), "acceptroad %0".to_owned()),
+        (14, PlayerId(0), "trade !1 food 20 wood 20".to_owned()),
+        (16, PlayerId(1), "accepttrade $0".to_owned()),
         (200, PlayerId(0), format!("demolish @{}", granary.0)),
         (300, PlayerId(0), format!("assign #6,#7 @{}", farm.0)),
         (320, PlayerId(0), "unassign #7".to_owned()),
@@ -451,10 +480,13 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
     {
         let verbs: std::collections::BTreeSet<&str> =
             script.iter().map(|(_, _, l)| l.split_whitespace().next().unwrap()).collect();
+        // Fourteen: every variant `Command` has. If a fifteenth is added and
+        // not scripted, this is what says so — which is the whole value of
+        // item 10 asking for "every variant" rather than "a good spread".
         assert_eq!(
             verbs.len(),
-            10,
-            "the script covers {} of the ten command variants: {verbs:?}",
+            14,
+            "the script covers {} of the fourteen command variants: {verbs:?}",
             verbs.len()
         );
     }
@@ -522,7 +554,11 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
     assert_eq!(mid.citizens[2].job, None, "#2 was unassigned");
     assert!(mid.pings.is_empty(), "pings from tick 6 were never pruned");
 
-    assert_eq!(w.buildings.len(), 6, "not everything was placed");
+    assert!(w.buildings.len() > 6, "the road laid no cells");
+    assert_eq!(w.roads.len(), 1);
+    assert!(w.roads[0].joined, "the road was never accepted");
+    assert_eq!(w.trades.len(), 1);
+    assert!(w.trades[0].accepted, "the trade was never accepted");
     assert!(w.buildings[dike.0 as usize].level > 1, "the dike was never raised");
     assert_eq!(w.buildings[farm.0 as usize].kind, Kind::Farm, "ids drifted");
     assert_eq!(w.population(PlayerId(0)), 0, "a city with no food somehow survived");

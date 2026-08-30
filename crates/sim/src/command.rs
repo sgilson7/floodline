@@ -14,8 +14,9 @@
 //! rejected identically on every machine, whether it did so by bug, by desync
 //! or by tampering.
 
-use crate::building::{BuildingId, Kind};
-use crate::citizen::CitizenId;
+use crate::building::{BuildingId, Good, Kind};
+use crate::citizen::{CitizenId, PlayerId};
+use crate::road::{RoadId, TradeId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -38,6 +39,15 @@ pub enum Command {
     /// chat message so it lands on the same tick for everyone and replays with
     /// the rest of the game (design §6).
     Ping { x: u8, y: u8 },
+    /// Lay a road from one cell to another along the cheapest path, bridging
+    /// shallows where it must (design §6).
+    Road { from: (u8, u8), to: (u8, u8) },
+    /// Join a road somebody laid to your city. Until this, it is their road
+    /// that happens to end near you.
+    AcceptRoad { road: RoadId },
+    /// Propose a standing daily exchange.
+    Trade { with: PlayerId, give: (Good, u16), take: (Good, u16) },
+    AcceptTrade { trade: TradeId },
     /// Stop the world. Design §6: it takes everyone's `Resume` to lift.
     Pause,
     Resume,
@@ -76,6 +86,19 @@ impl Command {
             Command::SetHome { citizens, cottage } => {
                 format!("home {} @{}", ids(citizens), cottage.0)
             }
+            Command::Road { from, to } => {
+                format!("road {} {} {} {}", from.0, from.1, to.0, to.1)
+            }
+            Command::AcceptRoad { road } => format!("acceptroad %{}", road.0),
+            Command::Trade { with, give, take } => format!(
+                "trade !{} {} {} {} {}",
+                with.0,
+                good_key(give.0),
+                give.1,
+                good_key(take.0),
+                take.1
+            ),
+            Command::AcceptTrade { trade } => format!("accepttrade ${}", trade.0),
             Command::Ping { x, y } => format!("ping {x} {y}"),
             Command::Pause => "pause".into(),
             Command::Resume => "resume".into(),
@@ -99,6 +122,15 @@ impl Command {
         let bid = |s: &str| -> Option<BuildingId> {
             s.strip_prefix('@').and_then(|n| n.parse().ok()).map(BuildingId)
         };
+        let rid = |s: &str| -> Option<RoadId> {
+            s.strip_prefix('%').and_then(|n| n.parse().ok()).map(RoadId)
+        };
+        let tid = |s: &str| -> Option<TradeId> {
+            s.strip_prefix('$').and_then(|n| n.parse().ok()).map(TradeId)
+        };
+        let pid = |s: &str| -> Option<PlayerId> {
+            s.strip_prefix('!').and_then(|n| n.parse().ok()).map(PlayerId)
+        };
 
         Some(match parts.as_slice() {
             ["place", k, x, y] => {
@@ -112,6 +144,17 @@ impl Command {
                 Command::MoveTo { citizens: ids(c)?, x: x.parse().ok()?, y: y.parse().ok()? }
             }
             ["home", c, b] => Command::SetHome { citizens: ids(c)?, cottage: bid(b)? },
+            ["road", fx, fy, tx, ty] => Command::Road {
+                from: (fx.parse().ok()?, fy.parse().ok()?),
+                to: (tx.parse().ok()?, ty.parse().ok()?),
+            },
+            ["acceptroad", r] => Command::AcceptRoad { road: rid(r)? },
+            ["trade", w, gg, ga, tg, ta] => Command::Trade {
+                with: pid(w)?,
+                give: (parse_good(gg)?, ga.parse().ok()?),
+                take: (parse_good(tg)?, ta.parse().ok()?),
+            },
+            ["accepttrade", t] => Command::AcceptTrade { trade: tid(t)? },
             ["ping", x, y] => Command::Ping { x: x.parse().ok()?, y: y.parse().ok()? },
             ["pause"] => Command::Pause,
             ["resume"] => Command::Resume,
@@ -138,6 +181,18 @@ pub fn parse_kind(s: &str) -> Option<Kind> {
     Kind::ALL.into_iter().find(|&k| kind_key(k) == s.to_ascii_lowercase())
 }
 
+pub fn good_key(g: Good) -> &'static str {
+    match g {
+        Good::Food => "food",
+        Good::Wood => "wood",
+        Good::Stone => "stone",
+    }
+}
+
+pub fn parse_good(s: &str) -> Option<Good> {
+    Good::ALL.into_iter().find(|&g| good_key(g) == s.to_ascii_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,6 +212,14 @@ mod tests {
             Command::Unassign { citizens: vec![CitizenId(4), CitizenId(5)] },
             Command::MoveTo { citizens: vec![CitizenId(8)], x: 127, y: 3 },
             Command::SetHome { citizens: vec![CitizenId(2)], cottage: BuildingId(11) },
+            Command::Road { from: (5, 6), to: (100, 120) },
+            Command::AcceptRoad { road: RoadId(2) },
+            Command::Trade {
+                with: PlayerId(1),
+                give: (Good::Food, 20),
+                take: (Good::Wood, 15),
+            },
+            Command::AcceptTrade { trade: TradeId(0) },
             Command::Ping { x: 64, y: 64 },
             Command::Pause,
             Command::Resume,
@@ -186,8 +249,8 @@ mod tests {
             .collect();
         assert_eq!(
             seen.len(),
-            10,
-            "one_of_each names {} distinct commands, not 10: {seen:?}",
+            14,
+            "one_of_each names {} distinct commands, not 14: {seen:?}",
             seen.len()
         );
     }
@@ -198,6 +261,8 @@ mod tests {
             "", "   ", "; just a comment", "fly to the moon", "place", "place nowhere 1 2",
             "place cottage 1", "demolish 7", "demolish @", "move 1 2 3", "assign #1",
             "pause now", "resume please", "ping 1", "home #1 2",
+            "road 1 2 3", "acceptroad 2", "trade !1 food 20 wood",
+            "trade !1 gold 20 wood 15", "accepttrade 0",
         ] {
             assert_eq!(Command::parse(line), None, "{line:?} parsed as a command");
         }
@@ -209,6 +274,18 @@ mod tests {
             Command::parse("ping 5 6   ; look at this"),
             Some(Command::Ping { x: 5, y: 6 })
         );
+    }
+
+    #[test]
+    fn every_good_has_a_spelling_and_only_one() {
+        let mut seen = std::collections::BTreeSet::new();
+        for g in Good::ALL {
+            let key = good_key(g);
+            assert!(seen.insert(key), "{key} names two goods");
+            assert_eq!(parse_good(key), Some(g));
+            assert_eq!(parse_good(&key.to_uppercase()), Some(g));
+        }
+        assert_eq!(parse_good("silver"), None);
     }
 
     #[test]
