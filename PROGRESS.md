@@ -23,14 +23,17 @@ except GitHub Pages.
 - [x] **Phase 4** — `quad_rtc.js`, vendored Trystero, the pasted-code path,
       `net-web`, `echo.html`. Both paths verified in a real browser, on the
       deployed build.
-- [x] **Phase 5** — the lobby, selection, the build menu, the road tool, the
-      trade dialog, the score screen, and design step 7's playtest.
+- [~] **Phase 5** — the lobby, selection, the build menu, the road tool, the
+      trade dialog, the score screen and design step 7's playtest are all
+      built. Its done-condition is "two people on two machines play a full run
+      to age 3 on the Pages build", and that has been attempted once and
+      failed. Not done until somebody finishes a run.
 - [x] **Phase 6** — failure messages that say what to do, the relay fallback,
       the build-hash guard end to end, the README.
 
 ### What was decided
 
-Ten entries added to `DECISIONS.md`; the ones that would change what somebody
+Seven entries added to `DECISIONS.md` (this said ten, and was wrong); the ones that would change what somebody
 else wrote are indexed under "Things that will bite you" in `HANDOFF.md`. The
 four that matter most:
 
@@ -72,7 +75,42 @@ Three specific questions are left, all in `DECISIONS.md` under "Design step 7":
    is a clean decision or a straitjacket, and only playing will say which.
 3. **A run is thirty-six minutes.** Design §11 already suspects that is long.
 
+---
+
+## Session 3 — 2026-08-30
+
+**Playing it broke it, which is what playing it is for.** Two people could not
+get into the same room, and a single-player village starved before the flood.
+Four bugs, all reproduced from scratch before being touched, all now tested:
+220 cargo tests and eleven browser checks.
+
+* **A lobby that was left kept its room.** `WebPeer` had no `Drop`, so leaving
+  the lobby dropped the game and left the browser in the Trystero room for
+  ever, answering strangers on behalf of nothing.
+* **A seat was never given back.** A two-seat game accepted exactly one joiner
+  for the host's whole life.
+* **Any peer leaving read as "the host left the game".**
+* **Choosing the whole city and right-clicking the farm did nothing at all** —
+  three slots, eight people, refused whole — so nobody farmed and the city
+  starved on day four with the farm standing empty.
+
+The last one is why "the water did not render": the run ended two days before
+the flood. `the_opening_a_player_would_play_reaches_the_flood` now plays that
+opening in `sim` and asserts the city lives to see water.
+
+### Still open, in the order they will be hit
+
+1. **Nothing produces wood or stone.** 200 wood is about five buildings and
+   that is the whole run; a Forester's hut and a Quarry are in design section
+   3.3 and deferred by the plan. This is the first question a player asks.
+2. **No fixed timestep.** The sim advances one tick per rendered frame —
+   measured at 24 ticks a second against a design rate of 10, and ~60 on a
+   normal display. A day is 20 to 50 seconds instead of two minutes, and the
+   drop timeout counts frames rather than seconds.
+3. **Design step 7 still needs a person.** Nobody has finished a run.
+
 ### Next action
 
-Play it, with a person, three times, and answer those three questions. Nothing
-else in the plan is unfinished.
+Phase 5's done-condition: two people, two machines, a full run to age 3 on the
+Pages build. Everything known to stop that is fixed; what stops it next is the
+thing to fix after.
