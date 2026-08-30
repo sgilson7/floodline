@@ -14,15 +14,17 @@
 //! rejected identically on every machine, whether it did so by bug, by desync
 //! or by tampering.
 
-use crate::building::{BuildingId, Good, Kind};
+use crate::building::{BuildingId, Facing, Good, Kind};
 use crate::citizen::{CitizenId, PlayerId};
 use crate::road::{RoadId, TradeId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Command {
-    /// Start a construction site.
-    Place { kind: Kind, x: u8, y: u8 },
+    /// Start a construction site. `facing` is which way the footprint runs
+    /// and is ignored by every kind that is square — but it is carried by all
+    /// of them, so there is one `Place` on the wire and not two.
+    Place { kind: Kind, facing: Facing, x: u8, y: u8 },
     /// Pull something down, or clear rubble.
     Demolish { building: BuildingId },
     /// Raise a dike by one level. Design §3.3 has dikes grow; this is how.
@@ -83,7 +85,9 @@ impl Command {
             c.iter().map(|i| format!("#{}", i.0)).collect::<Vec<_>>().join(",")
         };
         match self {
-            Command::Place { kind, x, y } => format!("place {} {x} {y}", kind_key(*kind)),
+            Command::Place { kind, facing, x, y } => {
+                format!("place {} {x} {y} {}", kind_key(*kind), facing_key(*facing))
+            }
             Command::Demolish { building } => format!("demolish @{}", building.0),
             Command::RaiseDike { dike } => format!("raise @{}", dike.0),
             Command::Assign { citizens, building } => {
@@ -142,9 +146,12 @@ impl Command {
         };
 
         Some(match parts.as_slice() {
-            ["place", k, x, y] => {
-                Command::Place { kind: parse_kind(k)?, x: x.parse().ok()?, y: y.parse().ok()? }
-            }
+            ["place", k, x, y, f] => Command::Place {
+                kind: parse_kind(k)?,
+                facing: parse_facing(f)?,
+                x: x.parse().ok()?,
+                y: y.parse().ok()?,
+            },
             ["demolish", b] => Command::Demolish { building: bid(b)? },
             ["raise", b] => Command::RaiseDike { dike: bid(b)? },
             ["assign", c, b] => Command::Assign { citizens: ids(c)?, building: bid(b)? },
@@ -193,6 +200,18 @@ pub fn parse_kind(s: &str) -> Option<Kind> {
     Kind::ALL.into_iter().find(|&k| kind_key(k) == s.to_ascii_lowercase())
 }
 
+/// The canonical spelling of a facing, for a transcript.
+pub fn facing_key(f: Facing) -> &'static str {
+    match f {
+        Facing::EastWest => "ew",
+        Facing::NorthSouth => "ns",
+    }
+}
+
+pub fn parse_facing(s: &str) -> Option<Facing> {
+    Facing::ALL.into_iter().find(|&f| facing_key(f) == s.to_ascii_lowercase())
+}
+
 pub fn good_key(g: Good) -> &'static str {
     match g {
         Good::Food => "food",
@@ -212,8 +231,9 @@ mod tests {
     /// Every variant, for the round-trip test and for the determinism script.
     fn one_of_each() -> Vec<Command> {
         vec![
-            Command::Place { kind: Kind::Cottage, x: 10, y: 20 },
-            Command::Place { kind: Kind::Bridge, x: 0, y: 255 },
+            Command::Place { kind: Kind::Cottage, facing: Facing::EastWest, x: 10, y: 20 },
+            Command::Place { kind: Kind::Dike, facing: Facing::NorthSouth, x: 4, y: 9 },
+            Command::Place { kind: Kind::Bridge, facing: Facing::EastWest, x: 0, y: 255 },
             Command::Demolish { building: BuildingId(7) },
             Command::RaiseDike { dike: BuildingId(3) },
             Command::Assign { citizens: vec![CitizenId(1)], building: BuildingId(2) },
@@ -271,8 +291,9 @@ mod tests {
     #[test]
     fn nonsense_is_not_a_command() {
         for line in [
-            "", "   ", "; just a comment", "fly to the moon", "place", "place nowhere 1 2",
-            "place cottage 1", "demolish 7", "demolish @", "move 1 2 3", "assign #1",
+            "", "   ", "; just a comment", "fly to the moon", "place", "place nowhere 1 2 ew",
+            "place cottage 1", "place cottage 1 2", "place cottage 1 2 up",
+            "demolish 7", "demolish @", "move 1 2 3", "assign #1",
             "pause now", "resume please", "ping 1", "home #1 2",
             "road 1 2 3", "acceptroad 2", "trade !1 food 20 wood",
             "trade !1 gold 20 wood 15", "accepttrade 0",
@@ -287,6 +308,18 @@ mod tests {
             Command::parse("ping 5 6   ; look at this"),
             Some(Command::Ping { x: 5, y: 6 })
         );
+    }
+
+    #[test]
+    fn every_facing_has_a_spelling_and_only_one() {
+        let mut seen = std::collections::BTreeSet::new();
+        for f in Facing::ALL {
+            let key = facing_key(f);
+            assert!(seen.insert(key), "{key} names two facings");
+            assert_eq!(parse_facing(key), Some(f));
+            assert_eq!(parse_facing(&key.to_uppercase()), Some(f));
+        }
+        assert_eq!(parse_facing("sideways"), None);
     }
 
     #[test]

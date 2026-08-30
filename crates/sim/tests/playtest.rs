@@ -21,7 +21,7 @@
 //!     cargo test -p sim --release --test playtest -- --ignored --nocapture
 
 use sim::balance::*;
-use sim::building::Kind;
+use sim::building::{Facing, Kind};
 use sim::citizen::{CitizenId, PlayerId};
 use sim::command::Command;
 use sim::map::{Map, MAP_H, MAP_W};
@@ -92,7 +92,7 @@ fn spot(w: &World, kind: Kind, hx: i32, hy: i32) -> Option<(i32, i32)> {
                 if dx.abs() != r && dy.abs() != r {
                     continue;
                 }
-                if w.can_place(ME, kind, hx + dx, hy + dy).is_ok() {
+                if w.can_place(ME, kind, Facing::EastWest, hx + dx, hy + dy).is_ok() {
                     return Some((hx + dx, hy + dy));
                 }
             }
@@ -168,7 +168,8 @@ fn play(seed: u64, play: Play) -> Report {
                 }
                 let kind = plan[placed];
                 if let Some((x, y)) = spot(&w, kind, hx, hy) {
-                    if w.apply(ME, &Command::Place { kind, x: x as u8, y: y as u8 }).is_ok() {
+                    if w.apply(ME, &Command::Place { kind,
+                            facing: Facing::EastWest, x: x as u8, y: y as u8 }).is_ok() {
                         placed += 1;
                     }
                 }
@@ -320,7 +321,7 @@ fn order_a_wall(w: &mut World, hx: i32, hy: i32) -> usize {
             continue;
         }
         let (x, y) = (cx + sx * along, cy + sy * (out - along));
-        if w.apply(ME, &Command::Place { kind: Kind::Dike, x: x as u8, y: y as u8 }).is_ok() {
+        if w.apply(ME, &Command::Place { kind: Kind::Dike, facing: Facing::EastWest, x: x as u8, y: y as u8 }).is_ok() {
             placed += 1;
         }
     }

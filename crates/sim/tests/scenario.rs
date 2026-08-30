@@ -9,7 +9,7 @@
 //! and if it can be driven by a list of commands it can be driven over a wire.
 
 use sim::balance::*;
-use sim::building::{Good, Kind};
+use sim::building::{Facing, Good, Kind};
 use sim::citizen::{CitizenId, PlayerId};
 use sim::command::Command;
 use sim::nav::Nav;
@@ -27,7 +27,7 @@ fn spot(w: &World, p: u8, kind: Kind) -> (i32, i32) {
                 if dx.abs() != r && dy.abs() != r {
                     continue;
                 }
-                if w.can_place(PlayerId(p), kind, hx + dx, hy + dy).is_ok() {
+                if w.can_place(PlayerId(p), kind, Facing::EastWest, hx + dx, hy + dy).is_ok() {
                     return (hx + dx, hy + dy);
                 }
             }
@@ -41,7 +41,8 @@ fn spot(w: &World, p: u8, kind: Kind) -> (i32, i32) {
 /// tests, not this one's.
 fn found(w: &mut World, p: u8, kind: Kind) -> BuildingId {
     let (x, y) = spot(w, p, kind);
-    w.apply(PlayerId(p), &Command::Place { kind, x: x as u8, y: y as u8 }).unwrap();
+    w.apply(PlayerId(p), &Command::Place { kind,
+                            facing: Facing::EastWest, x: x as u8, y: y as u8 }).unwrap();
     let id = w.buildings.last().unwrap().id;
     for g in Good::ALL {
         let want = kind.cost().get(g);
@@ -311,7 +312,7 @@ fn breaking_one_cell_of_the_road_stops_the_trade() {
     // Rebuild that cell and the link is back, without anybody having to agree
     // to anything again.
     w.apply(PlayerId(0), &Command::Demolish { building: broken }).unwrap();
-    w.apply(PlayerId(0), &Command::Place { kind: Kind::Road, x: bx, y: by }).unwrap();
+    w.apply(PlayerId(0), &Command::Place { kind: Kind::Road, facing: Facing::EastWest, x: bx, y: by }).unwrap();
     let fresh = w.buildings.last().unwrap().id;
     w.build_at(fresh, Kind::Road.build_ticks());
     assert!(w.linked(PlayerId(0), PlayerId(1)), "rebuilding did not restore the link");
@@ -412,10 +413,10 @@ fn a_city_in_the_path(with_a_dike: bool) -> u32 {
         // hang a test on. The two arms meet at the
         // corner, so a cell already taken is skipped rather than placed twice.
         let wall = |w: &mut World, x: i32, y: i32| {
-            if w.can_place(PlayerId(0), Kind::Dike, x, y).is_err() {
+            if w.can_place(PlayerId(0), Kind::Dike, Facing::EastWest, x, y).is_err() {
                 return;
             }
-            let id = w.place(PlayerId(0), Kind::Dike, x, y).unwrap();
+            let id = w.place(PlayerId(0), Kind::Dike, Facing::EastWest, x, y).unwrap();
             for _ in 0..DIKE_MAX_LEVEL {
                 w.deliver_to(id, Good::Stone, w.buildings[id.0 as usize].outstanding().stone);
                 w.build_at(id, Kind::Dike.build_ticks());
@@ -555,8 +556,9 @@ fn found_site(w: &mut World, p: PlayerId, kind: Kind) -> BuildingId {
                     continue;
                 }
                 let (x, y) = (hx + dx, hy + dy);
-                if w.can_place(p, kind, x, y).is_ok() {
-                    w.apply(p, &Command::Place { kind, x: x as u8, y: y as u8 }).unwrap();
+                if w.can_place(p, kind, Facing::EastWest, x, y).is_ok() {
+                    w.apply(p, &Command::Place { kind,
+                            facing: Facing::EastWest, x: x as u8, y: y as u8 }).unwrap();
                     return w.buildings.last().unwrap().id;
                 }
             }

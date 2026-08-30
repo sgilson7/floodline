@@ -255,6 +255,12 @@ pub const BUILDER_SLOTS: usize = 4;
 pub const DIKE_HEIGHT_PER_LEVEL: u16 = 3;
 pub const DIKE_MAX_LEVEL: u8 = 4;
 
+/// How long one dike segment is, in cells. A wall of 1 x 1 blocks was a wall
+/// you built cell by cell and a wall the water met one cell at a time; three
+/// is the shortest run that has a middle, which is what lets a segment feel a
+/// pressure that is not simply the cell in front of it.
+pub const DIKE_LENGTH: i32 = 3;
+
 // ---- getting about ---------------------------------------------------------
 
 /// How far a citizen walks in a tick on open ground, in 256ths of a cell.

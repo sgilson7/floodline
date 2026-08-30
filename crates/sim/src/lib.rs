@@ -26,7 +26,7 @@ pub mod road;
 pub mod water;
 pub mod world;
 
-pub use building::{Building, BuildingId, Good, Goods, Kind};
+pub use building::{Building, BuildingId, Facing, Good, Goods, Kind};
 pub use citizen::{Citizen, CitizenId, Job, PlayerId, State};
 pub use age::{Disaster, Ending, Omen, Score};
 pub use command::Command;

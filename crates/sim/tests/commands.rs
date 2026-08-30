@@ -7,7 +7,7 @@
 //! enforced on one peer and not another is a desync in a disguise.
 
 use sim::balance::*;
-use sim::building::{Good, Kind};
+use sim::building::{Facing, Good, Kind};
 use sim::citizen::{CitizenId, Job, PlayerId, State};
 use sim::command::Command;
 use sim::nav::{Dest, Nav};
@@ -22,7 +22,7 @@ fn spot(w: &World, p: u8, kind: Kind) -> (i32, i32) {
                 if dx.abs() != r && dy.abs() != r {
                     continue;
                 }
-                if w.can_place(PlayerId(p), kind, hx + dx, hy + dy).is_ok() {
+                if w.can_place(PlayerId(p), kind, Facing::EastWest, hx + dx, hy + dy).is_ok() {
                     return (hx + dx, hy + dy);
                 }
             }
@@ -33,7 +33,7 @@ fn spot(w: &World, p: u8, kind: Kind) -> (i32, i32) {
 
 fn build(w: &mut World, p: u8, kind: Kind) -> BuildingId {
     let (x, y) = spot(w, p, kind);
-    let id = w.place(PlayerId(p), kind, x, y).unwrap();
+    let id = w.place(PlayerId(p), kind, Facing::EastWest, x, y).unwrap();
     for g in Good::ALL {
         let want = kind.cost().get(g);
         if want > 0 {
@@ -184,7 +184,7 @@ fn assigning_picks_the_job_the_building_implies() {
 
     // A site wants builders, whatever it is going to be.
     let (x, y) = spot(&w, 0, Kind::Cottage);
-    let site = w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
+    let site = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, x, y).unwrap();
     w.apply(PlayerId(0), &Command::Assign { citizens: vec![mine[2]], building: site })
         .unwrap();
     assert_eq!(w.citizens[mine[2].0 as usize].job, Some(Job::Builder));
@@ -357,7 +357,7 @@ fn commands_arriving_through_tick_do_what_they_would_alone() {
 
     w.tick(
         &mut nav,
-        &[(PlayerId(0), Command::Place { kind: Kind::Cottage, x: x as u8, y: y as u8 })],
+        &[(PlayerId(0), Command::Place { kind: Kind::Cottage, facing: Facing::EastWest, x: x as u8, y: y as u8 })],
     );
     assert!(w.building_at(x, y).is_some(), "the command never arrived");
 
@@ -365,7 +365,7 @@ fn commands_arriving_through_tick_do_what_they_would_alone() {
     let t = w.tick;
     w.tick(
         &mut nav,
-        &[(PlayerId(1), Command::Place { kind: Kind::Cottage, x: x as u8, y: y as u8 })],
+        &[(PlayerId(1), Command::Place { kind: Kind::Cottage, facing: Facing::EastWest, x: x as u8, y: y as u8 })],
     );
     assert_eq!(w.tick, t + 1, "a rejected command stopped the world");
     assert_eq!(w.building_at(x, y).map(|b| b.owner), Some(PlayerId(0)));
@@ -382,7 +382,7 @@ fn a_rejected_command_leaves_the_world_byte_identical() {
     for cmd in [
         Command::MoveTo { citizens: vec![theirs], x: 64, y: 64 },
         Command::Demolish { building: BuildingId(500) },
-        Command::Place { kind: Kind::Hearth, x: 10, y: 10 },
+        Command::Place { kind: Kind::Hearth, facing: Facing::EastWest, x: 10, y: 10 },
         Command::Assign { citizens: vec![theirs], building: BuildingId(0) },
         Command::Ping { x: 250, y: 250 },
         Command::RaiseDike { dike: BuildingId(0) },
@@ -422,7 +422,7 @@ fn every_refusal_says_something_a_player_can_read() {
     // And a real refusal comes back with one attached.
     let mut w = sim::World::new(7, 2);
     let err = w.apply(sim::PlayerId(0), &sim::Command::Place {
-        kind: sim::building::Kind::Hearth, x: 10, y: 10,
+        kind: sim::building::Kind::Hearth, facing: Facing::EastWest, x: 10, y: 10,
     }).unwrap_err();
     assert_eq!(err.to_message(), "one hearth to a city");
 }
@@ -451,8 +451,8 @@ fn people_told_to_go_somewhere_stay_there() {
                     continue;
                 }
                 let (x, y) = (hx + dx, hy + dy);
-                if w.can_place(me, Kind::Granary, x, y).is_ok() {
-                    w.apply(me, &Command::Place { kind: Kind::Granary, x: x as u8, y: y as u8 })
+                if w.can_place(me, Kind::Granary, Facing::EastWest, x, y).is_ok() {
+                    w.apply(me, &Command::Place { kind: Kind::Granary, facing: Facing::EastWest, x: x as u8, y: y as u8 })
                         .unwrap();
                     break 'found;
                 }
@@ -559,8 +559,9 @@ fn a_building_says_how_many_it_will_take_before_the_command_is_refused() {
                         continue;
                     }
                     let (x, y) = (hx + dx, hy + dy);
-                    if w.can_place(me, kind, x, y).is_ok() {
-                        w.apply(me, &Command::Place { kind, x: x as u8, y: y as u8 }).unwrap();
+                    if w.can_place(me, kind, Facing::EastWest, x, y).is_ok() {
+                        w.apply(me, &Command::Place { kind,
+                            facing: Facing::EastWest, x: x as u8, y: y as u8 }).unwrap();
                         return w.buildings.last().unwrap().id;
                     }
                 }

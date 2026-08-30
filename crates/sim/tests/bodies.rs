@@ -5,7 +5,7 @@
 //! here, along with the rest of design §3.4's third paragraph.
 
 use sim::balance::*;
-use sim::building::{Good, Kind};
+use sim::building::{Facing, Good, Kind};
 use sim::citizen::PlayerId;
 use sim::fx::V2;
 use sim::map::{Corner, Ground, CELLS, MAP_H, MAP_W};
@@ -113,7 +113,7 @@ fn a_roof_is_worth_standing_on() {
         w.map.height[i] = 40;
         w.map.ground[i] = Ground::Grass;
     }
-    let id = w.place(PlayerId(0), Kind::Granary, 20, 20).unwrap();
+    let id = w.place(PlayerId(0), Kind::Granary, Facing::EastWest, 20, 20).unwrap();
     w.deliver_to(id, Good::Wood, Kind::Granary.cost().wood);
     assert!(w.build_at(id, Kind::Granary.build_ticks()));
 
@@ -144,7 +144,7 @@ fn a_rooftop_is_only_a_rooftop_while_the_building_stands() {
         w.map.height[i] = 40;
         w.map.ground[i] = Ground::Grass;
     }
-    let id = w.place(PlayerId(0), Kind::Cottage, 30, 30).unwrap();
+    let id = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, 30, 30).unwrap();
     w.water.raise_to(30, 30, depth(6));
     assert_eq!(w.depth_over(30, 30), depth(6), "a building site is not a roof");
 
@@ -162,7 +162,7 @@ fn battered_by_the_front(kind: Kind) -> (u16, bool) {
     let (mut w, mut nav) = at_the_impact_day(18);
     // Right in the mouth of it. Sixteen cells out is already too far: the
     // front has spread and slowed by there.
-    let id = w.place(PlayerId(0), kind, 9, 9).unwrap();
+    let id = w.place(PlayerId(0), kind, Facing::EastWest, 9, 9).unwrap();
     for g in Good::ALL {
         let want = kind.cost().get(g);
         if want > 0 {
@@ -212,7 +212,7 @@ fn a_building_the_flood_takes_lets_its_people_go() {
     // and tying this one to the flood's tuning would make it fail whenever the
     // water was rebalanced without anything here being wrong.
     let mut w = World::new(31, 2);
-    let farm = w.place(PlayerId(0), Kind::Farm, 60, 60).unwrap();
+    let farm = w.place(PlayerId(0), Kind::Farm, Facing::EastWest, 60, 60).unwrap();
     for g in Good::ALL {
         let want = Kind::Farm.cost().get(g);
         if want > 0 {
@@ -246,7 +246,7 @@ fn nobody_is_carried_into_a_wall() {
         w.map.ground[i] = Ground::Grass;
     }
     // A solid building, and a citizen just upstream of it.
-    let id = w.place(PlayerId(0), Kind::Granary, 62, 60).unwrap();
+    let id = w.place(PlayerId(0), Kind::Granary, Facing::EastWest, 62, 60).unwrap();
     w.deliver_to(id, Good::Wood, Kind::Granary.cost().wood);
     w.build_at(id, Kind::Granary.build_ticks());
 

@@ -1603,3 +1603,51 @@ is sixteen thousand rectangles at the fit and a few hundred up close.
 `packaging/browser/view.py` is the same discipline on the test side: one copy
 of the letterbox-and-camera arithmetic, imported by every script that clicks
 the map, instead of four scripts each doing the sum.
+
+---
+
+## 2026-08-30 — Which way a building runs
+
+M3 of the plan, first of three commits, and deliberately on its own: it is a
+wide mechanical edit and it is much easier to review without a pressure model
+tangled into it.
+
+A dike is three cells long and one deep, so for the first time a footprint has
+an orientation. `Building::facing` is a new field and `Kind::size` takes a
+`Facing`, which ripples through `footprint`, `fits_on_map`, `ground_suits`,
+`neighbours_suit`, `can_place` and `place`. `Command::Place` carries a facing
+too, and every kind carries one even though only the dike can use it — a wire
+format with a field that is present for one variant and absent for the others
+is a wire format with two shapes, and the transcript would need two spellings
+of `place`. It is `place dike 40 12 ns` now, for everything.
+
+**`Facing` is named for the axis the long side lies along, not the direction a
+wall faces.** A wall running east–west faces north and south, so "facing" is
+ambiguous exactly where it matters. `EastWest` is three across and one deep,
+and the doc comment says so, because the first person to guess will guess
+wrong.
+
+**A square building forgets which way it was placed.** `Building::site`
+normalises the field to `EastWest` for any kind that does not turn, and
+`Kind::turns` is read off `size` rather than kept as a second table. Without
+that, a cottage placed "north–south" and the same cottage placed "east–west"
+would be different bytes, and two peers would checksum a distinction the game
+does not make. `a_square_building_forgets_which_way_it_was_placed` holds it.
+
+**The GUI still places dikes east–west only, for one commit.** The facing a
+player chooses comes from the drag they draw the wall with, and that is the
+next commit; a rotate key would be dead the day it landed. Everything else on
+the menu is square and could not tell the difference.
+
+Two tests were the test encoding an old world rather than the code being
+wrong, and both were rewritten rather than patched. `a_one_by_one_centres_on_
+itself` now uses a road, which is the 1 × 1 it meant; the dike got its own test
+for three cells and a transpose. And `water.rs`'s two walls are stacks of
+east–west segments, so they are `DIKE_LENGTH` cells thick — "behind the wall"
+now means past the far side of it rather than one cell in, which is what those
+sums were quietly measuring.
+
+`playtest.rs`'s `order_a_wall` walks a diagonal a cell at a time and now leaves
+gaps where segments overlap. It is a measurement, not an assertion, and it
+becomes a single `DikeLine` in the next commit, so it is left alone rather than
+half-fixed twice.

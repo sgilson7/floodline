@@ -7,7 +7,7 @@
 
 use crate::age::{Disaster, DisasterKind, Ending};
 use crate::balance::*;
-use crate::building::{BuildState, Building, BuildingId, Good, Goods, Kind};
+use crate::building::{BuildState, Building, BuildingId, Facing, Good, Goods, Kind};
 use crate::citizen::{Citizen, CitizenId, Errand, Job, PlayerId, State};
 use crate::command::Command;
 use crate::fx::V2;
@@ -244,10 +244,16 @@ impl World {
         // always fit.
         for p in 0..players {
             let (cx, cy) = world.map.hearth_sites[p as usize];
-            let (w, h) = Kind::Hearth.size();
+            let (w, h) = Kind::Hearth.size(Facing::EastWest);
             let id = BuildingId(world.buildings.len() as u16);
-            let mut hearth =
-                Building::standing(id, PlayerId(p as u8), Kind::Hearth, cx - w / 2, cy - h / 2);
+            let mut hearth = Building::standing(
+                id,
+                PlayerId(p as u8),
+                Kind::Hearth,
+                Facing::EastWest,
+                cx - w / 2,
+                cy - h / 2,
+            );
             hearth.store = Goods::of(0, STARTING_WOOD, STARTING_STONE);
             world.occupy(&hearth);
             world.buildings.push(hearth);
@@ -275,6 +281,7 @@ impl World {
         &self,
         owner: PlayerId,
         kind: Kind,
+        facing: Facing,
         x: i32,
         y: i32,
     ) -> Result<(), RuleError> {
@@ -285,16 +292,16 @@ impl World {
             // The run starts with the only one a player gets.
             return Err(RuleError::OneHearthOnly);
         }
-        if !Building::fits_on_map(kind, x, y) {
+        if !Building::fits_on_map(kind, facing, x, y) {
             return Err(RuleError::OffMap);
         }
-        if !Building::ground_suits(kind, &self.map, x, y) {
+        if !Building::ground_suits(kind, facing, &self.map, x, y) {
             return Err(RuleError::WrongGround);
         }
-        if !Building::neighbours_suit(kind, &self.map, x, y) {
+        if !Building::neighbours_suit(kind, facing, &self.map, x, y) {
             return Err(RuleError::NoRockHere);
         }
-        for (cx, cy) in Building::footprint(kind, x, y) {
+        for (cx, cy) in Building::footprint(kind, facing, x, y) {
             if self.occupancy[Map::idx(cx, cy)].is_some() {
                 return Err(RuleError::Occupied);
             }
@@ -368,12 +375,13 @@ impl World {
         &mut self,
         owner: PlayerId,
         kind: Kind,
+        facing: Facing,
         x: i32,
         y: i32,
     ) -> Result<BuildingId, RuleError> {
-        self.can_place(owner, kind, x, y)?;
+        self.can_place(owner, kind, facing, x, y)?;
         let id = BuildingId(self.buildings.len() as u16);
-        let b = Building::site(id, owner, kind, x, y);
+        let b = Building::site(id, owner, kind, facing, x, y);
         self.occupy(&b);
         self.buildings.push(b);
         Ok(id)
@@ -663,8 +671,8 @@ impl World {
         }
 
         match cmd {
-            Command::Place { kind, x, y } => {
-                self.place(player, *kind, *x as i32, *y as i32).map(|_| ())
+            Command::Place { kind, facing, x, y } => {
+                self.place(player, *kind, *facing, *x as i32, *y as i32).map(|_| ())
             }
             Command::Demolish { building } => self.demolish(player, *building).map(|_| ()),
             Command::RaiseDike { dike } => self.raise_dike(player, *dike),
@@ -830,7 +838,7 @@ impl World {
             };
             // `plan` already established every cell is layable, so this cannot
             // fail for a reason the player could act on.
-            let _ = self.place(player, kind, x, y);
+            let _ = self.place(player, kind, Facing::EastWest, x, y);
         }
 
         let end = (b.0, b.1);
@@ -1489,7 +1497,7 @@ mod tests {
                         continue;
                     }
                     let (x, y) = (hx + dx, hy + dy);
-                    if w.can_place(PlayerId(p as u8), kind, x, y).is_ok() {
+                    if w.can_place(PlayerId(p as u8), kind, Facing::EastWest, x, y).is_ok() {
                         return (x, y);
                     }
                 }
@@ -1527,7 +1535,7 @@ mod tests {
     fn the_occupancy_grid_agrees_with_the_building_list() {
         let mut w = World::new(5, 3);
         let (x, y) = free_spot(&w, 0, Kind::Cottage);
-        let id = w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
+        let id = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, x, y).unwrap();
 
         let mut counted = 0;
         for (i, slot) in w.occupancy.iter().enumerate() {
@@ -1549,11 +1557,11 @@ mod tests {
     fn placing_refuses_a_footprint_that_hangs_off_the_map() {
         let mut w = World::new(1, 2);
         assert_eq!(
-            w.can_place(PlayerId(0), Kind::Farm, MAP_W - 1, 5),
+            w.can_place(PlayerId(0), Kind::Farm, Facing::EastWest, MAP_W - 1, 5),
             Err(RuleError::OffMap)
         );
-        assert_eq!(w.can_place(PlayerId(0), Kind::Cottage, -1, 5), Err(RuleError::OffMap));
-        assert!(w.place(PlayerId(0), Kind::Farm, MAP_W - 1, 5).is_err());
+        assert_eq!(w.can_place(PlayerId(0), Kind::Cottage, Facing::EastWest, -1, 5), Err(RuleError::OffMap));
+        assert!(w.place(PlayerId(0), Kind::Farm, Facing::EastWest, MAP_W - 1, 5).is_err());
         assert_eq!(w.buildings.len(), 2, "a rejected placement builds nothing");
     }
 
@@ -1561,20 +1569,20 @@ mod tests {
     fn placing_refuses_an_occupied_footprint() {
         let mut w = World::new(6, 2);
         let (x, y) = free_spot(&w, 0, Kind::Cottage);
-        w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
+        w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, x, y).unwrap();
 
         // Exactly on top.
-        assert_eq!(w.can_place(PlayerId(0), Kind::Cottage, x, y), Err(RuleError::Occupied));
+        assert_eq!(w.can_place(PlayerId(0), Kind::Cottage, Facing::EastWest, x, y), Err(RuleError::Occupied));
         // And merely overlapping by one cell, in each direction.
         for (dx, dy) in [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1)] {
             assert_eq!(
-                w.can_place(PlayerId(0), Kind::Cottage, x + dx, y + dy),
+                w.can_place(PlayerId(0), Kind::Cottage, Facing::EastWest, x + dx, y + dy),
                 Err(RuleError::Occupied),
                 "overlap at ({dx},{dy}) was allowed"
             );
         }
         // Another player's building is in the way too — the map is shared.
-        assert_eq!(w.can_place(PlayerId(1), Kind::Cottage, x, y), Err(RuleError::Occupied));
+        assert_eq!(w.can_place(PlayerId(1), Kind::Cottage, Facing::EastWest, x, y), Err(RuleError::Occupied));
     }
 
     #[test]
@@ -1585,7 +1593,7 @@ mod tests {
             .find(|&(x, y)| w.map.ground_at(x, y) == Ground::Rock)
             .expect("every map has rock");
         assert_eq!(
-            w.can_place(PlayerId(0), Kind::Dike, rock.0, rock.1),
+            w.can_place(PlayerId(0), Kind::Dike, Facing::EastWest, rock.0, rock.1),
             Err(RuleError::WrongGround)
         );
 
@@ -1594,23 +1602,23 @@ mod tests {
             .find(|&(x, y)| w.map.ground_at(x, y) == Ground::Shallows)
             .expect("every map has shallows");
         assert_eq!(
-            w.can_place(PlayerId(0), Kind::Cottage, wet.0, wet.1),
+            w.can_place(PlayerId(0), Kind::Cottage, Facing::EastWest, wet.0, wet.1),
             Err(RuleError::WrongGround),
             "a cottage in the river"
         );
         assert_eq!(
-            w.can_place(PlayerId(0), Kind::Bridge, wet.0, wet.1),
+            w.can_place(PlayerId(0), Kind::Bridge, Facing::EastWest, wet.0, wet.1),
             Ok(()),
             "but a bridge belongs there"
         );
 
         let dry = free_spot(&w, 0, Kind::Dike);
         assert_eq!(
-            w.can_place(PlayerId(0), Kind::Bridge, dry.0, dry.1),
+            w.can_place(PlayerId(0), Kind::Bridge, Facing::EastWest, dry.0, dry.1),
             Err(RuleError::WrongGround),
             "and nowhere else"
         );
-        let _ = w.place(PlayerId(0), Kind::Bridge, wet.0, wet.1).unwrap();
+        let _ = w.place(PlayerId(0), Kind::Bridge, Facing::EastWest, wet.0, wet.1).unwrap();
     }
 
     #[test]
@@ -1618,11 +1626,11 @@ mod tests {
         let w = World::new(3, 2);
         let (x, y) = free_spot(&w, 0, Kind::Cottage);
         assert_eq!(
-            w.can_place(PlayerId(0), Kind::Hearth, x, y),
+            w.can_place(PlayerId(0), Kind::Hearth, Facing::EastWest, x, y),
             Err(RuleError::OneHearthOnly)
         );
         assert_eq!(
-            w.can_place(PlayerId(9), Kind::Cottage, x, y),
+            w.can_place(PlayerId(9), Kind::Cottage, Facing::EastWest, x, y),
             Err(RuleError::NotYours),
             "a player who is not in this run"
         );
@@ -1632,7 +1640,7 @@ mod tests {
     fn a_building_goes_up_by_hauling_then_building() {
         let mut w = World::new(8, 2);
         let (x, y) = free_spot(&w, 0, Kind::Granary);
-        let id = w.place(PlayerId(0), Kind::Granary, x, y).unwrap();
+        let id = w.place(PlayerId(0), Kind::Granary, Facing::EastWest, x, y).unwrap();
 
         // Take the wood out of the hearth, as a hauler would.
         let hearth = w.buildings[0].id;
@@ -1652,7 +1660,7 @@ mod tests {
     fn demolishing_frees_the_ground_and_returns_something() {
         let mut w = World::new(12, 2);
         let (x, y) = free_spot(&w, 0, Kind::Cottage);
-        let id = w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
+        let id = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, x, y).unwrap();
         w.deliver_to(id, Good::Wood, 30);
         w.build_at(id, Kind::Cottage.build_ticks());
 
@@ -1661,7 +1669,7 @@ mod tests {
         assert_eq!(salvage, Goods::wood(15), "half the wood back");
         assert_eq!(w.buildings[id.0 as usize].state, BuildState::Rubble);
         assert!(w.building_at(x, y).is_none(), "the ground is free again");
-        assert_eq!(w.can_place(PlayerId(0), Kind::Cottage, x, y), Ok(()));
+        assert_eq!(w.can_place(PlayerId(0), Kind::Cottage, Facing::EastWest, x, y), Ok(()));
         assert_eq!(w.demolish(PlayerId(0), BuildingId(999)), Err(RuleError::NoSuchBuilding));
     }
 
@@ -1672,9 +1680,9 @@ mod tests {
         // takes half a city.
         let mut w = World::new(13, 2);
         let (x, y) = free_spot(&w, 0, Kind::Cottage);
-        let first = w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
+        let first = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, x, y).unwrap();
         w.demolish(PlayerId(0), first).unwrap();
-        let second = w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
+        let second = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, x, y).unwrap();
         assert_ne!(first, second, "the id is not reused");
         assert_eq!(w.buildings[first.0 as usize].state, BuildState::Rubble);
         for (i, b) in w.buildings.iter().enumerate() {
@@ -1687,7 +1695,7 @@ mod tests {
         let mut w = World::new(15, 2);
         let (x, y) = free_spot(&w, 0, Kind::Dike);
         let base = w.map.height_at(x, y) as u16;
-        let id = w.place(PlayerId(0), Kind::Dike, x, y).unwrap();
+        let id = w.place(PlayerId(0), Kind::Dike, Facing::EastWest, x, y).unwrap();
         assert_eq!(w.effective_height(x, y), base, "a site holds nothing back");
 
         // The price is a balance constant and has moved once already; what is
@@ -1715,7 +1723,7 @@ mod tests {
     fn a_dike_cannot_grow_forever() {
         let mut w = World::new(16, 2);
         let (x, y) = free_spot(&w, 0, Kind::Dike);
-        let id = w.place(PlayerId(0), Kind::Dike, x, y).unwrap();
+        let id = w.place(PlayerId(0), Kind::Dike, Facing::EastWest, x, y).unwrap();
         w.deliver_to(id, Good::Stone, 40);
         w.build_at(id, Kind::Dike.build_ticks());
 
@@ -1731,7 +1739,7 @@ mod tests {
 
         // Only a standing dike can be raised, and only a dike.
         let (cx, cy) = free_spot(&w, 0, Kind::Cottage);
-        let cottage = w.place(PlayerId(0), Kind::Cottage, cx, cy).unwrap();
+        let cottage = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, cx, cy).unwrap();
         assert_eq!(w.raise_dike(PlayerId(0), cottage), Err(RuleError::NotStanding));
     }
 
@@ -1751,8 +1759,8 @@ mod tests {
                             continue;
                         }
                         let (x, y) = (hx + dx, hy + dy);
-                        if w.can_place(PlayerId(0), Kind::Stockpile, x, y).is_ok() {
-                            placed = Some(w.place(PlayerId(0), Kind::Stockpile, x, y).unwrap());
+                        if w.can_place(PlayerId(0), Kind::Stockpile, Facing::EastWest, x, y).is_ok() {
+                            placed = Some(w.place(PlayerId(0), Kind::Stockpile, Facing::EastWest, x, y).unwrap());
                             break 'search;
                         }
                     }
@@ -1794,7 +1802,7 @@ mod tests {
     fn a_site_is_not_a_store() {
         let mut w = World::new(22, 2);
         let (x, y) = free_spot(&w, 0, Kind::Stockpile);
-        let id = w.place(PlayerId(0), Kind::Stockpile, x, y).unwrap();
+        let id = w.place(PlayerId(0), Kind::Stockpile, Facing::EastWest, x, y).unwrap();
         assert!(
             !w.stores_for(PlayerId(0), Good::Wood, x, y).contains(&id),
             "an unfinished stockpile is a hole in the ground"
@@ -1881,7 +1889,7 @@ mod tests {
         // Pave every cell from the citizen to the goal, the one it starts on
         // included — speed is read from the cell being left.
         for i in 0..=6 {
-            let id = w.place(PlayerId(0), Kind::Road, ox + i, oy).unwrap();
+            let id = w.place(PlayerId(0), Kind::Road, Facing::EastWest, ox + i, oy).unwrap();
             assert!(w.build_at(id, Kind::Road.build_ticks()));
         }
         w.citizens[0].walk_to(Dest::Cell(goal.0 as u8, goal.1 as u8));
@@ -1946,7 +1954,7 @@ mod tests {
     #[test]
     fn walking_to_a_building_stops_beside_it_rather_than_inside() {
         let (mut w, mut nav, ox, oy) = walker();
-        let id = w.place(PlayerId(0), Kind::Granary, ox + 5, oy).unwrap();
+        let id = w.place(PlayerId(0), Kind::Granary, Facing::EastWest, ox + 5, oy).unwrap();
         w.deliver_to(id, Good::Wood, 50);
         assert!(w.build_at(id, Kind::Granary.build_ticks()));
 
@@ -2051,7 +2059,7 @@ mod tests {
     #[test]
     fn losing_the_destination_mid_walk_stops_the_citizen() {
         let (mut w, mut nav, ox, oy) = walker();
-        let id = w.place(PlayerId(0), Kind::Cottage, ox + 6, oy).unwrap();
+        let id = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, ox + 6, oy).unwrap();
         w.citizens[0].walk_to(Dest::Building(id));
         for _ in 0..10 {
             w.tick(&mut nav, &[]);

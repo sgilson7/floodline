@@ -10,7 +10,7 @@
 use net::lockstep::{DROP_AFTER_TICKS, WAIT_WARN_TICKS};
 use net::loopback::{Conditions, Loopback, LoopbackPeer, HOST};
 use net::{Lockstep, PeerId, Status};
-use sim::building::Kind;
+use sim::building::{Facing, Kind};
 use sim::{Command, PlayerId};
 use std::collections::BTreeMap;
 
@@ -145,7 +145,8 @@ impl Game {
                         if taken.iter().any(|&(tx, ty)| (tx - x).abs() < 4 && (ty - y).abs() < 4) {
                             continue;
                         }
-                        let cmd = Command::Place { kind, x: x as u8, y: y as u8 };
+                        let cmd = Command::Place { kind,
+                            facing: Facing::EastWest, x: x as u8, y: y as u8 };
                         if self.steps[who].issue(cmd).is_ok() {
                             taken.push((x, y));
                             break 'place;

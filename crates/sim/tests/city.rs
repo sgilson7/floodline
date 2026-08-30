@@ -6,7 +6,7 @@
 //! anybody having to be told what to do each tick.
 
 use sim::balance::*;
-use sim::building::{Good, Kind};
+use sim::building::{Facing, Good, Kind};
 use sim::citizen::{Job, PlayerId, State};
 use sim::nav::Nav;
 use sim::world::World;
@@ -21,7 +21,7 @@ fn spot(w: &World, p: u8, kind: Kind) -> (i32, i32) {
                 if dx.abs() != r && dy.abs() != r {
                     continue;
                 }
-                if w.can_place(PlayerId(p), kind, hx + dx, hy + dy).is_ok() {
+                if w.can_place(PlayerId(p), kind, Facing::EastWest, hx + dx, hy + dy).is_ok() {
                     return (hx + dx, hy + dy);
                 }
             }
@@ -34,7 +34,7 @@ fn spot(w: &World, p: u8, kind: Kind) -> (i32, i32) {
 /// materials and the days would have.
 fn build(w: &mut World, p: u8, kind: Kind) -> BuildingId {
     let (x, y) = spot(w, p, kind);
-    let id = w.place(PlayerId(p), kind, x, y).unwrap();
+    let id = w.place(PlayerId(p), kind, Facing::EastWest, x, y).unwrap();
     for g in Good::ALL {
         let want = kind.cost().get(g);
         if want > 0 {
@@ -229,7 +229,7 @@ fn haulers_supply_a_building_site_from_the_hearth() {
 
     // A site, and nobody assigned to anything — so everybody is a hauler.
     let (x, y) = spot(&w, 0, Kind::Cottage);
-    let site = w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
+    let site = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, x, y).unwrap();
     assert_eq!(w.buildings[site.0 as usize].outstanding().wood, 30);
 
     for _ in 0..TICKS_PER_DAY * 3 {
@@ -252,7 +252,7 @@ fn builders_finish_what_haulers_supply() {
     let mut w = World::new(31, 2);
     let mut nav = Nav::new();
     let (x, y) = spot(&w, 0, Kind::Cottage);
-    let site = w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
+    let site = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, x, y).unwrap();
 
     // Two builders, the rest hauling.
     let mut n = 0;
@@ -349,7 +349,7 @@ fn a_city_left_alone_builds_what_it_was_told_to_build() {
                         if dx.abs() != r && dy.abs() != r {
                             continue;
                         }
-                        if w.can_place(me, kind, hx + dx, hy + dy).is_ok() {
+                        if w.can_place(me, kind, Facing::EastWest, hx + dx, hy + dy).is_ok() {
                             break 'found (hx + dx, hy + dy);
                         }
                     }
@@ -357,7 +357,8 @@ fn a_city_left_alone_builds_what_it_was_told_to_build() {
             }
             panic!("nowhere for a {kind:?}");
         };
-        w.apply(me, &Command::Place { kind, x: x as u8, y: y as u8 }).unwrap();
+        w.apply(me, &Command::Place { kind,
+                            facing: Facing::EastWest, x: x as u8, y: y as u8 }).unwrap();
         placed.push(w.buildings.last().unwrap().id);
     }
 
@@ -413,8 +414,9 @@ fn nobody_takes_a_job_that_was_not_given_to_them() {
                         continue;
                     }
                     let (x, y) = (hx + dx, hy + dy);
-                    if w.can_place(me, kind, x, y).is_ok() {
-                        w.apply(me, &Command::Place { kind, x: x as u8, y: y as u8 }).unwrap();
+                    if w.can_place(me, kind, Facing::EastWest, x, y).is_ok() {
+                        w.apply(me, &Command::Place { kind,
+                            facing: Facing::EastWest, x: x as u8, y: y as u8 }).unwrap();
                         if kind == Kind::Farm {
                             farm = Some(w.buildings.last().unwrap().id);
                         }
@@ -465,8 +467,9 @@ fn a_forester_and_a_quarry_pay_for_a_building_in_a_day() {
                         continue;
                     }
                     let (x, y) = (hx + dx, hy + dy);
-                    if w.can_place(me, kind, x, y).is_ok() {
-                        w.apply(me, &Command::Place { kind, x: x as u8, y: y as u8 }).unwrap();
+                    if w.can_place(me, kind, Facing::EastWest, x, y).is_ok() {
+                        w.apply(me, &Command::Place { kind,
+                            facing: Facing::EastWest, x: x as u8, y: y as u8 }).unwrap();
                         placed = Some(w.buildings.last().unwrap().id);
                         break 'ring;
                     }
@@ -539,9 +542,9 @@ fn a_quarry_needs_rock_beside_it_and_a_forester_does_not() {
     let mut allowed = 0;
     for y in (2..MAP_H - 3).step_by(3) {
         for x in (2..MAP_W - 3).step_by(3) {
-            match w.can_place(me, Kind::Quarry, x, y) {
+            match w.can_place(me, Kind::Quarry, Facing::EastWest, x, y) {
                 Ok(()) => {
-                    let (bw, bh) = Kind::Quarry.size();
+                    let (bw, bh) = Kind::Quarry.size(Facing::EastWest);
                     let near = (y - 1..=y + bh).any(|cy| {
                         (x - 1..=x + bw).any(|cx| w.map.ground_at(cx, cy) == Ground::Rock)
                     });
@@ -558,7 +561,7 @@ fn a_quarry_needs_rock_beside_it_and_a_forester_does_not() {
 
     // A forester's hut goes anywhere a building goes.
     let anywhere = (2..MAP_H - 3).step_by(3).any(|y| {
-        (2..MAP_W - 3).step_by(3).any(|x| w.can_place(me, Kind::Forester, x, y).is_ok())
+        (2..MAP_W - 3).step_by(3).any(|x| w.can_place(me, Kind::Forester, Facing::EastWest, x, y).is_ok())
     });
     assert!(anywhere, "a forester's hut could not be placed at all");
 }

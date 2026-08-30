@@ -121,6 +121,42 @@ pub enum Material {
     Stone,
 }
 
+/// Which way a footprint runs.
+///
+/// The name is the axis the *long* side lies along, not the direction a wall
+/// faces: `EastWest` is three cells across and one deep. Only a dike is
+/// anything but square, so only a dike cares — but `Command::Place` carries a
+/// facing for every kind, because a wire format with a field that is present
+/// for one building and absent for the others is a wire format with two
+/// shapes.
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+pub enum Facing {
+    #[default]
+    EastWest,
+    NorthSouth,
+}
+
+impl Facing {
+    pub const ALL: [Facing; 2] = [Facing::EastWest, Facing::NorthSouth];
+
+    pub fn turned(self) -> Facing {
+        match self {
+            Facing::EastWest => Facing::NorthSouth,
+            Facing::NorthSouth => Facing::EastWest,
+        }
+    }
+
+    /// The axis a run from `from` to `to` lies along. Ties go to east-west,
+    /// which is only reachable when the two ends are the same cell.
+    pub fn of_run(from: (i32, i32), to: (i32, i32)) -> Facing {
+        if (to.0 - from.0).abs() >= (to.1 - from.1).abs() {
+            Facing::EastWest
+        } else {
+            Facing::NorthSouth
+        }
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum Kind {
     Hearth,
@@ -154,15 +190,31 @@ impl Kind {
         Kind::Bridge,
     ];
 
-    /// Footprint in cells, as (width, height).
-    pub fn size(self) -> (i32, i32) {
+    /// Footprint in cells, as (width, height). Only a dike answers this
+    /// differently for the two facings; everything else is square.
+    pub fn size(self, facing: Facing) -> (i32, i32) {
         match self {
             Kind::Hearth => (HEARTH_SIZE, HEARTH_SIZE),
             Kind::Farm => (3, 3),
             Kind::Forester | Kind::Quarry => (2, 2),
             Kind::Cottage | Kind::Granary | Kind::Stockpile => (2, 2),
-            Kind::Dike | Kind::Road | Kind::Bridge => (1, 1),
+            Kind::Dike => match facing {
+                Facing::EastWest => (DIKE_LENGTH, 1),
+                Facing::NorthSouth => (1, DIKE_LENGTH),
+            },
+            Kind::Road | Kind::Bridge => (1, 1),
         }
+    }
+
+    /// Whether facing means anything for this kind.
+    ///
+    /// Read off `size` rather than kept as a second table, so a kind that
+    /// stops being square cannot forget to say so. Everything that stores a
+    /// facing normalises through this: a cottage placed "north-south" has to
+    /// be byte-identical to the same cottage placed "east-west", or two peers
+    /// would checksum a distinction the game does not make.
+    pub fn turns(self) -> bool {
+        self.size(Facing::EastWest) != self.size(Facing::NorthSouth)
     }
 
     /// What one costs. A Dike costs this per level.
@@ -436,6 +488,9 @@ pub struct Building {
     pub id: BuildingId,
     pub owner: PlayerId,
     pub kind: Kind,
+    /// Which way the footprint runs. Always `EastWest` for a kind that does
+    /// not turn; `Building::site` normalises it.
+    pub facing: Facing,
     /// Top-left cell of the footprint.
     pub x: u8,
     pub y: u8,
@@ -456,11 +511,19 @@ pub struct Building {
 }
 
 impl Building {
-    pub fn site(id: BuildingId, owner: PlayerId, kind: Kind, x: i32, y: i32) -> Building {
+    pub fn site(
+        id: BuildingId,
+        owner: PlayerId,
+        kind: Kind,
+        facing: Facing,
+        x: i32,
+        y: i32,
+    ) -> Building {
         Building {
             id,
             owner,
             kind,
+            facing: if kind.turns() { facing } else { Facing::EastWest },
             x: x as u8,
             y: y as u8,
             state: BuildState::Site,
@@ -476,8 +539,15 @@ impl Building {
 
     /// A building that is simply there, skipping construction. Only the
     /// founding Hearths use this.
-    pub fn standing(id: BuildingId, owner: PlayerId, kind: Kind, x: i32, y: i32) -> Building {
-        let mut b = Building::site(id, owner, kind, x, y);
+    pub fn standing(
+        id: BuildingId,
+        owner: PlayerId,
+        kind: Kind,
+        facing: Facing,
+        x: i32,
+        y: i32,
+    ) -> Building {
+        let mut b = Building::site(id, owner, kind, facing, x, y);
         b.delivered = kind.cost();
         b.progress = kind.build_ticks();
         b.state = BuildState::Standing;
@@ -490,14 +560,19 @@ impl Building {
 
     /// The cells this occupies, in a fixed order.
     pub fn cells(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
-        let (w, h) = self.kind.size();
+        let (w, h) = self.size();
         let (x0, y0) = (self.x as i32, self.y as i32);
         (0..h).flat_map(move |dy| (0..w).map(move |dx| (x0 + dx, y0 + dy)))
     }
 
+    /// This building's footprint in cells, as (width, height).
+    pub fn size(&self) -> (i32, i32) {
+        self.kind.size(self.facing)
+    }
+
     /// The middle of the footprint, where citizens walk to.
     pub fn centre(&self) -> (i32, i32) {
-        let (w, h) = self.kind.size();
+        let (w, h) = self.size();
         (self.x as i32 + w / 2, self.y as i32 + h / 2)
     }
 
@@ -608,20 +683,26 @@ impl Building {
     /// Whether the footprint would fit on the map at all, ignoring what is
     /// already there. Split out so placement can report the two failures
     /// separately.
-    pub fn fits_on_map(kind: Kind, x: i32, y: i32) -> bool {
-        let (w, h) = kind.size();
+    pub fn fits_on_map(kind: Kind, facing: Facing, x: i32, y: i32) -> bool {
+        let (w, h) = kind.size(facing);
         x >= 0 && y >= 0 && x + w <= crate::map::MAP_W && y + h <= crate::map::MAP_H
     }
 
     /// The cells a footprint of `kind` at `(x, y)` would cover.
-    pub fn footprint(kind: Kind, x: i32, y: i32) -> impl Iterator<Item = (i32, i32)> {
-        let (w, h) = kind.size();
+    pub fn footprint(
+        kind: Kind,
+        facing: Facing,
+        x: i32,
+        y: i32,
+    ) -> impl Iterator<Item = (i32, i32)> {
+        let (w, h) = kind.size(facing);
         (0..h).flat_map(move |dy| (0..w).map(move |dx| (x + dx, y + dy)))
     }
 
     /// Whether every cell of the footprint is ground this kind will stand on.
-    pub fn ground_suits(kind: Kind, map: &Map, x: i32, y: i32) -> bool {
-        Building::footprint(kind, x, y).all(|(cx, cy)| kind.accepts(map.ground_at(cx, cy)))
+    pub fn ground_suits(kind: Kind, facing: Facing, map: &Map, x: i32, y: i32) -> bool {
+        Building::footprint(kind, facing, x, y)
+            .all(|(cx, cy)| kind.accepts(map.ground_at(cx, cy)))
     }
 
     /// A quarry has to be cut out of something.
@@ -633,11 +714,11 @@ impl Building {
     /// Now the one building that ends the stone shortage has to be put
     /// somewhere particular, which is a decision about the map rather than
     /// another slot on the build menu.
-    pub fn neighbours_suit(kind: Kind, map: &Map, x: i32, y: i32) -> bool {
+    pub fn neighbours_suit(kind: Kind, facing: Facing, map: &Map, x: i32, y: i32) -> bool {
         if kind != Kind::Quarry {
             return true;
         }
-        let (w, h) = kind.size();
+        let (w, h) = kind.size(facing);
         for cy in y - 1..=y + h {
             for cx in x - 1..=x + w {
                 if map.ground_at(cx, cy) == Ground::Rock {
@@ -693,8 +774,14 @@ mod tests {
     #[test]
     fn every_kind_has_a_coherent_definition() {
         for k in Kind::ALL {
-            let (w, h) = k.size();
-            assert!(w > 0 && h > 0, "{k:?} has no footprint");
+            for f in Facing::ALL {
+                let (w, h) = k.size(f);
+                assert!(w > 0 && h > 0, "{k:?} has no footprint facing {f:?}");
+            }
+            // Turning a footprint transposes it and nothing else, so a kind
+            // cannot be one size east-west and a different area north-south.
+            let (w, h) = k.size(Facing::EastWest);
+            assert_eq!(k.size(Facing::NorthSouth), (h, w), "{k:?} changes area when turned");
             assert!(k.integrity() > 0, "{k:?} is rubble the moment it is built");
             // A Hearth is the only thing that appears already finished.
             if k != Kind::Hearth {
@@ -738,7 +825,7 @@ mod tests {
 
     #[test]
     fn a_footprint_covers_exactly_its_cells() {
-        let b = Building::site(BuildingId(0), PlayerId(0), Kind::Farm, 10, 20);
+        let b = Building::site(BuildingId(0), PlayerId(0), Kind::Farm, Facing::EastWest, 10, 20);
         let cells: Vec<(i32, i32)> = b.cells().collect();
         assert_eq!(cells.len(), 9);
         assert_eq!(cells[0], (10, 20), "starts at the top-left");
@@ -750,20 +837,46 @@ mod tests {
         assert_eq!(b.centre(), (11, 21));
 
         // The free function and the method agree.
-        let same: Vec<(i32, i32)> = Building::footprint(Kind::Farm, 10, 20).collect();
+        let same: Vec<(i32, i32)> = Building::footprint(Kind::Farm, Facing::EastWest, 10, 20).collect();
         assert_eq!(same, cells);
     }
 
     #[test]
     fn a_one_by_one_centres_on_itself() {
-        let b = Building::site(BuildingId(0), PlayerId(0), Kind::Dike, 7, 8);
+        let b = Building::site(BuildingId(0), PlayerId(0), Kind::Road, Facing::EastWest, 7, 8);
         assert_eq!(b.centre(), (7, 8));
         assert_eq!(b.cells().collect::<Vec<_>>(), vec![(7, 8)]);
     }
 
     #[test]
+    fn a_dike_is_three_cells_and_turning_it_turns_its_footprint() {
+        // Was a 1 x 1 block placed cell by cell. A wall is a run, and which
+        // way the run lies is the one thing about it a player chooses.
+        let across = Building::site(BuildingId(0), PlayerId(0), Kind::Dike, Facing::EastWest, 7, 8);
+        assert_eq!(across.cells().collect::<Vec<_>>(), vec![(7, 8), (8, 8), (9, 8)]);
+        assert_eq!(across.centre(), (8, 8), "the middle of the run, not an end of it");
+
+        let down =
+            Building::site(BuildingId(1), PlayerId(0), Kind::Dike, Facing::NorthSouth, 7, 8);
+        assert_eq!(down.cells().collect::<Vec<_>>(), vec![(7, 8), (7, 9), (7, 10)]);
+        assert_eq!(down.centre(), (7, 9));
+    }
+
+    #[test]
+    fn a_square_building_forgets_which_way_it_was_placed() {
+        // Two peers must not checksum a distinction the game does not make.
+        let ew = Building::site(BuildingId(0), PlayerId(0), Kind::Cottage, Facing::EastWest, 5, 5);
+        let ns =
+            Building::site(BuildingId(0), PlayerId(0), Kind::Cottage, Facing::NorthSouth, 5, 5);
+        assert_eq!(ew, ns);
+        assert_eq!(ns.facing, Facing::EastWest);
+        assert!(!Kind::Cottage.turns());
+        assert!(Kind::Dike.turns(), "the dike is the one kind that does turn");
+    }
+
+    #[test]
     fn a_site_needs_its_materials_before_anyone_can_build() {
-        let mut b = Building::site(BuildingId(0), PlayerId(0), Kind::Farm, 5, 5);
+        let mut b = Building::site(BuildingId(0), PlayerId(0), Kind::Farm, Facing::EastWest, 5, 5);
         assert_eq!(b.state, BuildState::Site);
         assert_eq!(b.outstanding(), Goods::of(0, 40, 10));
         assert!(!b.ready_to_build());
@@ -786,7 +899,7 @@ mod tests {
 
     #[test]
     fn building_finishes_exactly_once() {
-        let mut b = Building::site(BuildingId(0), PlayerId(0), Kind::Cottage, 5, 5);
+        let mut b = Building::site(BuildingId(0), PlayerId(0), Kind::Cottage, Facing::EastWest, 5, 5);
         b.deliver(Good::Wood, 30);
         let ticks = Kind::Cottage.build_ticks();
 
@@ -802,7 +915,7 @@ mod tests {
 
     #[test]
     fn a_free_building_needs_no_delivery() {
-        let mut b = Building::site(BuildingId(0), PlayerId(0), Kind::Stockpile, 1, 1);
+        let mut b = Building::site(BuildingId(0), PlayerId(0), Kind::Stockpile, Facing::EastWest, 1, 1);
         assert!(b.outstanding().is_empty());
         assert!(b.ready_to_build(), "nothing to haul, so builders can start");
         assert!(b.build(Kind::Stockpile.build_ticks()));
@@ -815,7 +928,7 @@ mod tests {
         // and the price itself is a balance constant that has already moved
         // once (see `balance::STARTING_STONE`).
         let per = Kind::Dike.cost().stone;
-        let mut b = Building::site(BuildingId(0), PlayerId(0), Kind::Dike, 3, 3);
+        let mut b = Building::site(BuildingId(0), PlayerId(0), Kind::Dike, Facing::EastWest, 3, 3);
         assert_eq!(b.total_cost(), Goods::stone(per));
         b.level = 3;
         assert_eq!(b.total_cost(), Goods::stone(per * 3));
@@ -829,7 +942,7 @@ mod tests {
 
     #[test]
     fn damage_ends_at_rubble_and_stays_there() {
-        let mut b = Building::standing(BuildingId(0), PlayerId(0), Kind::Cottage, 5, 5);
+        let mut b = Building::standing(BuildingId(0), PlayerId(0), Kind::Cottage, Facing::EastWest, 5, 5);
         b.workers.push(CitizenId(3));
         let max = Kind::Cottage.integrity();
 
@@ -846,7 +959,7 @@ mod tests {
 
     #[test]
     fn salvage_returns_half_the_materials_and_all_the_stores() {
-        let mut b = Building::standing(BuildingId(0), PlayerId(0), Kind::Granary, 5, 5);
+        let mut b = Building::standing(BuildingId(0), PlayerId(0), Kind::Granary, Facing::EastWest, 5, 5);
         b.store = Goods::of(120, 0, 0);
         // 50% of the 50 wood that went in, plus every scrap of the food.
         assert_eq!(b.salvage(), Goods::of(120, 25, 0));
@@ -855,7 +968,7 @@ mod tests {
     #[test]
     fn roads_carry_traffic_and_only_walls_stop_it() {
         for k in Kind::ALL {
-            let mut b = Building::standing(BuildingId(0), PlayerId(0), k, 5, 5);
+            let mut b = Building::standing(BuildingId(0), PlayerId(0), k, Facing::EastWest, 5, 5);
 
             let is_way = matches!(k, Kind::Road | Kind::Bridge);
             assert_eq!(b.carries_traffic(), is_way, "{k:?}");
@@ -886,11 +999,17 @@ mod tests {
     #[test]
     fn a_footprint_must_fit_on_the_map() {
         use crate::map::{MAP_H, MAP_W};
-        assert!(Building::fits_on_map(Kind::Farm, 0, 0));
-        assert!(Building::fits_on_map(Kind::Farm, MAP_W - 3, MAP_H - 3));
-        assert!(!Building::fits_on_map(Kind::Farm, MAP_W - 2, 0), "hangs off the right");
-        assert!(!Building::fits_on_map(Kind::Farm, 0, MAP_H - 2), "hangs off the bottom");
-        assert!(!Building::fits_on_map(Kind::Dike, -1, 0));
-        assert!(Building::fits_on_map(Kind::Dike, MAP_W - 1, MAP_H - 1));
+        assert!(Building::fits_on_map(Kind::Farm, Facing::EastWest, 0, 0));
+        assert!(Building::fits_on_map(Kind::Farm, Facing::EastWest, MAP_W - 3, MAP_H - 3));
+        assert!(!Building::fits_on_map(Kind::Farm, Facing::EastWest, MAP_W - 2, 0), "hangs off the right");
+        assert!(!Building::fits_on_map(Kind::Farm, Facing::EastWest, 0, MAP_H - 2), "hangs off the bottom");
+        assert!(!Building::fits_on_map(Kind::Road, Facing::EastWest, -1, 0));
+        assert!(Building::fits_on_map(Kind::Road, Facing::EastWest, MAP_W - 1, MAP_H - 1));
+
+        // A dike hangs off along whichever axis it runs, and not the other.
+        assert!(Building::fits_on_map(Kind::Dike, Facing::EastWest, MAP_W - 3, MAP_H - 1));
+        assert!(!Building::fits_on_map(Kind::Dike, Facing::EastWest, MAP_W - 2, MAP_H - 1));
+        assert!(Building::fits_on_map(Kind::Dike, Facing::NorthSouth, MAP_W - 1, MAP_H - 3));
+        assert!(!Building::fits_on_map(Kind::Dike, Facing::NorthSouth, MAP_W - 1, MAP_H - 2));
     }
 }

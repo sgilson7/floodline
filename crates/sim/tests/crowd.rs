@@ -10,7 +10,7 @@
 //! twenty-millisecond budget.
 
 use sim::balance::*;
-use sim::building::{Good, Kind};
+use sim::building::{Facing, Good, Kind};
 use sim::command::Command;
 use sim::fx::V2;
 use sim::map::Map;
@@ -29,8 +29,9 @@ fn build(w: &mut World, kind: Kind) -> sim::BuildingId {
                     continue;
                 }
                 let (x, y) = (hx + dx, hy + dy);
-                if w.can_place(ME, kind, x, y).is_ok() {
-                    w.apply(ME, &Command::Place { kind, x: x as u8, y: y as u8 }).unwrap();
+                if w.can_place(ME, kind, Facing::EastWest, x, y).is_ok() {
+                    w.apply(ME, &Command::Place { kind,
+                            facing: Facing::EastWest, x: x as u8, y: y as u8 }).unwrap();
                     let id = w.buildings.last().unwrap().id;
                     for g in Good::ALL {
                         let want = w.buildings[id.0 as usize].outstanding().get(g);

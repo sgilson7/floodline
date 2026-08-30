@@ -12,7 +12,7 @@
 //! arrives with `Command` in item 7.
 
 use sim::balance::{FOUNDING_CITIZENS, NEED_FULL, TICKS_PER_DAY};
-use sim::building::{Good, Kind};
+use sim::building::{Facing, Good, Kind};
 use sim::citizen::{Job, PlayerId};
 use sim::citizen::CitizenId;
 use sim::command::Command;
@@ -205,8 +205,8 @@ fn a_scripted_game_runs_the_same_twice() {
                             if dx.abs() != r && dy.abs() != r {
                                 continue;
                             }
-                            if w.can_place(PlayerId(p), kind, hx + dx, hy + dy).is_ok() {
-                                let id = w.place(PlayerId(p), kind, hx + dx, hy + dy).unwrap();
+                            if w.can_place(PlayerId(p), kind, Facing::EastWest, hx + dx, hy + dy).is_ok() {
+                                let id = w.place(PlayerId(p), kind, Facing::EastWest, hx + dx, hy + dy).unwrap();
                                 placed.push((kind, id));
                                 continue 'kinds;
                             }
@@ -328,8 +328,8 @@ fn a_city_at_work_runs_the_same_twice() {
                         if dx.abs() != r && dy.abs() != r {
                             continue;
                         }
-                        if w.can_place(PlayerId(0), kind, hx + dx, hy + dy).is_ok() {
-                            let id = w.place(PlayerId(0), kind, hx + dx, hy + dy).unwrap();
+                        if w.can_place(PlayerId(0), kind, Facing::EastWest, hx + dx, hy + dy).is_ok() {
+                            let id = w.place(PlayerId(0), kind, Facing::EastWest, hx + dx, hy + dy).unwrap();
                             for g in Good::ALL {
                                 let want = kind.cost().get(g);
                                 if want > 0 {
@@ -399,7 +399,7 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
                         if dx.abs() != r && dy.abs() != r {
                             continue;
                         }
-                        if w.can_place(PlayerId(0), kind, hx + dx, hy + dy).is_ok()
+                        if w.can_place(PlayerId(0), kind, Facing::EastWest, hx + dx, hy + dy).is_ok()
                             && !spots.iter().any(|&(_, sx, sy): &(Kind, i32, i32)| {
                                 (sx - (hx + dx)).abs() < 4 && (sy - (hy + dy)).abs() < 4
                             })
@@ -437,10 +437,10 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
     let dike = BuildingId(5);
 
     let script: Vec<(u32, PlayerId, String)> = vec![
-        (1, PlayerId(0), format!("place farm {} {}", layout[0].1, layout[0].2)),
-        (1, PlayerId(0), format!("place granary {} {}", layout[1].1, layout[1].2)),
-        (2, PlayerId(0), format!("place cottage {} {}", layout[2].1, layout[2].2)),
-        (2, PlayerId(0), format!("place dike {} {}", layout[3].1, layout[3].2)),
+        (1, PlayerId(0), format!("place farm {} {} ew", layout[0].1, layout[0].2)),
+        (1, PlayerId(0), format!("place granary {} {} ew", layout[1].1, layout[1].2)),
+        (2, PlayerId(0), format!("place cottage {} {} ew", layout[2].1, layout[2].2)),
+        (2, PlayerId(0), format!("place dike {} {} ew", layout[3].1, layout[3].2)),
         // Builders on the dike, so it is standing by the time the script
         // tries to raise it. A construction site only makes progress when
         // somebody is assigned to it — hauling brings the stone, building

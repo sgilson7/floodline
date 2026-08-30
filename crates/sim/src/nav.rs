@@ -261,7 +261,7 @@ pub fn goal_cells(world: &World, dest: Dest) -> Vec<(i32, i32)> {
 /// Whether a cell is at or beside a building's footprint — near enough to
 /// deliver to it, work in it, or eat at it.
 pub fn at_building(b: &Building, x: i32, y: i32) -> bool {
-    let (w, h) = b.kind.size();
+    let (w, h) = b.size();
     let (bx, by) = (b.x as i32, b.y as i32);
     x >= bx - 1 && y >= by - 1 && x <= bx + w && y <= by + h
 }
@@ -300,7 +300,7 @@ const _: () = assert!(MAP_H == 128);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::building::{Good, Kind};
+    use crate::building::{Facing, Good, Kind};
     use crate::citizen::PlayerId;
 
     /// How much clear ground the layout tests need around their centre.
@@ -413,7 +413,7 @@ mod tests {
             .unwrap();
 
         assert!(!passable(&w, wet.0, wet.1));
-        let id = w.place(PlayerId(0), Kind::Bridge, wet.0, wet.1).unwrap();
+        let id = w.place(PlayerId(0), Kind::Bridge, Facing::EastWest, wet.0, wet.1).unwrap();
         assert!(!passable(&w, wet.0, wet.1), "a half-built bridge is still a river");
 
         w.deliver_to(id, Good::Wood, 20);
@@ -429,14 +429,14 @@ mod tests {
         let (mut w, hx, hy) = open_world();
         let spot = (hx + 4, hy);
 
-        let cottage = w.place(PlayerId(0), Kind::Cottage, spot.0, spot.1).unwrap();
+        let cottage = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, spot.0, spot.1).unwrap();
         assert!(passable(&w, spot.0, spot.1), "a site is walked through");
         w.deliver_to(cottage, Good::Wood, 30);
         w.build_at(cottage, Kind::Cottage.build_ticks());
         assert!(!passable(&w, spot.0, spot.1), "a cottage is walked around");
 
         let dspot = (hx - 4, hy);
-        let dike = w.place(PlayerId(0), Kind::Dike, dspot.0, dspot.1).unwrap();
+        let dike = w.place(PlayerId(0), Kind::Dike, Facing::EastWest, dspot.0, dspot.1).unwrap();
         w.deliver_to(dike, Good::Stone, 40);
         w.build_at(dike, Kind::Dike.build_ticks());
         assert!(
@@ -455,7 +455,7 @@ mod tests {
         let before = plain.dist_at(hx + 6, hy);
 
         for i in 1..=6 {
-            let id = w.place(PlayerId(0), Kind::Road, hx + i, hy).unwrap();
+            let id = w.place(PlayerId(0), Kind::Road, Facing::EastWest, hx + i, hy).unwrap();
             assert!(w.build_at(id, Kind::Road.build_ticks()), "roads are free to build");
         }
 
@@ -472,8 +472,8 @@ mod tests {
         let (mut w, hx, hy) = open_world();
         // Two cottages meeting at a corner, leaving a diagonal gap that must
         // not be squeezed through.
-        let a = w.place(PlayerId(0), Kind::Cottage, hx + 1, hy + 1).unwrap();
-        let b = w.place(PlayerId(0), Kind::Cottage, hx + 3, hy + 3).unwrap();
+        let a = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, hx + 1, hy + 1).unwrap();
+        let b = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, hx + 3, hy + 3).unwrap();
         for id in [a, b] {
             w.deliver_to(id, Good::Wood, 30);
             w.build_at(id, Kind::Cottage.build_ticks());
@@ -493,7 +493,7 @@ mod tests {
     #[test]
     fn a_field_is_seeded_from_a_whole_footprint() {
         let (mut w, hx, hy) = open_world();
-        let id = w.place(PlayerId(0), Kind::Farm, hx + 3, hy - 1).unwrap();
+        let id = w.place(PlayerId(0), Kind::Farm, Facing::EastWest, hx + 3, hy - 1).unwrap();
         let cells: Vec<(i32, i32)> = w.buildings[id.0 as usize].cells().collect();
         assert_eq!(cells.len(), 9);
 
@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn a_field_to_a_building_that_is_gone_reaches_nothing() {
         let (mut w, hx, hy) = open_world();
-        let id = w.place(PlayerId(0), Kind::Cottage, hx + 3, hy).unwrap();
+        let id = w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, hx + 3, hy).unwrap();
         let mut nav = Nav::new();
         assert!(nav.field(&w, Dest::Building(id)).reachable(hx, hy), "before");
 
@@ -532,7 +532,7 @@ mod tests {
         assert_eq!(nav.field(&w, dest).generation, gen0);
 
         // Placing something does.
-        w.place(PlayerId(0), Kind::Cottage, hx + 5, hy).unwrap();
+        w.place(PlayerId(0), Kind::Cottage, Facing::EastWest, hx + 5, hy).unwrap();
         assert!(w.nav_generation > gen0);
         assert_eq!(nav.field(&w, dest).generation, w.nav_generation);
         assert_eq!(nav.len(), 1, "rebuilt in place rather than added");

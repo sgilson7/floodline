@@ -18,7 +18,7 @@ use crate::screen::{MapView, CELL, LOGICAL_H, LOGICAL_W, PANEL_W};
 use crate::ui::Ui;
 use crate::{palette, ui};
 use macroquad::prelude::*;
-use sim::building::{Good, Kind};
+use sim::building::{Facing, Good, Kind};
 use sim::{CitizenId, Command, PlayerId, World};
 
 /// What the next click on the map means.
@@ -213,8 +213,12 @@ impl Input {
                     });
                     match existing.map(|b| b.id) {
                         Some(dike) => self.issue(session, Command::RaiseDike { dike }),
+                        // Every kind but the dike is square, so east-west is
+                        // the only answer that means anything here. The dike
+                        // gets its facing from the drag it is drawn with.
                         None => self.issue(session, Command::Place {
                             kind,
+                            facing: Facing::EastWest,
                             x: x as u8,
                             y: y as u8,
                         }),
@@ -324,8 +328,8 @@ impl Input {
         let Some((x, y)) = cell else { return };
         match self.tool {
             Tool::Build(kind) => {
-                let (bw, bh) = kind.size();
-                let ok = w.can_place(me, kind, x, y).is_ok();
+                let (bw, bh) = kind.size(Facing::EastWest);
+                let ok = w.can_place(me, kind, Facing::EastWest, x, y).is_ok();
                 draw_rectangle(
                     x as f32 * CELL,
                     y as f32 * CELL,

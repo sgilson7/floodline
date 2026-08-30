@@ -5,7 +5,7 @@
 //! looks like a hill.
 
 use sim::balance::*;
-use sim::building::{Good, Kind};
+use sim::building::{Facing, Good, Kind};
 use sim::citizen::PlayerId;
 use sim::map::{Corner, Ground, Map, CELLS, MAP_H, MAP_W};
 use sim::nav::Nav;
@@ -169,11 +169,16 @@ fn water_behind_a_level_two_dike_stays_behind_it_for_a_height_twelve_surge() {
     let mut w = flat(40);
     let mut nav = Nav::new();
 
-    // A wall of dikes across the map at x = 40, two levels high.
+    // A wall of dikes across the map from x = 40, two levels high. A dike
+    // segment is DIKE_LENGTH cells long, so stacking one per row builds a
+    // wall that is DIKE_LENGTH cells thick and MAP_H rows tall. Thickness is
+    // not what is under test — height is — but "behind the wall" has to mean
+    // past the far side of it and not on top of it.
     let wall_x = 40;
+    let wall_back = wall_x + DIKE_LENGTH;
     let mut wall = Vec::new();
     for y in 0..MAP_H {
-        let id = w.place(PlayerId(0), Kind::Dike, wall_x, y).unwrap();
+        let id = w.place(PlayerId(0), Kind::Dike, Facing::EastWest, wall_x, y).unwrap();
         w.deliver_to(id, Good::Stone, Kind::Dike.cost().stone);
         w.build_at(id, Kind::Dike.build_ticks());
         w.raise_dike(PlayerId(0), id).unwrap();
@@ -203,7 +208,7 @@ fn water_behind_a_level_two_dike_stays_behind_it_for_a_height_twelve_surge() {
         w.water.step(&ground, 0);
     }
 
-    let behind: u32 = (wall_x + 1..MAP_W)
+    let behind: u32 = (wall_back..MAP_W)
         .flat_map(|x| (0..MAP_H).map(move |y| (x, y)))
         .map(|(x, y)| w.water.depth_at(x, y) as u32)
         .sum();
@@ -222,8 +227,9 @@ fn water_spills_over_a_dike_it_is_deeper_than() {
     // The other half of the lesson: a dike is not a wall, it is a height.
     let mut w = flat(40);
     let wall_x = 20;
+    let wall_back = wall_x + DIKE_LENGTH;
     for y in 0..MAP_H {
-        let id = w.place(PlayerId(0), Kind::Dike, wall_x, y).unwrap();
+        let id = w.place(PlayerId(0), Kind::Dike, Facing::EastWest, wall_x, y).unwrap();
         w.deliver_to(id, Good::Stone, Kind::Dike.cost().stone);
         w.build_at(id, Kind::Dike.build_ticks());
     }
@@ -239,7 +245,7 @@ fn water_spills_over_a_dike_it_is_deeper_than() {
         w.water.step(&ground, 0);
     }
 
-    let behind: u32 = (wall_x + 1..MAP_W)
+    let behind: u32 = (wall_back..MAP_W)
         .flat_map(|x| (0..MAP_H).map(move |y| (x, y)))
         .map(|(x, y)| w.water.depth_at(x, y) as u32)
         .sum();

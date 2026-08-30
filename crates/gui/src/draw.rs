@@ -70,7 +70,7 @@ fn buildings(w: &World, seen: (i32, i32, i32, i32)) {
         if b.state == sim::building::BuildState::Rubble {
             continue;
         }
-        let (bw, bh) = b.kind.size();
+        let (bw, bh) = b.size();
         if !on_screen(seen, b.x as i32, b.y as i32, bw, bh) {
             continue;
         }

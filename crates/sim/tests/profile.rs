@@ -12,7 +12,7 @@
 //! 20 ms leaves rendering and networking the rest.
 
 use sim::balance::*;
-use sim::building::{Good, Kind};
+use sim::building::{Facing, Good, Kind};
 use sim::citizen::{Citizen, CitizenId, PlayerId};
 use sim::fx::V2;
 use sim::nav::Nav;
@@ -33,8 +33,8 @@ fn a_busy_world(n: usize, days: u32) -> (World, Nav) {
                         if dx.abs() != r && dy.abs() != r {
                             continue;
                         }
-                        if w.can_place(PlayerId(p), kind, hx + dx, hy + dy).is_ok() {
-                            let id = w.place(PlayerId(p), kind, hx + dx, hy + dy).unwrap();
+                        if w.can_place(PlayerId(p), kind, Facing::EastWest, hx + dx, hy + dy).is_ok() {
+                            let id = w.place(PlayerId(p), kind, Facing::EastWest, hx + dx, hy + dy).unwrap();
                             for g in Good::ALL {
                                 let want = kind.cost().get(g);
                                 if want > 0 {
