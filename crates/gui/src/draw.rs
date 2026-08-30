@@ -11,15 +11,13 @@ pub const CELL: f32 = 8.0;
 pub const MAP_X: f32 = 12.0;
 pub const MAP_Y: f32 = 12.0;
 
-/// Where the map sits on the canvas. Used by input in phase 5; kept here
-/// beside the drawing so the two cannot disagree about where a cell is.
-#[allow(dead_code)]
+/// Where the map sits on the canvas. Kept here beside the drawing so the
+/// drawing and the hit-testing cannot disagree about where a cell is.
 pub fn map_rect() -> Rect {
     Rect::new(MAP_X, MAP_Y, sim::MAP_W as f32 * CELL, sim::MAP_H as f32 * CELL)
 }
 
 /// The cell under a point in logical coordinates, if any.
-#[allow(dead_code)]
 pub fn cell_at(x: f32, y: f32) -> Option<(i32, i32)> {
     let r = map_rect();
     if !r.contains(vec2(x, y)) {
@@ -151,7 +149,9 @@ fn pings(w: &World) {
 
 /// The side panel: what a player needs to know without looking away from the
 /// map (plan phase 5).
-pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: &[u32]) {
+/// Returns the y the fixed part of the panel ended at, so the tools below it
+/// move down when there are six cities in the list instead of two.
+pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: &[u32]) -> f32 {
     let x = LOGICAL_W - PANEL_W;
     draw_rectangle(x, 0.0, PANEL_W, LOGICAL_H, palette::PANEL);
     draw_line(x, 0.0, x, LOGICAL_H, 1.0, palette::RULE);
@@ -223,6 +223,7 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
         net::Status::Ended(reason) => (reason.clone(), palette::ALARM),
     };
     line(&text, 17, colour, &mut y);
+    let ended = y;
 
     // The bottom of the panel is for the things you only look at when
     // something is wrong.
@@ -230,6 +231,7 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
     line(&format!("tick {}", w.tick), 15, palette::FAINT, &mut y);
     line(&format!("peers at {ticks:?}"), 15, palette::FAINT, &mut y);
     line(&format!("build {build}   seed {}", w.seed), 15, palette::FAINT, &mut y);
+    ended
 }
 
 /// The score screen (design §4).
@@ -273,4 +275,9 @@ pub fn score(w: &World) {
     y += 16.0;
     line(&format!("seed {} — the same map again, if you want it", s.seed), 16,
          palette::FAINT, &mut y);
+    // The plan's "New run". There is no button because there is nothing for a
+    // button to do that the lobby does not already do better: a new run is a
+    // new room, a new seed and possibly a different set of people.
+    y += 10.0;
+    line("ENTER for a new run", 20, palette::INK, &mut y);
 }

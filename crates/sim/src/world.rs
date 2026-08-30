@@ -74,6 +74,39 @@ pub enum RuleError {
     AlreadyAccepted,
 }
 
+impl RuleError {
+    /// Something a person can read, in the place they were looking.
+    ///
+    /// It lives here rather than in `gui` because the rule and the sentence
+    /// that explains it are the same fact, and a rule added without a sentence
+    /// would otherwise reach a player as silence — which is the failure mode
+    /// `Lockstep::issue` exists to prevent, checking locally so a refusal
+    /// arrives now instead of three ticks later on five machines at once.
+    pub fn to_message(&self) -> &'static str {
+        match self {
+            RuleError::NotYours => "that is not yours",
+            RuleError::OffMap => "it will not fit there",
+            RuleError::Occupied => "something is already there",
+            RuleError::WrongGround => "not on that ground",
+            RuleError::OneHearthOnly => "one hearth to a city",
+            RuleError::NoSuchBuilding => "there is nothing there",
+            RuleError::NoSuchCitizen => "nobody there to ask",
+            RuleError::NotStanding => "it is not built yet",
+            RuleError::TooHigh => "that dike is as high as it goes",
+            RuleError::NoJobThere => "there is no work there",
+            RuleError::Full => "there is no room",
+            RuleError::NotACottage => "only a cottage has beds",
+            RuleError::NoSuchCell => "not on the map",
+            RuleError::NoRoute => "no way through",
+            RuleError::NoSuchRoad => "no such road",
+            RuleError::NoSuchTrade => "no such offer",
+            RuleError::NotYourRoad => "that road does not reach you",
+            RuleError::NoSuchPartner => "there is no such city",
+            RuleError::AlreadyAccepted => "already agreed",
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct World {
     /// The seed this run was generated from. Kept so the score screen can show

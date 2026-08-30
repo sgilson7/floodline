@@ -40,6 +40,11 @@ for dpr in 1 2; do
     "http://localhost:$PORT/index.html" "$dpr" || fail=1
 done
 
+# The mouse reaching the simulation, which is the one thing cargo cannot say.
+say "play.py"
+"$VENV/bin/python" "$ROOT/packaging/browser/play.py" \
+  "http://localhost:$PORT/index.html" || fail=1
+
 # The whole stack: two tabs of the real game, both ways into a room.
 for mode in room code; do
   say "game_two_tabs.py by $mode"

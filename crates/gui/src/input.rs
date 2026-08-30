@@ -1,0 +1,607 @@
+//! Everything a player does with the mouse, and what it turns into.
+//!
+//! Immediate mode, like `ui`: the tools draw themselves and act in the same
+//! pass, so there is no state that can disagree with what is on screen. What
+//! leaves this file is always a `Command` handed to `Session::issue`, which is
+//! `World::apply` on this machine first — so an illegal placement is refused
+//! *now*, under the cursor, instead of being silently dropped three ticks
+//! later on every machine at once.
+//!
+//! **Nothing here reads `mouse_position()`.** `Ui::frame` has already put the
+//! cursor into logical coordinates, and `draw::cell_at` is the only thing that
+//! turns those into a cell. The two conversions in `screen::Viewport` are the
+//! whole of the letterbox and this file may not do the arithmetic itself.
+
+use crate::draw::{self, CELL};
+use crate::game::Session;
+use crate::screen::{LOGICAL_H, LOGICAL_W, PANEL_W};
+use crate::ui::Ui;
+use crate::{palette, ui};
+use macroquad::prelude::*;
+use sim::building::{Good, Kind};
+use sim::{CitizenId, Command, PlayerId, World};
+
+/// What the next click on the map means.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum Tool {
+    /// Select citizens; right-click orders them about.
+    Select,
+    /// Put one of these down. A dike is also raised with this tool, by
+    /// clicking one that is already there.
+    Build(Kind),
+    /// Two clicks: where from, where to.
+    Road { from: Option<(u8, u8)> },
+    /// Point at something, for the other player to see.
+    Ping,
+}
+
+/// The buildings the MVP lets a player put down, in the order the panel shows
+/// them and the order the number keys pick them. `Hearth` is not among them:
+/// the run starts with the only one a city gets. `Road` and `Bridge` are laid
+/// by the road tool, which routes and bridges by itself (design §6).
+const BUILDABLE: [(Kind, &str, KeyCode); 5] = [
+    (Kind::Cottage, "cottage", KeyCode::Key1),
+    (Kind::Farm, "farm", KeyCode::Key2),
+    (Kind::Granary, "granary", KeyCode::Key3),
+    (Kind::Stockpile, "stockpile", KeyCode::Key4),
+    (Kind::Dike, "dike", KeyCode::Key5),
+];
+
+/// A trade being composed. Design §6: a standing daily exchange, proposed by
+/// one city and accepted by the other.
+struct Draft {
+    open: bool,
+    with: usize,
+    give: (Good, u16),
+    take: (Good, u16),
+}
+
+impl Default for Draft {
+    fn default() -> Draft {
+        Draft { open: false, with: 0, give: (Good::Food, 10), take: (Good::Wood, 10) }
+    }
+}
+
+pub struct Input {
+    pub tool: Tool,
+    pub selected: Vec<CitizenId>,
+    /// Where a selection drag began, in logical coordinates.
+    drag: Option<Vec2>,
+    trade: Draft,
+    /// The last thing the rules said no to, and when, so it fades.
+    notice: Option<(String, f64)>,
+}
+
+impl Default for Input {
+    fn default() -> Input {
+        Input { tool: Tool::Select, selected: Vec::new(), drag: None, trade: Draft::default(),
+                notice: None }
+    }
+}
+
+/// How long a refusal stays on screen.
+const NOTICE_SECONDS: f64 = 3.0;
+
+impl Input {
+    /// One frame: draw the tools, read the mouse, issue what it meant.
+    pub fn frame(&mut self, ui: &Ui, session: &mut Session, panel_top: f32) {
+        let me = session.me();
+        self.keys();
+        self.forget_the_dead(session.world());
+
+        // The dialog is modal over the map, so it gets the mouse first.
+        if self.trade.open {
+            self.trade_dialog(ui, session, me);
+            self.tools(ui, session, me, panel_top);
+            return;
+        }
+        self.map(ui, session, me);
+        self.tools(ui, session, me, panel_top);
+        self.notice();
+    }
+
+    fn keys(&mut self) {
+        for (kind, _, key) in BUILDABLE {
+            if is_key_pressed(key) {
+                self.tool = Tool::Build(kind);
+            }
+        }
+        if is_key_pressed(KeyCode::R) {
+            self.tool = Tool::Road { from: None };
+        }
+        if is_key_pressed(KeyCode::P) {
+            self.tool = Tool::Ping;
+        }
+        if is_key_pressed(KeyCode::Escape) {
+            self.tool = Tool::Select;
+            self.trade.open = false;
+        }
+    }
+
+    /// A citizen who has died stops being selected.
+    ///
+    /// Not tidiness: `World::apply` refuses a command naming a dead citizen,
+    /// and it refuses the *whole* command (see DECISIONS.md, "Commands are
+    /// all-or-nothing), so one drowned villager in the selection would
+    /// silently cancel every order given to the other seven — during a flood,
+    /// which is when it matters most.
+    fn forget_the_dead(&mut self, w: &World) {
+        self.selected.retain(|id| {
+            w.citizens.get(id.0 as usize).is_some_and(|c| c.alive())
+        });
+    }
+
+    fn say(&mut self, text: impl Into<String>) {
+        self.notice = Some((text.into(), get_time()));
+    }
+
+    fn issue(&mut self, session: &mut Session, cmd: Command) {
+        if let Err(e) = session.issue(cmd) {
+            self.say(e.to_message());
+        }
+    }
+
+    // ---- the map ------------------------------------------------------------
+
+    fn map(&mut self, ui: &Ui, session: &mut Session, me: PlayerId) {
+        let cell = draw::cell_at(ui.mouse.x, ui.mouse.y);
+        self.hover(session.world(), me, cell);
+
+        match self.tool {
+            Tool::Select => self.select(ui, session, me, cell),
+            Tool::Build(kind) => {
+                if let (true, Some((x, y))) = (ui.clicked, cell) {
+                    // A dike clicked with the dike tool is a dike to raise,
+                    // which is design §3.3's "dikes grow" and the only way to
+                    // spell `RaiseDike` from a mouse.
+                    let existing = session.world().building_at(x, y).filter(|b| {
+                        b.owner == me && b.kind == Kind::Dike && kind == Kind::Dike
+                    });
+                    match existing.map(|b| b.id) {
+                        Some(dike) => self.issue(session, Command::RaiseDike { dike }),
+                        None => self.issue(session, Command::Place {
+                            kind,
+                            x: x as u8,
+                            y: y as u8,
+                        }),
+                    }
+                }
+                if ui.right_clicked {
+                    self.tool = Tool::Select;
+                }
+            }
+            Tool::Road { from } => {
+                if let (true, Some((x, y))) = (ui.clicked, cell) {
+                    match from {
+                        None => self.tool = Tool::Road { from: Some((x as u8, y as u8)) },
+                        Some(start) => {
+                            self.issue(session, Command::Road {
+                                from: start,
+                                to: (x as u8, y as u8),
+                            });
+                            self.tool = Tool::Road { from: None };
+                        }
+                    }
+                }
+                if ui.right_clicked {
+                    self.tool = Tool::Select;
+                }
+            }
+            Tool::Ping => {
+                if let (true, Some((x, y))) = (ui.clicked, cell) {
+                    self.issue(session, Command::Ping { x: x as u8, y: y as u8 });
+                    self.tool = Tool::Select;
+                }
+            }
+        }
+    }
+
+    /// Drag to select, right-click to order.
+    fn select(&mut self, ui: &Ui, session: &mut Session, me: PlayerId, cell: Option<(i32, i32)>) {
+        let on_map = draw::map_rect().contains(ui.mouse);
+        if ui.clicked && on_map {
+            self.drag = Some(ui.mouse);
+        }
+        if let Some(start) = self.drag {
+            let r = rect_between(start, ui.mouse);
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, palette::INK);
+            if ui.released {
+                self.drag = None;
+                // A click is a drag of no size, and picking the one citizen
+                // under the cursor wants a few pixels of tolerance rather than
+                // an exact hit on a six-pixel circle.
+                let r = if r.w < 4.0 && r.h < 4.0 {
+                    Rect::new(start.x - 6.0, start.y - 6.0, 12.0, 12.0)
+                } else {
+                    r
+                };
+                self.selected = session
+                    .world()
+                    .citizens
+                    .iter()
+                    .filter(|c| c.owner == me && c.alive())
+                    .filter(|c| r.contains(citizen_at(c)))
+                    .map(|c| c.id)
+                    .collect();
+            }
+        }
+
+        if ui.right_clicked && !self.selected.is_empty() {
+            let Some((x, y)) = cell else { return };
+            let citizens = self.selected.clone();
+            let target = session.world().building_at(x, y).map(|b| (b.id, b.owner, b.kind));
+            match target {
+                // Somebody else's building is not a place to work.
+                Some((id, owner, kind)) if owner == me => match kind {
+                    Kind::Cottage => {
+                        self.issue(session, Command::SetHome { citizens, cottage: id })
+                    }
+                    _ => self.issue(session, Command::Assign { citizens, building: id }),
+                },
+                _ => self.issue(session, Command::MoveTo {
+                    citizens,
+                    x: x as u8,
+                    y: y as u8,
+                }),
+            }
+        }
+    }
+
+    /// What the cursor is over: a ghost of what would be built, or the name of
+    /// what is already there.
+    fn hover(&self, w: &World, me: PlayerId, cell: Option<(i32, i32)>) {
+        let Some((x, y)) = cell else { return };
+        match self.tool {
+            Tool::Build(kind) => {
+                let (bw, bh) = kind.size();
+                let ok = w.can_place(me, kind, x, y).is_ok();
+                let r = draw::map_rect();
+                draw_rectangle(
+                    r.x + x as f32 * CELL,
+                    r.y + y as f32 * CELL,
+                    bw as f32 * CELL,
+                    bh as f32 * CELL,
+                    Color { a: 0.35, ..if ok { palette::GOOD } else { palette::ALARM } },
+                );
+            }
+            Tool::Road { from: Some((fx, fy)) } => {
+                let r = draw::map_rect();
+                draw_line(
+                    r.x + fx as f32 * CELL + CELL / 2.0,
+                    r.y + fy as f32 * CELL + CELL / 2.0,
+                    r.x + x as f32 * CELL + CELL / 2.0,
+                    r.y + y as f32 * CELL + CELL / 2.0,
+                    2.0,
+                    palette::WARNING,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    // ---- the panel ----------------------------------------------------------
+
+    fn tools(&mut self, ui: &Ui, session: &mut Session, me: PlayerId, top: f32) {
+        let left = LOGICAL_W - PANEL_W + 18.0;
+        let wide = PANEL_W - 36.0;
+        let half = (wide - 8.0) / 2.0;
+        let mut y = top + 8.0;
+
+        draw_line(left, y, left + wide, y, 1.0, palette::RULE);
+        y += 22.0;
+        draw_text("BUILD", left, y, 15.0, palette::FAINT);
+        y += 14.0;
+
+        let goods = session.world().treasury(me);
+        for (i, (kind, name, key)) in BUILDABLE.iter().enumerate() {
+            let r = Rect::new(
+                left + (i % 2) as f32 * (half + 8.0),
+                y + (i / 2) as f32 * 42.0,
+                half,
+                36.0,
+            );
+            let cost = kind.cost();
+            let afford = goods.food >= cost.food && goods.wood >= cost.wood
+                && goods.stone >= cost.stone;
+            let label = format!("{} {}", i + 1, name);
+            if ui.button(r, &label, true) {
+                self.tool = Tool::Build(*kind);
+            }
+            if self.tool == Tool::Build(*kind) {
+                draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, palette::INK);
+            }
+            // The cost, under the name, greyed when it is out of reach. Not a
+            // refusal — the materials are hauled to a site over time and a
+            // player may well want to start one they cannot yet pay for.
+            draw_text(
+                &cost_line(kind.cost()),
+                r.x + 6.0,
+                r.y + r.h - 4.0,
+                13.0,
+                if afford { palette::FAINT } else { palette::ALARM },
+            );
+            let _ = key;
+        }
+        y += 42.0 * ((BUILDABLE.len() as f32 + 1.0) / 2.0).floor() + 8.0;
+
+        let road = Rect::new(left, y, half, 36.0);
+        let ping = Rect::new(left + half + 8.0, y, half, 36.0);
+        if ui.button(road, "r road", true) {
+            self.tool = Tool::Road { from: None };
+        }
+        if matches!(self.tool, Tool::Road { .. }) {
+            draw_rectangle_lines(road.x, road.y, road.w, road.h, 2.0, palette::INK);
+        }
+        if ui.button(ping, "p point", true) {
+            self.tool = Tool::Ping;
+        }
+        if self.tool == Tool::Ping {
+            draw_rectangle_lines(ping.x, ping.y, ping.w, ping.h, 2.0, palette::INK);
+        }
+        y += 48.0;
+
+        draw_text(
+            match self.tool {
+                Tool::Select => "drag to choose. right-click to send them",
+                Tool::Build(_) => "click the ground. right-click to stop",
+                Tool::Road { from: None } => "click where the road starts",
+                Tool::Road { from: Some(_) } => "click where it ends",
+                Tool::Ping => "click what you want them to look at",
+            },
+            left,
+            y,
+            14.0,
+            palette::FAINT,
+        );
+        y += 26.0;
+
+        // Who is chosen, and the one order that has no gesture of its own.
+        draw_line(left, y, left + wide, y, 1.0, palette::RULE);
+        y += 22.0;
+        draw_text(
+            &match self.selected.len() {
+                0 => "nobody chosen".to_owned(),
+                1 => "1 chosen".to_owned(),
+                n => format!("{n} chosen"),
+            },
+            left,
+            y,
+            17.0,
+            if self.selected.is_empty() { palette::FAINT } else { palette::INK },
+        );
+        y += 12.0;
+        let chosen = !self.selected.is_empty();
+        if ui.button(Rect::new(left, y, half, 34.0), "back to hauling", chosen) {
+            let citizens = self.selected.clone();
+            self.issue(session, Command::Unassign { citizens });
+        }
+        if ui.button(Rect::new(left + half + 8.0, y, half, 34.0), "choose all", true) {
+            self.selected = session
+                .world()
+                .citizens
+                .iter()
+                .filter(|c| c.owner == me && c.alive())
+                .map(|c| c.id)
+                .collect();
+        }
+        y += 48.0;
+
+        // Trade, and anything waiting for an answer.
+        draw_line(left, y, left + wide, y, 1.0, palette::RULE);
+        y += 22.0;
+        let others = session.world().players.len() > 1;
+        if ui.button(Rect::new(left, y, wide, 34.0), "propose a trade", others) {
+            self.trade.open = true;
+        }
+        y += 42.0;
+        y = self.offers(ui, session, me, left, wide, y);
+        let _ = y;
+    }
+
+    /// Roads and trades that are waiting on this player to say yes.
+    fn offers(
+        &mut self,
+        ui: &Ui,
+        session: &mut Session,
+        me: PlayerId,
+        left: f32,
+        wide: f32,
+        mut y: f32,
+    ) -> f32 {
+        let roads: Vec<_> = session
+            .world()
+            .roads
+            .iter()
+            .filter(|r| r.reaches == Some(me) && !r.joined)
+            .map(|r| (r.id, r.by))
+            .collect();
+        for (id, by) in roads {
+            if ui.button(
+                Rect::new(left, y, wide, 32.0),
+                &format!("join city {}'s road", by.0),
+                true,
+            ) {
+                self.issue(session, Command::AcceptRoad { road: id });
+            }
+            y += 38.0;
+        }
+
+        let trades: Vec<_> = session
+            .world()
+            .trades
+            .iter()
+            .filter(|t| t.with == me && !t.accepted)
+            .map(|t| (t.id, t.from, t.give, t.take))
+            .collect();
+        for (id, from, give, take) in trades {
+            // `give` and `take` are named from the proposer's side, so this
+            // player receives what the other gives. Saying it the wrong way
+            // round would be a trap in the one screen where a mistake costs
+            // real food.
+            if ui.button(
+                Rect::new(left, y, wide, 32.0),
+                &format!(
+                    "city {}: {} {} for your {} {}",
+                    from.0, give.1, good_name(give.0), take.1, good_name(take.0)
+                ),
+                true,
+            ) {
+                self.issue(session, Command::AcceptTrade { trade: id });
+            }
+            y += 38.0;
+        }
+        y
+    }
+
+    // ---- the trade dialog ---------------------------------------------------
+
+    fn trade_dialog(&mut self, ui: &Ui, session: &mut Session, me: PlayerId) {
+        let others: Vec<PlayerId> = session
+            .world()
+            .players
+            .iter()
+            .copied()
+            .filter(|&p| p != me)
+            .collect();
+        if others.is_empty() {
+            self.trade.open = false;
+            return;
+        }
+        self.trade.with %= others.len();
+        let with = others[self.trade.with];
+
+        let card = Rect::new(340.0, 260.0, 620.0, 420.0);
+        draw_rectangle(card.x, card.y, card.w, card.h, Color { a: 0.97, ..palette::PANEL });
+        draw_rectangle_lines(card.x, card.y, card.w, card.h, 2.0, palette::RULE);
+        let cx = card.x + card.w / 2.0;
+        let mut y = card.y + 54.0;
+        let m = measure_text("A STANDING TRADE", None, 26, 1.0);
+        draw_text("A STANDING TRADE", cx - m.width / 2.0, y, 26.0, palette::INK);
+        y += 20.0;
+        let m = measure_text("every day, until one of you stops it", None, 16, 1.0);
+        draw_text(
+            "every day, until one of you stops it",
+            cx - m.width / 2.0,
+            y,
+            16.0,
+            palette::FAINT,
+        );
+        y += 44.0;
+
+        draw_text("with", card.x + 40.0, y + 24.0, 18.0, palette::INK);
+        if ui.button(Rect::new(card.x + 130.0, y, 200.0, 34.0), &format!("city {}", with.0), true)
+        {
+            self.trade.with = (self.trade.with + 1) % others.len();
+        }
+        y += 56.0;
+
+        y = self.trade_row(ui, card, y, "you give", true);
+        y = self.trade_row(ui, card, y, "you get", false);
+        y += 14.0;
+
+        let propose = Rect::new(cx - 220.0, y, 210.0, 44.0);
+        let close = Rect::new(cx + 10.0, y, 210.0, 44.0);
+        if ui.button(propose, "propose it", true) {
+            let (give, take) = (self.trade.give, self.trade.take);
+            self.issue(session, Command::Trade { with, give, take });
+            self.trade.open = false;
+        }
+        if ui.button(close, "never mind", true) {
+            self.trade.open = false;
+        }
+    }
+
+    fn trade_row(&mut self, ui: &Ui, card: Rect, y: f32, label: &str, giving: bool) -> f32 {
+        draw_text(label, card.x + 40.0, y + 24.0, 18.0, palette::INK);
+        let (good, amount) = if giving { self.trade.give } else { self.trade.take };
+        if ui.button(Rect::new(card.x + 130.0, y, 150.0, 34.0), good_name(good), true) {
+            let next = match good {
+                Good::Food => Good::Wood,
+                Good::Wood => Good::Stone,
+                Good::Stone => Good::Food,
+            };
+            if giving {
+                self.trade.give.0 = next;
+            } else {
+                self.trade.take.0 = next;
+            }
+        }
+        if ui.button(Rect::new(card.x + 300.0, y, 40.0, 34.0), "-", amount > 5) {
+            let slot = if giving { &mut self.trade.give.1 } else { &mut self.trade.take.1 };
+            *slot -= 5;
+        }
+        ui::centred_in(
+            Rect::new(card.x + 340.0, y, 70.0, 34.0),
+            &amount.to_string(),
+            20.0,
+            palette::INK,
+        );
+        if ui.button(Rect::new(card.x + 410.0, y, 40.0, 34.0), "+", amount < 200) {
+            let slot = if giving { &mut self.trade.give.1 } else { &mut self.trade.take.1 };
+            *slot += 5;
+        }
+        y + 50.0
+    }
+
+    /// The last refusal, under the map, fading.
+    fn notice(&mut self) {
+        let Some((text, at)) = &self.notice else { return };
+        let age = get_time() - at;
+        if age > NOTICE_SECONDS {
+            self.notice = None;
+            return;
+        }
+        let fade = 1.0 - (age / NOTICE_SECONDS) as f32;
+        let m = measure_text(text, None, 22, 1.0);
+        let x = (LOGICAL_W - PANEL_W) / 2.0 - m.width / 2.0;
+        draw_text(text, x, LOGICAL_H - 26.0, 22.0, Color { a: fade, ..palette::ALARM });
+    }
+}
+
+/// A citizen's position in logical coordinates, the same arithmetic `draw`
+/// does — and the only reason it is written twice is that one draws and one
+/// hit-tests, so a single function would have to be handed both a `Rect` and a
+/// `Citizen` for no gain.
+fn citizen_at(c: &sim::Citizen) -> Vec2 {
+    let r = draw::map_rect();
+    vec2(
+        r.x + c.pos.x.raw() as f32 / 256.0 * CELL,
+        r.y + c.pos.y.raw() as f32 / 256.0 * CELL,
+    )
+}
+
+fn rect_between(a: Vec2, b: Vec2) -> Rect {
+    Rect::new(a.x.min(b.x), a.y.min(b.y), (a.x - b.x).abs(), (a.y - b.y).abs())
+}
+
+fn good_name(g: Good) -> &'static str {
+    match g {
+        Good::Food => "food",
+        Good::Wood => "wood",
+        Good::Stone => "stone",
+    }
+}
+
+fn cost_line(c: sim::building::Goods) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if c.food > 0 {
+        parts.push(format!("{} food", c.food));
+    }
+    if c.wood > 0 {
+        parts.push(format!("{} wood", c.wood));
+    }
+    if c.stone > 0 {
+        parts.push(format!("{} stone", c.stone));
+    }
+    if parts.is_empty() {
+        "free".to_owned()
+    } else {
+        parts.join("  ")
+    }
+}
+
+/// Selected citizens, for the renderer's owner ring.
+pub fn selected(input: &Input) -> &[CitizenId] {
+    &input.selected
+}
+

@@ -8,6 +8,7 @@
 mod buildid;
 mod draw;
 mod game;
+mod input;
 mod lobby;
 mod page;
 mod palette;
@@ -46,7 +47,7 @@ async fn main() {
     let build = buildid::build_hash();
     let mut lobby = Some(lobby::Lobby::new());
     let mut session: Option<game::Session> = None;
-    let selected: Vec<sim::CitizenId> = Vec::new();
+    let mut input = input::Input::default();
 
     loop {
         // Clear the whole window, letterbox bars included, then move into
@@ -90,19 +91,28 @@ async fn main() {
                 lobby = None;
             }
         } else if let Some(s) = session.as_mut() {
-            // A joiner leaves the lobby when the host's first bundle arrives,
-            // which is the same moment on every peer.
             let me = s.me();
-            draw::world(s.world(), me, &selected);
-            draw::panel(s.world(), me, s.status(), &build, &s.ticks());
-            if s.world().finished().is_some() {
+            draw::world(s.world(), me, input::selected(&input));
+            let panel_ends = draw::panel(s.world(), me, s.status(), &build, &s.ticks());
+            let over = s.world().finished().is_some();
+            if over {
+                // Nothing left to command, and a build menu over a score
+                // screen would only invite clicks that fail.
                 draw::score(s.world());
+            } else {
+                input.frame(&ui, s, panel_ends);
             }
-            if let net::Status::Ended(_) = s.status() {
-                if is_key_pressed(KeyCode::Escape) {
-                    session = None;
-                    lobby = Some(lobby::Lobby::new());
-                }
+            let stopped = matches!(s.status(), net::Status::Ended(_));
+            let back = (over || stopped)
+                && (is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Enter));
+            if back {
+                let why = match s.status() {
+                    net::Status::Ended(reason) => reason.clone(),
+                    _ => String::new(),
+                };
+                session = None;
+                input = input::Input::default();
+                lobby = Some(lobby::Lobby::with_notice(why));
             }
         }
 

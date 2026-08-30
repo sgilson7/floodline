@@ -391,3 +391,34 @@ fn a_rejected_command_leaves_the_world_byte_identical() {
         assert_eq!(w.checksum(), before, "{cmd:?} changed the world before failing");
     }
 }
+
+#[test]
+fn every_refusal_says_something_a_player_can_read() {
+    // The list is the enum, written out, so a rule added without a sentence
+    // fails here rather than reaching a player as silence.
+    use sim::world::RuleError::*;
+    let all = [
+        NotYours, OffMap, Occupied, WrongGround, OneHearthOnly, NoSuchBuilding, NoSuchCitizen,
+        NotStanding, TooHigh, NoJobThere, Full, NotACottage, NoSuchCell, NoRoute, NoSuchRoad,
+        NoSuchTrade, NotYourRoad, NoSuchPartner, AlreadyAccepted,
+    ];
+    let mut seen: Vec<&str> = Vec::new();
+    for e in &all {
+        let text = e.to_message();
+        assert!(!text.is_empty(), "{e:?} has nothing to say");
+        assert!(
+            text.chars().next().unwrap().is_lowercase(),
+            "{e:?} reads like a heading, not a line under the cursor: {text:?}"
+        );
+        assert!(text.len() < 44, "{e:?} is too long for the panel: {text:?}");
+        assert!(!seen.contains(&text), "{e:?} says the same as another: {text:?}");
+        seen.push(text);
+    }
+
+    // And a real refusal comes back with one attached.
+    let mut w = sim::World::new(7, 2);
+    let err = w.apply(sim::PlayerId(0), &sim::Command::Place {
+        kind: sim::building::Kind::Hearth, x: 10, y: 10,
+    }).unwrap_err();
+    assert_eq!(err.to_message(), "one hearth to a city");
+}

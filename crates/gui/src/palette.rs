@@ -79,3 +79,6 @@ pub fn glyph(kind: sim::Kind) -> &'static str {
 /// field a shade darker, which is the whole of the depth in this interface.
 pub const BUTTON: Color = Color::new(0.11, 0.11, 0.15, 1.0);
 pub const FIELD: Color = Color::new(0.04, 0.04, 0.06, 1.0);
+
+/// A legal placement, under the cursor.
+pub const GOOD: Color = Color::new(0.42, 0.78, 0.45, 1.0);
