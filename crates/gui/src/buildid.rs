@@ -20,10 +20,11 @@ mod imp {
     /// console if they disagree. It is the guard against a deployed page whose
     /// JS plugin and whose Rust side have drifted apart — the phase 3 failure
     /// that would otherwise present as "the handshake just hangs". Bump both
-    /// numbers together whenever the plugin's imports change.
+    /// numbers together whenever the plugin's imports change. Two since
+    /// phase 4 added the seven `rtc_*` imports to the two the stub had.
     #[no_mangle]
     pub extern "C" fn quad_rtc_crate_version() -> u32 {
-        1
+        2
     }
 
     extern "C" {

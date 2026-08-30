@@ -12,7 +12,7 @@ GUI   := gui
 ROOT  := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
 .DEFAULT_GOAL := run
-.PHONY: run play test check build web serve publish clean help
+.PHONY: run play test check build web serve publish browser-test clean help
 
 ## run: play the native build
 run play:
@@ -21,6 +21,14 @@ run play:
 ## test: run the whole suite (no window needed)
 test:
 	@$(CARGO) test --workspace
+
+## browser-test: check the browser build in a real browser (needs the network)
+#
+# Deliberately not part of `make test`, which stays hermetic and quick. This
+# one downloads Chromium the first time and talks to public signalling relays
+# every time. packaging/browser/README.md says what each script answers.
+browser-test: web
+	@$(ROOT)/packaging/browser/run.sh
 
 ## check: fast type-check of everything, native and wasm, no binaries
 check:

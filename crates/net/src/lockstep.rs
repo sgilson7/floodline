@@ -93,6 +93,9 @@ pub struct Lockstep {
     /// trying to drop.
     dropping: BTreeSet<PlayerId>,
     next_player: u8,
+
+    /// Joiner: a `Hello` is still owed to whichever peer turns up first.
+    greet: bool,
 }
 
 impl Lockstep {
@@ -117,25 +120,40 @@ impl Lockstep {
             dropping: BTreeSet::new(),
             active_from: BTreeMap::new(),
             next_player: 1,
+            greet: false,
             world,
         }
     }
 
     /// Join a game. The world is a placeholder until `Welcome` arrives.
-    pub fn join(build_hash: &str, peer: &mut impl Peer) -> Lockstep {
+    ///
+    /// Nothing is sent here, and that is the whole point. The first version
+    /// said `Hello` to `peer.peers()` at this moment, which works on
+    /// `Loopback` — where every peer exists before the first poll — and cannot
+    /// work on a real one, where a browser has no peers at all until a
+    /// connection completes seconds later. The `Hello` goes out on
+    /// `Event::Peer` instead, which is true of both.
+    pub fn join(build_hash: &str) -> Lockstep {
         let mut ls = Lockstep::host(0, 2, build_hash);
         ls.host = false;
         ls.me = PlayerId(u8::MAX); // not ours until the host says so
         ls.status = Status::Lobby;
+        ls.greet = true;
+        ls
+    }
+
+    /// Joiner: say `Hello` to the host now that there is a host to say it to.
+    fn greet(&mut self, to: PeerId, peer: &mut impl Peer) {
+        if !self.greet {
+            return;
+        }
+        self.greet = false;
         let hello = encode(&Message::Hello {
             proto_version: PROTO_VERSION,
-            build_hash: build_hash.to_owned(),
+            build_hash: self.build_hash.clone(),
             name: String::new(),
         });
-        for p in peer.peers() {
-            peer.send(p, &hello, true);
-        }
-        ls
+        peer.send(to, &hello, true);
     }
 
     /// Host: begin the run.
@@ -204,7 +222,7 @@ impl Lockstep {
     fn drain(&mut self, peer: &mut impl Peer) {
         while let Some(ev) = peer.poll() {
             match ev {
-                Event::Peer(_) => {}
+                Event::Peer(who) => self.greet(who, peer),
                 Event::Left(who) => self.peer_left(who, peer),
                 Event::Error(text) => self.status = Status::Ended(text),
                 Event::Msg { from, bytes, .. } => match decode(&bytes) {

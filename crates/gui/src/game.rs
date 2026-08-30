@@ -21,10 +21,10 @@ pub struct Local {
 impl Local {
     pub fn new(seed: u64, players: u32, build: &str) -> Local {
         let net = Loopback::new(players, Conditions::default());
-        let mut peers: Vec<LoopbackPeer> = (0..players).map(|i| net.peer(PeerId(i))).collect();
+        let peers: Vec<LoopbackPeer> = (0..players).map(|i| net.peer(PeerId(i))).collect();
         let mut steps = vec![Lockstep::host(seed, players, build)];
-        for p in peers.iter_mut().skip(1) {
-            steps.push(Lockstep::join(build, p));
+        for _ in 1..players {
+            steps.push(Lockstep::join(build));
         }
         Local { net, peers, steps, me: 0 }
     }

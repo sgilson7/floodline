@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FLOODLINE — echo</title>
+<!--
+  Not linked from anywhere and not part of the game. Design 9.6: the browser
+  plugin is tested on a page that only connects, sends and receives, so a
+  networking regression and a lockstep regression can never be mistaken for one
+  another. This page drives `window.FLOODLINE_RTC` — the same functions the
+  wasm's imports call, not a copy of them — with no wasm, no `sim` and no
+  lockstep anywhere in the picture. If two tabs of this page can talk, the
+  transport works; if they can and the game still cannot, the fault is above
+  the transport.
+-->
+<style>
+  body { margin: 0; padding: 18px; background: #0d0d12; color: #d8dae8;
+         font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  h1 { font-size: 15px; letter-spacing: 4px; color: #78aadc; margin: 0 0 4px; }
+  .sub { color: #6a6a80; margin-bottom: 14px; }
+  fieldset { border: 1px solid #262633; margin: 0 0 12px; padding: 10px 12px; }
+  legend { color: #8a8aa0; padding: 0 6px; }
+  button { background: #1a1a24; color: #d8dae8; border: 1px solid #3a3a4c;
+           padding: 5px 10px; margin: 2px 2px 2px 0; cursor: pointer; font: inherit; }
+  button:hover { border-color: #78aadc; }
+  input, textarea { background: #12121a; color: #d8dae8; border: 1px solid #3a3a4c;
+                    font: inherit; padding: 4px 6px; }
+  textarea { width: 100%; height: 68px; box-sizing: border-box; resize: vertical; }
+  #stats { color: #9fd08a; white-space: pre; }
+  #log { height: 240px; overflow-y: auto; white-space: pre-wrap;
+         border: 1px solid #262633; padding: 8px; color: #a8a8c0; }
+  .err { color: #e08a7a; }
+  canvas { display: none; }
+</style>
+</head>
+<body>
+<h1>FLOODLINE ECHO</h1>
+<div class="sub">the transport, on its own — build <span id="build">?</span></div>
+
+<fieldset><legend>trystero</legend>
+  room <input id="room" value="echo-room" size="18">
+  <button id="host-room">Host</button>
+  <button id="join-room">Join</button>
+</fieldset>
+
+<fieldset><legend>pasted code</legend>
+  <button id="host-code">Host by code</button>
+  <button id="join-code">Join by code</button>
+  <div style="margin-top:8px">
+    yours (send this) — <span id="mine-len">0</span> characters
+    <textarea id="mine" readonly></textarea>
+  </div>
+  <div style="margin-top:8px">
+    theirs (paste here)
+    <textarea id="theirs"></textarea>
+    <button id="apply">Apply</button>
+  </div>
+</fieldset>
+
+<fieldset><legend>traffic</legend>
+  <button id="close">Close</button>
+  <div id="stats">no session</div>
+</fieldset>
+
+<div id="log"></div>
+
+<canvas id="glcanvas"></canvas>
+<script>window.FLOODLINE_BUILD = "__BUILD__";</script>
+<!-- macroquad's bundle assigns to this global under "use strict"; see index.html. -->
+<script>var register_plugin;</script>
+<script src="config.js"></script>
+<script src="mq_js_bundle.js"></script>
+<script src="sapp_jsutils.js"></script>
+<script src="quad_rtc.js"></script>
+<script>
+"use strict";
+// The same script set as the game, minus the one line that starts the wasm.
+// The plugin is loaded exactly as it is in production, which is the point:
+// stubbing `miniquad_add_plugin` here would test a different file.
+(function () {
+  const $ = id => document.getElementById(id);
+  const RTC = window.FLOODLINE_RTC;
+  $("build").textContent = window.FLOODLINE_BUILD;
+
+  // What a test reads instead of scraping the page.
+  const E = window.ECHO = {
+    peers: [], events: [], errors: [],
+    rtt: {reliable: null, unreliable: null},
+    got: {reliable: 0, unreliable: 0}, bytes: 0,
+    mine: null, running: false,
+  };
+
+  let seq = 0;
+  const sentAt = new Map();
+
+  function log(text, bad) {
+    E.events.push(text);
+    const line = document.createElement("div");
+    if (bad) line.className = "err";
+    line.textContent = new Date().toISOString().slice(11, 23) + "  " + text;
+    $("log").appendChild(line);
+    $("log").scrollTop = $("log").scrollHeight;
+  }
+
+  function start(fn, room, mode) {
+    E.peers = []; E.errors = []; E.bytes = 0;
+    E.got = {reliable: 0, unreliable: 0};
+    E.rtt = {reliable: null, unreliable: null};
+    E.mine = null; E.running = true;
+    $("mine").value = "";
+    fn(room, mode);
+    log((fn === RTC.host ? "host" : "join") +
+        (mode === 0 ? " by room '" + room + "'" : " by code"));
+  }
+
+  // The echo itself: every peer pings on both channels; whoever gets a ping
+  // sends it straight back on the channel it arrived on. Round trip and
+  // throughput both fall out of that, per channel, which is what tells the two
+  // channels apart when one of them is misconfigured.
+  function tick() {
+    const now = performance.now();
+    for (const id of E.peers) {
+      for (const reliable of [1, 0]) {
+        const n = ++seq;
+        sentAt.set(n, now);
+        RTC.send(id, reliable, frame(0x50, n)); // 'P'
+      }
+    }
+  }
+
+  function frame(tag, n) {
+    const b = new Uint8Array(5);
+    b[0] = tag;
+    new DataView(b.buffer).setUint32(1, n);
+    return b;
+  }
+
+  function drain() {
+    for (;;) {
+      const ev = RTC.poll();
+      if (!ev) break;
+      if (ev.k === 0) {
+        E.peers.push(ev.id);
+        log("peer " + ev.id + " connected");
+      } else if (ev.k === 1) {
+        E.peers = E.peers.filter(p => p !== ev.id);
+        log("peer " + ev.id + " left");
+      } else if (ev.k === 2) {
+        E.bytes += ev.bytes.length;
+        const kind = ev.reliable ? "reliable" : "unreliable";
+        E.got[kind]++;
+        const tag = ev.bytes[0];
+        const n = new DataView(ev.bytes.buffer, ev.bytes.byteOffset).getUint32(1);
+        if (tag === 0x50) {
+          RTC.send(ev.id, ev.reliable, frame(0x51, n)); // 'Q', the reply
+        } else if (tag === 0x51) {
+          const at = sentAt.get(n);
+          if (at !== undefined) {
+            sentAt.delete(n);
+            E.rtt[kind] = Math.round(performance.now() - at);
+          }
+        }
+      } else {
+        E.errors.push(ev.text);
+        log(ev.text, true);
+      }
+    }
+
+    const blob = RTC.codeLocal();
+    if (blob && blob !== E.mine) {
+      E.mine = blob;
+      $("mine").value = blob;
+      $("mine-len").textContent = blob.length;
+      log((blob[0] === "O" ? "invitation" : "reply") + " ready, " + blob.length + " characters");
+    }
+
+    $("stats").textContent =
+      "peers        " + (E.peers.length ? E.peers.join(", ") : "none") + "\n" +
+      "round trip   reliable " + (E.rtt.reliable === null ? "—" : E.rtt.reliable + " ms") +
+      "   unreliable " + (E.rtt.unreliable === null ? "—" : E.rtt.unreliable + " ms") + "\n" +
+      "messages     reliable " + E.got.reliable + "   unreliable " + E.got.unreliable + "\n" +
+      "bytes in     " + E.bytes;
+  }
+
+  $("host-room").onclick = () => start(RTC.host, $("room").value, 0);
+  $("join-room").onclick = () => start(RTC.join, $("room").value, 0);
+  $("host-code").onclick = () => start(RTC.host, "", 1);
+  $("join-code").onclick = () => start(RTC.join, "", 1);
+  $("apply").onclick = () => {
+    RTC.codeRemote($("theirs").value);
+    log("applied " + $("theirs").value.length + " characters");
+  };
+  $("close").onclick = () => { RTC.close(); E.running = false; E.peers = []; log("closed"); };
+
+  setInterval(drain, 50);
+  setInterval(tick, 500);
+})();
+</script>
+</body>
+</html>

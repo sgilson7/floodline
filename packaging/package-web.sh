@@ -48,6 +48,35 @@ JS_UTILS="$REGISTRY/sapp-jsutils-$JS_VERSION/js/sapp_jsutils.js"
 [ -f "$MQ_BUNDLE" ] || die "no mq_js_bundle.js for macroquad $MQ_VERSION at $MQ_BUNDLE"
 [ -f "$JS_UTILS" ]  || die "no sapp_jsutils.js for sapp-jsutils $JS_VERSION at $JS_UTILS"
 
+# Trystero is not a crate and cannot be pinned by the lockfile, so it is pinned
+# by hand: the file is committed under web/vendor/ and its hash is checked here
+# before anything ships. The same rule the two JS shims above get, applied to
+# the one dependency that arrived by curl. Updating it means a new file, a new
+# hash on this line, and a new row in web/vendor/README.md.
+check_pin() { # file, sha256
+  [ -f "$1" ] || die "missing vendored file $1 — see web/vendor/README.md"
+  have=$(sha256 < "$1" | cut -d' ' -f1)
+  [ "$have" = "$2" ] || die "$1 is not the pinned copy
+    expected $2
+    found    $have
+  Either it was edited (do not edit vendored files) or it was replaced without
+  updating the pin here and in web/vendor/README.md."
+}
+check_pin "$ROOT/web/vendor/trystero-nostr-0.25.4.js" \
+  6bfce15d72a64384cc66c2693917994e1b900f4f98c9b7a2d54e4e86f5202906
+check_pin "$ROOT/web/vendor/trystero-torrent-0.25.4.js" \
+  93ed42a50b03b0deaf6d3ee278971416e1f28e5f3bc3bd50233da0ba152558f0
+
+# A vendored bundle that imports anything is a bundle that phones home at load
+# time, which would mean the game stops working the day somebody else's CDN
+# does. Both were checked for this when they were vendored; check it again,
+# because it is one grep and the failure is silent and total.
+for f in "$ROOT"/web/vendor/*.js; do
+  if grep -qE '(^|[^A-Za-z_$.])(import|from) *["(]' "$f"; then
+    die "$(basename "$f") has an import in it — vendored bundles must be self-contained"
+  fi
+done
+
 say "Assembling $WEB"
 rm -rf "$WEB"; mkdir -p "$WEB"
 cp -R "$ROOT/web/." "$WEB/"
@@ -70,6 +99,9 @@ say "Stamping build id"
 BUILD=$(sha256 < "$WEB/$OUT.wasm" | cut -c1-12)
 bust "$WEB/index.html" "load(\"$OUT.wasm\")" "load(\"$OUT.wasm?v=$BUILD\")"
 bust "$WEB/index.html" '__BUILD__'           "$BUILD"
+# echo.html is not linked from anywhere and is not the game (design 9.6), but
+# it has to be stamped too or it hosts its rooms under the name "__BUILD__".
+bust "$WEB/echo.html"  '__BUILD__'           "$BUILD"
 
 # Fail loudly rather than shipping a page that silently serves a stale wasm or
 # tells every peer its build is called "__BUILD__".

@@ -37,10 +37,10 @@ struct Game {
 impl Game {
     fn new(n: u32, conditions: Conditions) -> Game {
         let net = Loopback::new(n, conditions);
-        let mut peers: Vec<LoopbackPeer> = (0..n).map(|i| net.peer(PeerId(i))).collect();
+        let peers: Vec<LoopbackPeer> = (0..n).map(|i| net.peer(PeerId(i))).collect();
         let mut steps = vec![Lockstep::host(31, n, BUILD)];
-        for p in peers.iter_mut().skip(1) {
-            steps.push(Lockstep::join(BUILD, p));
+        for _ in 1..n {
+            steps.push(Lockstep::join(BUILD));
         }
         let history = vec![BTreeMap::new(); n as usize];
         let mut g = Game { net, peers, steps, history };
@@ -358,8 +358,8 @@ fn a_late_joiner_catches_up_from_a_snapshot() {
     // has already been made — the map's hearth sites were placed for a
     // particular number of players.
     let mut steps = vec![Lockstep::host(31, 4, BUILD)];
-    for p in peers.iter_mut().take(3).skip(1) {
-        steps.push(Lockstep::join(BUILD, p));
+    for _ in 1..3 {
+        steps.push(Lockstep::join(BUILD));
     }
 
     let run = |steps: &mut Vec<Lockstep>, peers: &mut Vec<LoopbackPeer>, n: u32| {
@@ -376,7 +376,7 @@ fn a_late_joiner_catches_up_from_a_snapshot() {
     assert!(steps[0].tick() > 0, "the game never started");
 
     // The fourth arrives.
-    let joiner = Lockstep::join(BUILD, &mut peers[3]);
+    let joiner = Lockstep::join(BUILD);
     steps.push(joiner);
     run(&mut steps, &mut peers, 120);
 
@@ -419,7 +419,7 @@ fn a_different_build_is_refused_with_a_reason() {
     let net = Loopback::new(2, Conditions::default());
     let mut peers: Vec<LoopbackPeer> = (0..2).map(|i| net.peer(PeerId(i))).collect();
     let mut host = Lockstep::host(31, 2, BUILD);
-    let mut joiner = Lockstep::join("a-different-build", &mut peers[1]);
+    let mut joiner = Lockstep::join("a-different-build");
 
     for _ in 0..20 {
         host.advance(&mut peers[0]);
@@ -533,4 +533,69 @@ fn an_unreliable_channel_that_loses_messages_changes_nothing() {
     g.run_to_tick(400);
     assert!(g.disagreements().is_empty(), "loss desynced the game");
     assert!(g.steps[0].tick() >= 400, "the game stalled");
+}
+
+/// A transport where nobody is there yet — which is every real one.
+///
+/// `Loopback` hands a peer its `Event::Peer`s before the first poll, because in
+/// one process everybody exists at once. A browser does not: `Lockstep::join`
+/// runs while ICE is still gathering and `peers()` is empty for seconds after.
+/// This is the smallest transport that behaves that way, and it exists because
+/// the first version of `join` said `Hello` to `peer.peers()` at construction
+/// and would have said it to nobody.
+struct LateHost {
+    inbox: std::collections::VecDeque<net::Event>,
+    sent: Vec<(PeerId, Vec<u8>)>,
+    connected: Vec<PeerId>,
+}
+
+impl net::Peer for LateHost {
+    fn poll(&mut self) -> Option<net::Event> {
+        self.inbox.pop_front()
+    }
+    fn send(&mut self, to: PeerId, bytes: &[u8], _reliable: bool) {
+        self.sent.push((to, bytes.to_vec()));
+    }
+    fn peers(&self) -> Vec<PeerId> {
+        self.connected.clone()
+    }
+    fn is_host(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn a_joiner_says_hello_when_the_host_appears_and_not_before() {
+    let mut wire = LateHost {
+        inbox: std::collections::VecDeque::new(),
+        sent: Vec::new(),
+        connected: Vec::new(),
+    };
+    let mut joiner = Lockstep::join(BUILD);
+
+    // Seconds of frames with no connection yet.
+    for _ in 0..120 {
+        joiner.advance(&mut wire);
+    }
+    assert!(wire.sent.is_empty(), "something was sent before there was anybody to send it to");
+
+    // The connection completes.
+    wire.connected.push(HOST);
+    wire.inbox.push_back(net::Event::Peer(HOST));
+    joiner.advance(&mut wire);
+
+    assert_eq!(wire.sent.len(), 1, "the host was greeted {} times", wire.sent.len());
+    let (to, bytes) = &wire.sent[0];
+    assert_eq!(*to, HOST);
+    match net::wire::decode(bytes) {
+        Some(net::Message::Hello { build_hash, .. }) => assert_eq!(build_hash, BUILD),
+        other => panic!("the first thing a joiner says should be Hello, not {other:?}"),
+    }
+
+    // And exactly once, however many more peers the transport reports.
+    wire.inbox.push_back(net::Event::Peer(PeerId(9)));
+    for _ in 0..10 {
+        joiner.advance(&mut wire);
+    }
+    assert_eq!(wire.sent.len(), 1, "Hello was said more than once");
 }

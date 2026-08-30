@@ -795,3 +795,234 @@ checked at a device pixel ratio of one, where the two coordinate systems are
 the same size and the bug does not exist. It is invisible from a desktop and
 unmissable on a laptop. Anything touching the letterbox gets looked at under
 both from now on, which `packaging/` cannot enforce but a person can.
+
+---
+
+## 2026-08-30 — The handshake, written down before the plugin
+
+The plan (phase 4 item 5) and `HANDOFF.md` both say to write the exact sequence
+of events down before writing `web/quad_rtc.js`, and to implement to what was
+written. This is that. Where reality later disagreed with it the paragraph says
+so rather than being quietly edited, because the disagreement is the useful
+part.
+
+Notation: `H` is the host, `A` and `B` joiners. "our channels" are the two
+`RTCDataChannel`s the plugin owns, distinct from anything Trystero opens for
+its own use.
+
+### Both paths share the channels, and they are negotiated
+
+Each connection carries exactly two channels, created **out of band** —
+`{negotiated: true, id: 40, ordered: true}` and `{negotiated: true, id: 41,
+ordered: false, maxRetransmits: 0}` — by *both* ends independently.
+
+Out-of-band is not a detail. The in-band alternative is one side calling
+`createDataChannel` and the other waiting for `ondatachannel`, and on the
+Trystero path there is a race in it that cannot be closed: the plugin does not
+get its hands on the `RTCPeerConnection` until `onPeerJoin` fires, both ends'
+`onPeerJoin` fire at about the same moment, and if the host creates its channel
+before the joiner has attached a listener the event is gone. Negotiated
+channels have no event and therefore no race — both ends name the same stream
+ids and the channels simply open. It also makes the two paths identical from
+the channel down, so the only thing the Trystero path adds is where the
+`RTCPeerConnection` came from.
+
+40 and 41 rather than 0 and 1 because Trystero opens its own in-band channel
+(`createDataChannel("data")`, seen in the vendored bundle) and in-band ids are
+allocated from 0 upwards; twenty channels would have to open before anything
+reached 40. Trystero also assigns `pc.ondatachannel` directly rather than
+adding a listener, which is a second reason not to want that event.
+
+### The role frame, and why the star is enforced rather than assumed
+
+Trystero rooms are meshes: every peer meets every other. The star wants joiners
+to talk only to the host. Design §9.2 proposes that "joiners accept only the
+first peer (the host) and ignore others", and first-is-the-host is a guess —
+two joiners arriving together may well meet each other before either meets `H`.
+
+So the first message on the reliable channel, sent by both ends the moment it
+opens, is a single byte: `0x48` (`H`) from a host, `0x4A` (`J`) from a joiner.
+The plugin consumes it; Rust never sees it. A host that reads `J` has a joiner
+and reports it. A joiner that reads `H` has found the host. A joiner that reads
+`J` has met another joiner, closes its two channels and reports nothing —
+leaving Trystero's own connection alone, because that one is Trystero's to
+manage. One byte per connection buys an invariant instead of a hope.
+
+### Trystero path, in order
+
+1. `rtc_host(room, 0)`. The plugin dynamically imports the vendored bundle
+   named by `config.js`, so a player who only ever uses pasted codes never
+   downloads it, and a failed import is a message that says "try Join by code"
+   rather than a page that does not work.
+2. `joinRoom({appId, password, rtcConfig}, "<build_hash>-<room>")`. Nothing is
+   on the wire until a relay socket opens. The build hash is in the room name
+   (design §9.4) so a stale tab cannot find a newer build's game.
+3. `A` does the same. Trystero introduces them over the relays and does the
+   SDP exchange itself; the plugin never sees an offer on this path.
+4. `room.onPeerJoin(id)` fires at both ends. It means Trystero's own channel is
+   open, which means the SCTP association exists, which is exactly the
+   precondition for opening a negotiated channel with no renegotiation.
+   The plugin takes `room.getPeers()[id]` — a real `RTCPeerConnection`, and
+   documented API, not an internal — and creates channels 40 and 41 on it.
+5. Both channels open. Each end sends its role byte on 40.
+6. `H` reads `J` and emits `peer(1)` to Rust; `A` reads `H` and emits
+   `peer(1)`. The two ends number their peers independently and neither cares
+   what the other calls anybody: `PeerId` is local to a transport, which is
+   why `net::PeerId` and `sim::PlayerId` were kept apart in phase 3.
+7. Bytes flow. Channel 40 arrives as `reliable = 1`, channel 41 as `0`.
+8. `B` joins. `H` emits `peer(2)`. `A` and `B` also meet, exchange `J` for `J`,
+   close their channels and tell Rust nothing. This is the step that would
+   otherwise have gone wrong quietly and only with three players.
+9. `A` closes its tab. `room.onPeerLeave(A)` at `H` → `left(1)`. `B` had no id
+   for `A` and emits nothing.
+10. `H` closes its tab. `A` gets `onPeerLeave` → `left(1)`, and the lockstep
+    already knows what to do with that: "the host left the game".
+
+### Pasted-code path, in order
+
+1. `rtc_host(room, 1)`. The plugin builds its own `RTCPeerConnection` from
+   `config.js`'s ICE servers, creates channels 40 and 41, `createOffer`,
+   `setLocalDescription`, and then **waits for `iceGatheringState` to reach
+   `complete`**. No trickle: there is no second channel to deliver a late
+   candidate on, so the blob has to be the whole thing.
+2. `rtc_code_local()` returns `null` until gathering finishes and the
+   compressed blob after. The lobby shows it; the player sends it over whatever
+   chat they are already using.
+3. `A`: `rtc_join(room, 1)` and then `rtc_code_remote(blob)` when the player
+   pastes. The plugin decompresses, builds its connection, creates channels 40
+   and 41, `setRemoteDescription(offer)`, `createAnswer`,
+   `setLocalDescription`, waits for gathering, and `rtc_code_local()` then
+   returns the answer blob.
+4. `H`: `rtc_code_remote(answer)` → `setRemoteDescription`. DTLS and SCTP come
+   up, both channels open, role bytes cross, both ends emit `peer`.
+5. `H` immediately starts gathering a *fresh* offer for the next joiner, so
+   `rtc_code_local()` goes non-null again with a different blob. One paste per
+   joiner and no mesh to arrange: that is what the star bought.
+6. Leaving has no signalling channel to announce itself on, so it is read from
+   the connection: `connectionstatechange` reaching `failed` or `closed`, or
+   either channel closing, is a `left`. Only for peers that were reported as
+   `peer` in the first place — otherwise closing our own channels on a
+   joiner-to-joiner link would report a departure that never happened.
+
+### What Rust is told
+
+`rtc_poll()` returns one event or null:
+
+```
+{k: 0, id}                        a peer is usable
+{k: 1, id}                        it is gone
+{k: 2, id, reliable, bytes}       bytes arrived
+{k: 3, text}                      something a person should read
+```
+
+Design §9.2 writes `kind` as a string (`{kind:"peer", id}`). It is a small
+integer here because the field is read on every event, sixty times a second per
+peer, and reading a string across `sapp-jsutils` costs a UTF-8 conversion and
+an allocation on each side. Nothing else about the shape changed.
+
+`rtc_send(peer, reliable, bytes)` takes the bytes as a `JsObject` buffer rather
+than design §9.2's `(ptr, len)`. Reading the wasm heap directly from the plugin
+would save one copy of a few hundred bytes and would need the plugin to reach
+for miniquad's `wasm_memory` global; the copy is not worth the coupling.
+
+---
+
+## 2026-08-30 — Vendoring Trystero without npm, and why Nostr and BitTorrent
+
+`web/vendor/` holds two files, pinned by name and sha256 in
+`web/vendor/README.md` and checked by `packaging/package-web.sh` before it will
+package anything:
+
+| file | version | sha256 |
+|---|---|---|
+| `trystero-nostr-0.25.4.js` | 0.25.4 | `6bfce15d…202906` |
+| `trystero-torrent-0.25.4.js` | 0.25.4 | `93ed42a5…2558f0` |
+
+**Getting a browser-ready file at all took a decision.** Trystero on npm is
+source, not a bundle: 0.25's `trystero` package is a shim that re-exports
+`@trystero-p2p/<strategy>`, and every strategy imports bare specifiers
+(`@trystero-p2p/core`, `@noble/secp256k1`, `mqtt`) that no browser resolves. A
+`<script>` tag needs one self-contained file, and the rule is no npm at build
+time — which leaves fetching a pre-bundled build once, by hand, and committing
+it. jsDelivr's `/+esm` was the obvious source and is not usable: it splits into
+chunks that import each other by absolute CDN path, so the vendored copy would
+still phone home at load time and the game would stop working the day jsDelivr
+did. esm.sh's `…/es2022/<name>.bundle.mjs` is a single file with no imports at
+all, which is the property that matters. Both files were checked for that —
+`grep -c 'from *"'` is zero on each — and hashed.
+
+**Nostr is the default and BitTorrent is the alternative; MQTT is not shipped.**
+The plan says to try MQTT if Nostr is slow. Its bundle is 418 KB against
+Nostr's 61 KB and BitTorrent's 52 KB — most of it an MQTT client this game
+would use for one handshake — and 418 KB is most of the wasm again for a
+fallback that may never be used. BitTorrent covers the same failure (Nostr
+relays unreachable or slow from one end) at a tenth the size, and the real
+last-resort fallback is the pasted code, which needs nobody's relays. If both
+strategies turn out to be unreachable from a real network the answer is a line
+in `config.js`, not a rebuild: `strategy` names one of the two files, and
+`web/` is copied wholesale into `dist/web/`.
+
+**They are loaded on demand, not with a script tag.** Design §9.1 says a plain
+script tag. `import()` from inside the plugin instead, because it makes the
+choice of strategy a config value rather than a build-time constant, keeps a
+player who only uses pasted codes from downloading 61 KB they will not run, and
+turns "the signalling library did not load" into a caught rejection the lobby
+can put on screen — which is exactly the failure phase 6 wants to have a
+sentence for.
+
+---
+
+## 2026-08-30 — What phase 4 measured, and the two places reality disagreed
+
+Everything below is a number a browser produced, not one that looked
+reasonable. `make browser-test` re-runs all of it.
+
+**Join times, headless Chromium, two and three tabs.** Nostr introduced a
+joiner to a host in **0.3–0.8 s**; BitTorrent trackers in **1.0–1.1 s**. Both
+are far inside anything a lobby needs, so Nostr stays the default on nothing
+stronger than being first in the design — if a real pair of home networks
+disagrees, `config.js` names the other file and neither end rebuilds.
+
+**The pasted blob is 292–369 characters.** Design §9.2 asked for under 600 and
+suggested stripping inferable SDP lines *and* deflating. Stripping first turned
+out to matter more than the compression: a full data-channel offer is about
+1 400 characters, of which the eight kinds of line that say anything are about
+600, and `deflate-raw` plus base64url takes those to ~350. Dropping Chrome's
+TCP host candidates is worth about a third of the candidate lines on its own,
+and they are no use without a TCP relay at the other end. It fits in a chat
+message with room to spare, which was the actual requirement.
+
+**Round trip reads as ~50 ms between two tabs on one machine, and that number
+is the harness.** `echo.html` drains its queue on a 50 ms interval, so a reply
+waits up to 50 ms at each end before anyone looks at it. The wire is
+sub-millisecond here. Recorded because a future session will otherwise read
+"50 ms on loopback" as a problem.
+
+**Two places where writing the sequence down first was not enough.**
+
+*A closed tab took sixteen seconds to notice.* The pasted-code path has no
+signalling channel to announce a departure on, so the first version left it to
+`connectionstatechange`, and measured 16.1 s — ICE consent freshness expiring.
+That is inside the lockstep's thirty-second patience and outside the ten
+seconds the plan asks for. A `pagehide` listener that closes the connections
+puts an SCTP shutdown on the wire and the other end sees it in **0.3 s**. The
+slow path is still there and is still the one that matters for a crash, a
+killed process or a pulled cable — none of which get to run any code.
+
+*Closing Trystero's connections is rude, and it says so.* The same `pagehide`
+handler called `pc.close()` on every link, including the ones Trystero owns,
+and the *other* tab's console filled with `Trystero peer error: OperationError:
+User-Initiated Abort`. A real error message about nothing, on the page of the
+peer that did nothing, in the phase whose whole job is reading consoles.
+A link now records whether the plugin built the connection or was handed one,
+and only closes what it made; the two channels are always ours to close and
+`room.leave()` does the rest. Zero console errors on either side now, which is
+the state phase 4 has to be able to trust.
+
+**And one place it was exactly enough.** The star. Design §9.2 says a joiner
+should "accept only the first peer (the host) and ignore others"; the sequence
+written down before the code said that was a guess and used a role byte
+instead. In the three-tab run, the second joiner's host is peer **id 2** — it
+met the other joiner first, ignored it, and took the host when it arrived.
+First-is-the-host would have wired two joiners together and left the host
+waiting, and it would have happened only with three players and only sometimes.
