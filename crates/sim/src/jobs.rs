@@ -55,6 +55,11 @@ impl World {
             if self.citizens[i].busy() {
                 continue;
             }
+            // Told to stand somewhere and not yet told otherwise. See
+            // `Citizen::held`.
+            if self.citizens[i].held {
+                continue;
+            }
             self.find_work(i);
         }
     }
@@ -156,6 +161,11 @@ impl World {
     }
 
     /// Give citizen `i` something to do.
+    ///
+    /// The order is: your own job if you have one, then carrying, then
+    /// building. Carrying before building because a site with nothing
+    /// delivered cannot be built and a builder standing at one is a citizen
+    /// doing nothing.
     fn find_work(&mut self, i: usize) {
         match self.citizens[i].job {
             Some(Job::Farmer) | Some(Job::Builder) => {
@@ -169,11 +179,80 @@ impl World {
                     self.citizens[i].workplace = None;
                     self.citizens[i].job = None;
                 }
-                self.find_haul(i);
+                // Design §3.2 says a Builder "walks to construction sites",
+                // plural. One whose site is finished looks for the next before
+                // it falls back to carrying, or every building in the city
+                // would cost the player another round of clicks.
+                if self.citizens[i].job == Some(Job::Builder) && self.take_a_site(i) {
+                    return;
+                }
+                if !self.find_haul(i) {
+                    self.take_a_site(i);
+                }
             }
-            // Design §3.2: hauling is what an unassigned citizen does.
-            None | Some(Job::Hauler) => self.find_haul(i),
+            // Design §3.2: hauling is what an unassigned citizen does — and
+            // when there is nothing to carry, so is building.
+            //
+            // The second half of that is not in the design and is here because
+            // of what a measurement showed. A city that places a farm sees its
+            // haulers deliver the wood and stone and then stop: the site sits
+            // full and finished-looking, nothing ever builds it, the granary
+            // never exists, and since a citizen can only eat at a granary the
+            // whole city starves on day four with the materials on the ground.
+            // The fix by the book is "assign builders to the site", the gesture
+            // exists, and nothing whatsoever tells a player that it is needed.
+            // A trap that silent, that early and that fatal is not difficulty.
+            //
+            // Assignment still matters and still does the same thing: an
+            // assigned builder goes to *its* site and stays until it is done,
+            // and `BUILDER_SLOTS` caps how many can work on one at once. What
+            // this buys is that an unattended city builds slowly instead of
+            // dying, which is the difference between a game a stranger can
+            // learn and one they have to be told.
+            None | Some(Job::Hauler) => {
+                if !self.find_haul(i) {
+                    self.take_a_site(i);
+                }
+            }
         }
+    }
+
+    /// The nearest of this owner's sites with a builder's slot free and
+    /// something to do, taken for one building's worth of work.
+    ///
+    /// Not an `Assign`: the citizen's `job` is untouched, so a hauler that
+    /// lends a hand goes back to hauling the moment the site is finished, and
+    /// nothing about the player's roster changes behind their back.
+    fn take_a_site(&mut self, i: usize) -> bool {
+        let owner = self.citizens[i].owner;
+        let (x, y) = self.citizens[i].pos.cell();
+        let mut sites: Vec<(i32, BuildingId)> = self
+            .buildings
+            .iter()
+            .filter(|b| b.owner == owner && b.state == BuildState::Site)
+            // Materials first: a site still waiting for wood cannot be built,
+            // and standing at one is worse than carrying the wood to it.
+            .filter(|b| b.outstanding().is_empty())
+            .filter(|b| {
+                self.citizens
+                    .iter()
+                    .filter(|c| c.alive() && c.workplace == Some(b.id))
+                    .count()
+                    < BUILDER_SLOTS
+            })
+            .map(|b| {
+                let (bx, by) = b.centre();
+                ((bx - x).abs() + (by - y).abs(), b.id)
+            })
+            .collect();
+        sites.sort_unstable();
+        let Some(&(_, id)) = sites.first() else {
+            return false;
+        };
+        self.citizens[i].workplace = Some(id);
+        self.citizens[i].errand = Some(Errand::ToWork(id));
+        self.citizens[i].walk_to(Dest::Building(id));
+        true
     }
 
     /// The next load worth moving, if there is one.
@@ -183,7 +262,7 @@ impl World {
     /// so would a city whose farms back up because every hauler is on a
     /// building site — which is why a full farm counts as construction's equal
     /// rather than being checked only when nothing is being built.
-    fn find_haul(&mut self, i: usize) {
+    fn find_haul(&mut self, i: usize) -> bool {
         let owner = self.citizens[i].owner;
         let (x, y) = self.citizens[i].pos.cell();
 
@@ -199,19 +278,21 @@ impl World {
             if let Some(to) = self.somewhere_for(owner, &self.citizens[i].carrying.clone(), x, y) {
                 self.citizens[i].errand = Some(Errand::Carry { to });
                 self.citizens[i].walk_to(Dest::Building(to));
-                return;
+                return true;
             }
         }
 
         if let Some((from, good, to)) = self.next_supply_run(owner, x, y) {
             self.citizens[i].errand = Some(Errand::Collect { from, good, to });
             self.citizens[i].walk_to(Dest::Building(from));
-            return;
+            return true;
         }
         if let Some((from, good, to)) = self.next_collection(owner, x, y) {
             self.citizens[i].errand = Some(Errand::Collect { from, good, to });
             self.citizens[i].walk_to(Dest::Building(from));
+            return true;
         }
+        false
     }
 
     /// Somewhere that will take what this citizen is holding: a site that
@@ -392,7 +473,11 @@ impl World {
         let job = self.citizens[i].job;
 
         match (job, b.state) {
-            (Some(Job::Builder), BuildState::Site) => {
+            // Any job at all, at a site. A Builder was assigned here; a hauler
+            // walked over because there was nothing to carry and `take_a_site`
+            // sent it. The work is the same work, and `build_at` is the only
+            // thing that turns delivered materials into a building.
+            (_, BuildState::Site) => {
                 // Half effort when exhausted, like walking.
                 let effort =
                     if self.citizens[i].tired() { BUILDER_EFFORT.max(2) / 2 } else { BUILDER_EFFORT };

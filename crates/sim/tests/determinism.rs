@@ -531,7 +531,7 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
     // be made while there is one.
     let mut w = World::new(31, 2);
     let mut nav = Nav::new();
-    let mut mid = None;
+    let (mut early, mut mid) = (None, None);
     for t in 0..1500u32 {
         let now: Vec<(PlayerId, Command)> = script
             .iter()
@@ -539,17 +539,33 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
             .map(|(_, p, l)| (*p, Command::parse(l).unwrap()))
             .collect();
         w.tick(&mut nav, &now);
+        if t == 20 {
+            early = Some(w.clone());
+        }
         if t == 400 {
             mid = Some(w.clone());
         }
     }
 
+    // A site wants builders whatever it is going to become. #0 and #1 were
+    // assigned to the dike at tick 3, while it was a hole in the ground.
+    let early = early.unwrap();
+    assert_eq!(early.citizens[0].job, Some(Job::Builder), "a site did not want a builder");
+    assert_eq!(early.citizens[0].workplace, Some(dike));
+
     let mid = mid.unwrap();
     assert_eq!(mid.population(PlayerId(0)), FOUNDING_CITIZENS, "somebody died early");
-    // A site wants builders whatever it is going to become, so assigning to
-    // the unbuilt farm made builders rather than farmers. The rule working.
+    // #6 and #7 were assigned to the farm at tick 300 and are *farmers*, which
+    // is a change: this assertion used to read `Builder`, on the grounds that
+    // the farm was still a site three hundred ticks after it was placed. It
+    // was, and that was the bug — nothing in the city ever built anything
+    // nobody had been explicitly assigned to, so the farm stood as a heap of
+    // delivered wood for the whole run. Now a citizen with nothing to carry
+    // picks up a shovel, the farm is finished long before tick 300, and
+    // assigning to a standing farm makes farmers. The rule is unchanged; the
+    // world it is being applied to finally has a farm in it.
     assert_eq!(mid.citizens[6].workplace, Some(farm), "the assignment did not take");
-    assert_eq!(mid.citizens[6].job, Some(Job::Builder));
+    assert_eq!(mid.citizens[6].job, Some(Job::Farmer));
     assert_eq!(mid.citizens[7].job, None, "#7 was unassigned again");
     assert_eq!(mid.citizens[2].job, None, "#2 was unassigned");
     assert!(mid.pings.is_empty(), "pings from tick 6 were never pruned");

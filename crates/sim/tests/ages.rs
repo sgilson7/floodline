@@ -29,12 +29,23 @@ fn immortal(seed: u64) -> World {
     w
 }
 
-/// Keep everybody fed, so the run lasts as long as the ages do.
+/// Keep everybody fed and out of the water, so the run lasts as long as the
+/// ages do.
+///
+/// The drying is new, and it is the map generator's doing. Hearth sites used
+/// to sit on a ring around the map centre, which on most seeds is beyond
+/// anything an age-one flood can reach; they now sit on a line at a fixed
+/// distance from the corner the water comes out of, in the flood's way on
+/// purpose (see `balance::SHORE_DISTANCE`). So a world left running for three
+/// ages now drowns, which is the flood working and is a different test's
+/// subject. This file is about ages turning over and a run ending, and it
+/// needs a city that lasts to the end for either question to have an answer.
 fn feed(w: &mut World) {
     for c in &mut w.citizens {
         if c.alive() {
             c.food = NEED_FULL;
             c.rest = NEED_FULL;
+            c.drowning_for = 0;
         }
     }
 }

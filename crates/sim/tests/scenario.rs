@@ -196,9 +196,25 @@ fn two_cities_found_a_road_and_trade_for_three_days() {
         "city 1 received no food at all: {before_1:?} -> {after_1:?}"
     );
 
-    // And both cities are still alive, which is the whole point of trading.
-    assert_eq!(w.population(PlayerId(0)), FOUNDING_CITIZENS);
-    assert_eq!(w.population(PlayerId(1)), FOUNDING_CITIZENS);
+    // And both cities came through, which is the whole point of trading.
+    //
+    // "Came through" and not "lost nobody", which is what this said until the
+    // map generator moved the hearth sites onto a line at a fixed distance
+    // from the corner the water comes out of (see `balance::SHORE_DISTANCE`).
+    // Founding, joining and three days of trade take the world past the
+    // age-one impact day, so this scenario now runs through a flood that it
+    // used to sit comfortably clear of, and one of city 1's haulers drowned
+    // out on the shore. That is the flood working: nobody built a dike here
+    // and nobody was told to go uphill. Losing more than a couple would mean
+    // something else.
+    for p in [PlayerId(0), PlayerId(1)] {
+        let alive = w.population(p);
+        assert!(
+            alive + 2 >= FOUNDING_CITIZENS,
+            "city {} came out of the flood with {alive} of {FOUNDING_CITIZENS}",
+            p.0
+        );
+    }
 }
 
 #[test]

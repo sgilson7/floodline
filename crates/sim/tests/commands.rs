@@ -426,3 +426,113 @@ fn every_refusal_says_something_a_player_can_read() {
     }).unwrap_err();
     assert_eq!(err.to_message(), "one hearth to a city");
 }
+
+#[test]
+fn people_told_to_go_somewhere_stay_there() {
+    // Design §3.2 calls "get uphill" the one order that matters during a
+    // flood, and it did not work: a citizen that reached where it was sent
+    // arrived with nothing to do, `find_work` gave it something, and it walked
+    // back to the farm it had been told to leave — inside a tick, and a day
+    // before the water came. The order stands until the player says otherwise.
+    use sim::building::Kind;
+    use sim::nav::Nav;
+    use sim::{Command, PlayerId, World};
+
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+    let me = PlayerId(0);
+    let (hx, hy) = w.map.hearth_sites[0];
+
+    // Somewhere to work, so there is something to be pulled back to.
+    'found: for r in 3..30i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (x, y) = (hx + dx, hy + dy);
+                if w.can_place(me, Kind::Granary, x, y).is_ok() {
+                    w.apply(me, &Command::Place { kind: Kind::Granary, x: x as u8, y: y as u8 })
+                        .unwrap();
+                    break 'found;
+                }
+            }
+        }
+    }
+
+    let mine: Vec<sim::CitizenId> =
+        w.citizens.iter().filter(|c| c.owner == me).map(|c| c.id).collect();
+    // Somewhere they can actually stand, about fifteen cells off, and nowhere
+    // any errand would take them.
+    let far = {
+        let mut found = None;
+        'ring: for r in 14..24i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (x, y) = (hx + dx, hy + dy);
+                    // Off the edges: a flow field seeded in the last column
+                    // does not always reach a citizen standing in it, which is
+                    // a fact about the map's border and not about the order.
+                    if x < 6 || y < 6 || x > 121 || y > 121 {
+                        continue;
+                    }
+                    if w.map.buildable(x, y) && w.building_at(x, y).is_none() {
+                        found = Some((x as u8, y as u8));
+                        break 'ring;
+                    }
+                }
+            }
+        }
+        found.expect("nowhere within twenty cells of the hearth to stand")
+    };
+    w.apply(me, &Command::MoveTo { citizens: mine.clone(), x: far.0, y: far.1 }).unwrap();
+
+    // Where they settle, and then that they stay settled. Asserted as "they
+    // stopped moving" rather than "they reached that exact cell" because the
+    // cell picked above may be rock or shallows, and a flow field cannot take
+    // anybody to a cell nobody can stand on — which is a fact about the map
+    // and not about the order.
+    for _ in 0..600 {
+        w.tick(&mut nav, &[]);
+    }
+    let settled: Vec<(i32, i32)> = mine.iter().map(|id| w.citizens[id.0 as usize].pos.cell()).collect();
+    for _ in 0..600 {
+        w.tick(&mut nav, &[]);
+    }
+    for (n, id) in mine.iter().enumerate() {
+        let c = &w.citizens[id.0 as usize];
+        let (x, y) = c.pos.cell();
+        let d = (x - settled[n].0).abs() + (y - settled[n].1).abs();
+        assert!(
+            d <= 1,
+            "#{} was sent somewhere and then wandered {d} cells away again: \
+             job {:?} errand {:?}",
+            id.0,
+            c.job,
+            c.errand
+        );
+        assert!(c.held, "#{} is no longer holding its ground", id.0);
+        // And they went at least somewhere: the order was carried out.
+        assert!(
+            (x - hx).abs() + (y - hy).abs() > 6,
+            "#{} never left the hearth",
+            id.0
+        );
+    }
+
+    // And "back to hauling" releases them.
+    w.apply(me, &Command::Unassign { citizens: mine.clone() }).unwrap();
+    assert!(w.citizens[mine[0].0 as usize].held == false);
+    for _ in 0..400 {
+        w.tick(&mut nav, &[]);
+    }
+    let moved = mine.iter().enumerate().any(|(n, id)| {
+        let c = &w.citizens[id.0 as usize];
+        let (x, y) = c.pos.cell();
+        (x - settled[n].0).abs() + (y - settled[n].1).abs() > 4
+    });
+    assert!(moved, "nobody went back to work after being released");
+}

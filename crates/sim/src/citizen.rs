@@ -102,6 +102,19 @@ pub struct Citizen {
     pub starved_for: u32,
     /// Ticks spent out of your depth. Resets the moment you find footing.
     pub drowning_for: u32,
+    /// Told to go somewhere and stay there, and not yet told otherwise.
+    ///
+    /// Design §3.2 calls "get uphill" the one order that matters during a
+    /// flood, and without this it does not work: a citizen that walked to
+    /// where it was sent arrived with no errand, `find_work` gave it one, and
+    /// it turned round and went back to the farm it had been told to leave —
+    /// within a tick, and a day before the water came. Held citizens are not
+    /// given work until the player says so, which is what `Unassign` (the
+    /// panel's "back to hauling") and `Assign` are for. Hunger and exhaustion
+    /// still overrule it, because a body overruling an order is the rule
+    /// everywhere else in this file and a held citizen that starved standing
+    /// on a hill would be a worse bug than the one this fixes.
+    pub held: bool,
     /// Carried by the water rather than walking: too deep to stand up in.
     pub swept: bool,
 }
@@ -125,6 +138,7 @@ impl Citizen {
             dest: None,
             starved_for: 0,
             drowning_for: 0,
+            held: false,
             swept: false,
         }
     }

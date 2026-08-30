@@ -305,3 +305,121 @@ fn a_city_that_loses_its_granary_stops_eating_there() {
         "somebody is still walking to a granary that is not there"
     );
 }
+
+#[test]
+fn a_city_left_alone_builds_what_it_was_told_to_build() {
+    // The trap this exists to stop, found by playing a full run rather than by
+    // any test: place a farm and a granary, assign nobody, and the haulers
+    // deliver the wood and stone and then stop. The sites sit full and
+    // finished-looking, nothing ever builds them, so there is never a granary
+    // — and a citizen can only eat at a granary, so the whole city starves on
+    // day four with the materials lying on the ground. The gesture that fixes
+    // it (select citizens, right-click the site) exists and works, and nothing
+    // anywhere tells a player it is needed.
+    use sim::building::{BuildState, Kind};
+    use sim::command::Command;
+    use sim::nav::Nav;
+    use sim::world::World;
+    use sim::PlayerId;
+
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+    let me = PlayerId(0);
+    let (hx, hy) = w.map.hearth_sites[0];
+
+    let mut placed = Vec::new();
+    for kind in [Kind::Farm, Kind::Granary] {
+        let (x, y) = 'found: {
+            for r in 3..30i32 {
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        if dx.abs() != r && dy.abs() != r {
+                            continue;
+                        }
+                        if w.can_place(me, kind, hx + dx, hy + dy).is_ok() {
+                            break 'found (hx + dx, hy + dy);
+                        }
+                    }
+                }
+            }
+            panic!("nowhere for a {kind:?}");
+        };
+        w.apply(me, &Command::Place { kind, x: x as u8, y: y as u8 }).unwrap();
+        placed.push(w.buildings.last().unwrap().id);
+    }
+
+    // Half a day, and not one command after the two placements.
+    for _ in 0..sim::balance::TICKS_PER_DAY / 2 {
+        w.tick(&mut nav, &[]);
+    }
+
+    for id in placed {
+        let b = &w.buildings[id.0 as usize];
+        assert_eq!(
+            b.state,
+            BuildState::Standing,
+            "the {:?} was never built: {} of {} builder-ticks, {:?} still outstanding",
+            b.kind,
+            b.progress,
+            b.kind.build_ticks(),
+            b.outstanding(),
+        );
+    }
+}
+
+#[test]
+fn nobody_takes_a_job_that_was_not_given_to_them() {
+    // The other side of the line above, written down because it is a decision
+    // and not an omission. A city finishes what it was told to build without
+    // being asked twice; it does not decide who farms. Placing a building is
+    // an order already given, and carrying it out is not a choice — but who
+    // works where is the whole of what a player does with their citizens
+    // (design section 3.2: "jobs are assigned StarCraft-style"), and a city
+    // that staffed itself would leave them nothing to manage.
+    //
+    // So a farm with nobody in it produces nothing, and a city that builds a
+    // farm and never mans it starves. That is the game asking a question, not
+    // a trap: the farm is standing where the player put it and the panel says
+    // food 0.
+    use sim::building::{BuildState, Kind};
+    use sim::command::Command;
+    use sim::nav::Nav;
+    use sim::world::World;
+    use sim::PlayerId;
+
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+    let me = PlayerId(0);
+    let (hx, hy) = w.map.hearth_sites[0];
+    let mut farm = None;
+    for kind in [Kind::Farm, Kind::Granary] {
+        'found: for r in 3..30i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (x, y) = (hx + dx, hy + dy);
+                    if w.can_place(me, kind, x, y).is_ok() {
+                        w.apply(me, &Command::Place { kind, x: x as u8, y: y as u8 }).unwrap();
+                        if kind == Kind::Farm {
+                            farm = Some(w.buildings.last().unwrap().id);
+                        }
+                        break 'found;
+                    }
+                }
+            }
+        }
+    }
+    let farm = farm.unwrap();
+
+    for _ in 0..sim::balance::TICKS_PER_DAY {
+        w.tick(&mut nav, &[]);
+    }
+    assert_eq!(w.buildings[farm.0 as usize].state, BuildState::Standing);
+    assert!(
+        w.buildings[farm.0 as usize].workers.is_empty(),
+        "somebody took a job nobody gave them"
+    );
+    assert_eq!(w.treasury(me).food, 0, "an unmanned farm produced food");
+}

@@ -157,35 +157,65 @@ impl Map {
 
     /// One site per player, on a ring around the centre.
     ///
-    /// A ring rather than rejection sampling because the plan asks for a hard
-    /// guarantee — "sites at least 40 cells apart" — and rejection sampling
-    /// can only offer one in practice: at six players on a map whose
-    /// buildable ground depends on the seed, it will eventually fail to find a
-    /// sixth spot and have to relax the very constraint it exists to keep. A
-    /// ring gives the spacing by construction. The whole ring is rotated by a
-    /// random amount, which changes which city is nearest the low corner
-    /// without changing any distance between two cities.
+    /// One site per player, on the shore parallel: the line of cells at a
+    /// fixed distance from the corner the water comes out of, spread evenly
+    /// along it.
+    ///
+    /// **This replaced a ring around the map centre**, and `SHORE_DISTANCE`
+    /// carries the measurement that says why: the centre of a 128-cell map is
+    /// 128 cells from its corner and an age-one flood stops at about 115, so
+    /// the ring put whole cities outside the game while putting others in the
+    /// shallows. On the shore parallel every city is the same distance from
+    /// the water and what differs between players is what they built.
+    ///
+    /// A line rather than rejection sampling for the same reason the ring was
+    /// one: the plan wants a hard spacing guarantee and rejection sampling can
+    /// only offer one in practice. Even spacing along a line gives it by
+    /// construction, and `MIN_SITE_SPACING` records what the line's length
+    /// actually allows for each player count.
+    ///
+    /// Design section 6 asks for "comparable (not identical)" ground, and the
+    /// jitter is what "not identical" means here: two cells each way plus up
+    /// to five cells nearer or further from the water, so no two sites face
+    /// quite the same flood without any of them facing a different game.
     fn place_hearth_sites(&mut self, rng: &mut Rng, players: u32) {
-        use crate::fx::{cos, sin, Fx};
-
-        let rot = rng.below(256) as u8;
-        let centre = (MAP_W / 2, MAP_H / 2);
-        let r = Fx::cells(SITE_RING_RADIUS);
+        let (cx, cy) = self.low_corner.cell();
+        // Into the map, whichever corner the water is at.
+        let (sx, sy) = ((MAP_W / 2 - cx).signum(), (MAP_H / 2 - cy).signum());
+        let span = SHORE_DISTANCE - 2 * SHORE_MARGIN;
 
         let mut sites = Vec::with_capacity(players as usize);
         for i in 0..players {
-            let angle = rot.wrapping_add(((i * 256) / players) as u8);
-            let x = centre.0 + (r * cos(angle)).round();
-            let y = centre.1 + (r * sin(angle)).round();
+            // Evenly along the line, ends left clear. Integer arithmetic, like
+            // everything in `sim`: one player sits in the middle of the shore.
+            let along = if players < 2 {
+                SHORE_MARGIN + span / 2
+            } else {
+                SHORE_MARGIN + (span * i as i32) / (players as i32 - 1)
+            };
+            // How far out this one is. Small, and deliberately not
+            // alternating: moving one step along the shore already moves a
+            // site on both axes, so two neighbours are further apart than the
+            // step itself, and swinging them in opposite directions eats that
+            // back. An alternating swing of up to six cells was tried and took
+            // the closest pair at six players from twenty-two cells to
+            // fourteen. This is the "not identical" of design section 6 and
+            // nothing more is wanted from it.
+            let out = SHORE_DISTANCE + rng.range(-2, 2);
+            let x = cx + sx * along + rng.range(-SITE_JITTER, SITE_JITTER);
+            let y = cy + sy * (out - along) + rng.range(-SITE_JITTER, SITE_JITTER);
 
-            // Jitter, so two runs with the same player count are not the same
-            // six spots rotated. Bounded, because the spacing sum depends on
-            // it — see SITE_RING_RADIUS.
-            let x = x + rng.range(-SITE_JITTER, SITE_JITTER);
-            let y = y + rng.range(-SITE_JITTER, SITE_JITTER);
-
-            let (x, y) = self.snap_to_buildable(x, y);
-            sites.push((x, y));
+            // Room for the hearth's footprint and for the pad levelled under
+            // it, after snapping as well as before: `snap_to_buildable` may
+            // move a site by `SITE_SNAP`, and a site two cells from the edge
+            // that snaps outward takes its pad off the map with it.
+            let edge = HEARTH_SIZE / 2 + SITE_SNAP;
+            let (x, y) = self.snap_to_buildable(
+                x.clamp(edge, MAP_W - 1 - edge),
+                y.clamp(edge, MAP_H - 1 - edge),
+            );
+            let half = HEARTH_SIZE / 2;
+            sites.push((x.clamp(half, MAP_W - 1 - half), y.clamp(half, MAP_H - 1 - half)));
         }
 
         // Level a pad under each site last, so that snapping saw the terrain
@@ -497,6 +527,7 @@ mod tests {
     /// enough seeds that a ring geometry mistake cannot hide in one of them.
     #[test]
     fn sites_are_far_enough_apart() {
+        let mut worst = std::collections::BTreeMap::new();
         for players in 2..=6u32 {
             for seed in 0..200u64 {
                 let m = gen(seed, players);
@@ -504,6 +535,8 @@ mod tests {
                 for (i, &(ax, ay)) in m.hearth_sites.iter().enumerate() {
                     for &(bx, by) in &m.hearth_sites[i + 1..] {
                         let d2 = (ax - bx).pow(2) + (ay - by).pow(2);
+                        let e = worst.entry(players).or_insert(i32::MAX);
+                        *e = (*e).min(crate::fx::isqrt(d2 as i64) as i32);
                         let min = MIN_SITE_SPACING * MIN_SITE_SPACING;
                         assert!(
                             d2 >= min,
@@ -515,6 +548,9 @@ mod tests {
                 }
             }
         }
+        // Printed with --nocapture: the table in `MIN_SITE_SPACING` is the
+        // arithmetic before jitter, and this is what it comes to in practice.
+        println!("closest two cities, by player count: {worst:?}");
     }
 
     #[test]
@@ -564,30 +600,58 @@ mod tests {
     }
 
     #[test]
-    fn the_low_corner_is_nearer_to_some_cities_than_others() {
-        // Design §6: comparable ground, but not identical — somebody starts
-        // closer to where the water comes from, and the seed decides who.
-        let (lx, ly) = {
-            let m = gen(3, 4);
-            m.low_corner.cell()
-        };
-        let m = gen(3, 4);
-        let mut d: Vec<i32> = m
-            .hearth_sites
-            .iter()
-            .map(|&(x, y)| (x - lx).abs() + (y - ly).abs())
-            .collect();
-        d.sort_unstable();
-        assert!(
-            d[d.len() - 1] - d[0] > 40,
-            "every city was about as exposed as every other: {d:?}"
-        );
+    fn the_low_corner_is_comparably_near_to_every_city() {
+        let mut spreads = std::collections::BTreeSet::new();
+        // Design §6: "comparable (not identical)" ground.
+        //
+        // This assertion used to read the other way round — that the spread
+        // between the nearest city to the water and the furthest was *more*
+        // than forty cells — and it passed, and that was the problem. On a
+        // ring around the map centre the spread was routinely a hundred, which
+        // is not "not identical", it is one player drowned in age one and
+        // another who never sees water in three ages. See `SHORE_DISTANCE` for
+        // the measurement that says where the flood actually is.
+        //
+        // So: nobody is the same distance out as anybody else, and nobody is
+        // in a different game.
+        for players in 2..=6u32 {
+            for seed in 0..60u64 {
+                let m = gen(seed, players);
+                let (lx, ly) = m.low_corner.cell();
+                let mut d: Vec<i32> = m
+                    .hearth_sites
+                    .iter()
+                    .map(|&(x, y)| (x - lx).abs() + (y - ly).abs())
+                    .collect();
+                d.sort_unstable();
+                let spread = d[d.len() - 1] - d[0];
+                spreads.insert(spread);
+                assert!(
+                    spread <= 30,
+                    "{players}p seed {seed}: one city is in a different game: {d:?}"
+                );
+                // And all of them are where the water goes: past about 115
+                // cells an age-one flood never arrives at all.
+                assert!(
+                    d[d.len() - 1] < 115 && d[0] > 55,
+                    "{players}p seed {seed}: a city is outside the flood: {d:?}"
+                );
+            }
+        }
+        // And "not identical" across the run of seeds: the swing and the
+        // jitter do move cities relative to the water. Asserted over the set
+        // rather than per map, because two cities landing at the same distance
+        // on one seed is a coincidence and not a fault.
+        assert!(spreads.len() > 3, "every map is laid out the same: {spreads:?}");
+        assert!(spreads.contains(&0) || *spreads.iter().next().unwrap() < 6);
     }
 
     #[test]
     fn the_rotation_moves_the_cities_between_seeds() {
-        // Without the ring rotation every map would put city 0 in the same
-        // place, which would make the seed much less interesting than it looks.
+        // The shore parallel runs from whichever corner the water comes out
+        // of, and the jitter moves each site along and across it, so city 0 is
+        // somewhere different on every seed. Without that the seed would be
+        // much less interesting than it looks.
         let firsts: Vec<(i32, i32)> = (0..20u64).map(|s| gen(s, 4).hearth_sites[0]).collect();
         let distinct = {
             let mut v = firsts.clone();

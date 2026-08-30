@@ -1070,3 +1070,154 @@ silently invalidate the code the host is at that moment reading down a phone.
 The failure was reproduced rather than imagined: a Playwright context that
 aborts every `wss://` request and names a signalling bundle that does not
 exist, which is what a blocked network looks like from inside the page.
+
+---
+
+## 2026-08-30 — Design step 7, and the four things playing it found
+
+The plan's phase 5 ends with "playtest the flood until it is fun", and the
+prompt for this session says to run at least three full games and to say
+plainly if it is not fun yet. Here is what was done, what it found, and what is
+still unanswered.
+
+**Nobody has played FLOODLINE with their hands.** That has to be said first,
+because everything below is a measurement and a measurement cannot tell you
+whether a game is fun. What it *can* tell you is whether the decisions a player
+is being asked to make have different outcomes, and a game where the careful
+player and the idle one end up in the same place is not unbalanced — it is not
+a game, and no amount of judgement about how it feels will fix that.
+
+So `crates/sim/tests/playtest.rs` plays five strategies through full three-age
+runs on three seeds, entirely through `World::apply`:
+
+* **idle** — found a city, do nothing.
+* **grow** — a farm, a granary, two cottages, a second farm, one a day, and
+  farmers assigned as each farm goes up.
+* **dike** — grow, and a wall along the shore between the city and the water.
+* **flee** — grow, and everybody uphill on the impact day.
+* **both**.
+
+Run it with `cargo test -p sim --release --test playtest -- --ignored
+--nocapture`. The first run of it said this:
+
+```
+  seed        play   ages  alive by age
+  31          idle      0   [0]
+  31          grow      0   [0]
+  31          dike      0   [0]
+  31          flee      0   [0]
+```
+
+Every strategy, every seed, dead before the end of age one with no water
+anywhere near them. Four things came out of chasing that.
+
+### 1. Nothing in a city ever built anything
+
+A city that places a farm sees its haulers carry the wood and the stone to the
+site and then stop. `Job::Builder` existed, `Assign` on a site produced one,
+and nothing else in the game ever did — so unless the player knew to select
+citizens and right-click the hole in the ground, the site sat there full and
+finished-looking for ever. Because a citizen can only eat at a granary and a
+granary is a building, the city then starved on day four with the materials
+lying on the floor.
+
+An unassigned citizen with nothing to carry now picks up a shovel. Assignment
+still does what it did — an assigned builder goes to *its* site and stays, and
+`BUILDER_SLOTS` caps how many work on one at once — so what this costs is
+nothing and what it buys is that an unattended city builds slowly instead of
+dying. It does *not* extend to farming: a farm with nobody in it still produces
+nothing, and `nobody_takes_a_job_that_was_not_given_to_them` says so, because
+who works where is the whole of what a player does with their citizens and a
+city that staffed itself would leave them nothing to manage. Placing a building
+is an order already given; carrying it out is not a choice.
+
+Two tests in `tests/city.rs` now hold both halves of that line.
+
+### 2. "Get uphill" did not work, and it is the order the game is about
+
+Design §3.2 calls it "the one order that matters during a flood". A citizen
+that walked to where it was sent arrived with no errand, `find_work` handed it
+one, and it turned round and walked back to the farm it had been told to leave
+— inside a tick, a day before the water came. `Citizen::held` is what a move
+order sets and what `Unassign` (the panel's "back to hauling") clears.
+
+### 3. Every citizen starts inside a building, and could not be ordered out of it
+
+A Hearth blocks movement, the founding party spawns on its site, and a flow
+field has no step for somebody standing in a wall. So "select everybody, go
+uphill" on the first morning left whoever had not wandered off yet standing in
+the fire, permanently unorderable, for the rest of the run. The unit test that
+covered this asserted the *old* behaviour — "stopping is the honest answer" —
+and that reasoning is right when there is a path from where you stand and
+useless when there is not. A citizen on impassable ground now walks out of it
+first.
+
+### 4. The map decided the game, and it should not have
+
+This is the big one and it has its own arithmetic in `balance::SHORE_DISTANCE`.
+Hearth sites sat on a ring around the map centre, and the centre of a
+128-cell map is 128 Manhattan cells from its corner while an age-one flood
+stops at about 115. Measured across the three seeds: one city sat 65 cells from
+the water and lost five of its eight people to the first flood before it had a
+granary; another sat 148 cells away and never got wet in three ages. Nothing a
+player did moved the outcome as much as which spot the ring's random rotation
+handed them.
+
+The ring cannot be fixed by moving it — a circle about a point is not
+equidistant from a corner, and one of radius 54 already spans 108 of the map's
+128 cells. So the sites go on the **shore parallel**: the line at a fixed
+distance from the corner the water comes out of, spread along it, with a couple
+of cells of jitter for design §6's "comparable (not identical)". Ninety-six
+cells out, which the flood-reach measurement says is where an age-one flood
+wades through the streets and an age-three flood is properly dangerous.
+
+It costs something and the cost is written down rather than hidden: six cities
+forty cells apart need two hundred cells of shore and there are a hundred and
+thirteen, so `MIN_SITE_SPACING` falls from 40 to 17 and five- and six-player
+maps are cramped. Design §11 already lists map size as an open question and now
+has a second reason to. Given the choice between neighbours who can see each
+other and whole cities standing outside the flood for a three-age run, the
+flood wins: it is the game.
+
+### What the runs say now
+
+```
+  seed        play   ages  alive by age    at the hearth
+  31          idle      0   [0]            [0]
+  31          grow      2   [8, 6, 0]      [19, 86, 187]
+  31          dike      2   [8, 8, 0]      [6, 72, 179]
+  31          flee      2   [8, 7, 0]      [19, 86, 3]
+  1000003     grow      2   [8, 8, 0]      [0, 58, 287]
+  1000003     dike      2   [8, 8, 0]      [0, 54, 285]
+  4043362590  grow      3   [8, 8, 1]      [0, 17, 116]
+  4043362590  dike      3   [8, 8, 5]      [0, 13, 102]
+```
+
+Idling still kills you, and now it kills you by starvation rather than by a
+bug. Growing gets you through ages one and two with a bloody nose. A dike keeps
+everybody through ages one and two on every seed and five of eight through age
+three on one of them — it is the best thing to do, which is what design §5
+wants it to be. Running uphill saves the people the water would have taken and
+costs a day's farming, and age three's second corner half a day behind the
+first is what catches a city that comes home too early.
+
+### What is still not answered
+
+**Whether it is fun.** Nobody has played it. Three things are visible from the
+measurements that a person should be asked about:
+
+* **Age three kills everybody on two of three seeds** whatever is done. It is
+  the last age, so losing there is losing at the end rather than being denied a
+  choice — but a run that always ends the same way is a run with no ending
+  worth reaching.
+* **Stone runs out and there is no Quarry.** A city starts with 120 stone,
+  a dike costs 40 per level, and nothing in the MVP produces any. That is three
+  cells of bank, which cannot protect a city; the probe's wall is built by
+  fiat. Either the starting stone is far too low or the flood defence a player
+  can actually afford is "move people", not "build a wall". The plan defers the
+  Quarry and this is the argument for undeferring it.
+* **A day is two minutes and a run is thirty-six.** §11 already suspects that
+  is too long for an evening. Nothing here can tell.
+
+They are three specific questions rather than "is it fun", which is the most
+useful shape the answer could have had without a player.

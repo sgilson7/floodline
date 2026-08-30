@@ -118,16 +118,86 @@ pub const SHALLOWS_PERCENT: i32 = 12;
 pub const SAND_PERCENT: i32 = 6;
 pub const ROCK_PERCENT: i32 = 8;
 
-/// Hearth sites are placed on a ring around the map centre. The radius is
-/// what makes the spacing guarantee hold: at six players the ring's shortest
-/// chord is about 53 cells, and jitter and snapping can each pull two
-/// neighbours about 11 cells closer together, which still clears the 40 the
-/// plan asks for. Raising the player count or the jitter means redoing that
-/// sum — `sites_are_far_enough_apart` is the test that will notice.
-pub const SITE_RING_RADIUS: i32 = 54;
-pub const SITE_JITTER: i32 = 2;
+/// Hearth sites sit on a line at a fixed distance from the corner the water
+/// comes out of, spread along it. The "shore parallel".
+///
+/// **This replaced a ring around the map centre, and the reason is measured.**
+/// `tests/playtest.rs::how_far_the_water_reaches` pours each age's surge onto
+/// generated maps and reports the deepest water at each Manhattan distance
+/// from the corner it came from:
+///
+/// | from the corner | age 1-2 (height 12) | age 3 (height 18) |
+/// |---|---|---|
+/// | 40  | median 108 - swimming   | median 162 - swimming |
+/// | 55  | median 63, deepest 245  | median 100 - swimming |
+/// | 70  | median 63, deepest 213  | median 72, deepest 308 |
+/// | 85  | median 41, deepest 150  | median 69, deepest 245 |
+/// | 100 | median 18, deepest 66   | median 33, deepest 152 |
+/// | 115 | median 3                | deepest 50 |
+/// | 130 | dry                     | deepest 32 |
+///
+/// Wading starts at 32, swimming at 96, and a citizen drowns after fifty ticks
+/// out of its depth. So a city at 40 cells is dead on the first flood before
+/// it has finished a second building, a city past 115 never sees water in a
+/// whole three-age run, and the game is a game between about 70 and 105.
+///
+/// A ring of radius 54 around the map centre put its sites anywhere from about
+/// 40 to about 150 cells out, because the centre of a 128-cell map is 128
+/// Manhattan cells from its corner. Three full runs of four strategies showed
+/// what that cost: on one seed the age-one flood took five of eight citizens
+/// before the city had a granary, on another no water reached the city in any
+/// of the three ages, and between those two nothing a player *did* — a dike,
+/// running for high ground — moved the outcome as much as which spot the
+/// rotation happened to hand them. The ring cannot be fixed by moving it: a
+/// circle about a point is not equidistant from a corner, and one of radius 54
+/// already spans 108 of the map's 128 cells.
+///
+/// So the sites go on the line `x + y = SHORE_DISTANCE` measured from the low
+/// corner, spread evenly along it. Ninety-six puts an age-one flood in the
+/// streets — wading, with pockets deep enough to drown somebody standing in
+/// the wrong place — and makes an age-three flood properly dangerous.
+pub const SHORE_DISTANCE: i32 = 96;
+
+/// How close to the ends of the shore line a site may sit. The line runs from
+/// one map edge to the other; without this the outermost cities are jammed
+/// into the corners beside the low one — at four, a hearth landed three cells
+/// from the map's west edge with nowhere to put a farm on that side. Eight is
+/// the compromise: it costs the closest pair at six players two cells and buys
+/// the end cities somewhere to build.
+pub const SHORE_MARGIN: i32 = 8;
+
+pub const SITE_JITTER: i32 = 1;
 pub const SITE_SNAP: i32 = 2;
-pub const MIN_SITE_SPACING: i32 = 40;
+
+/// The plan asks for forty cells between cities. This is what the map gives.
+///
+/// Measured over two hundred seeds at each player count, by
+/// `sites_are_far_enough_apart`, which prints the table with `--nocapture`:
+///
+/// | players | closest two cities |
+/// |---|---|
+/// | 2 | 108 |
+/// | 3 | 51 |
+/// | 4 | 31 |
+/// | 5 | 22 |
+/// | 6 | 17 |
+///
+/// Two and three clear the plan's forty; four is short and five and six are
+/// well short, and none of that can be fixed where it looks like it should be.
+/// The usable shore is `SHORE_DISTANCE - 2 * SHORE_MARGIN` cells of x, which
+/// is about a hundred and thirteen cells of line. Six cities forty apart need
+/// two hundred. The shore cannot be lengthened without moving it out of the
+/// flood, and moving it out of the flood is what the ring did and what this
+/// whole change exists to undo.
+///
+/// So: a guarantee of seventeen, and design section 11's "map size vs. citizen
+/// count" gets a second reason to be an open question. Seventeen cells between
+/// two three-by-three hearths leaves fourteen of clear ground, which is
+/// cramped and playable; five or six players want a bigger map, not a
+/// different rule. Given the choice between neighbours who can see each other
+/// and whole cities standing outside the flood for a three-age run, the flood
+/// wins: it is the game.
+pub const MIN_SITE_SPACING: i32 = 17;
 
 /// The Hearth's footprint, and so the size of the flat pad the generator
 /// levels under each site.

@@ -597,8 +597,12 @@ impl World {
                     return Err(RuleError::NoSuchCell);
                 }
                 for id in citizens {
+                    // The job goes too. "Get uphill" means drop what you are
+                    // doing, not "visit that hill and come back to the farm".
+                    self.unassign_one(*id);
                     let c = &mut self.citizens[id.0 as usize];
                     c.abandon();
+                    c.held = true;
                     c.walk_to(Dest::Cell(*x, *y));
                 }
                 Ok(())
@@ -997,6 +1001,10 @@ impl World {
         let c = &mut self.citizens[id.0 as usize];
         c.job = None;
         c.workplace = None;
+        // Back to hauling means back to hauling: a citizen that was told to
+        // stand on a hill starts finding its own work again. `MoveTo` calls
+        // this and then sets the flag, so the order of those two matters.
+        c.held = false;
         c.abandon();
     }
 
@@ -1050,6 +1058,14 @@ impl World {
         }
 
         let Some((dx, dy)) = field.step_at(cx, cy) else {
+            if let Some(out) = self.step_off_a_building(cx, cy) {
+                // Walking out of a footprint it is standing inside. Not
+                // through the check below, which would refuse the first step:
+                // the cell next to the middle of a three-by-three Hearth is
+                // also the Hearth.
+                self.nudge(i, out);
+                return;
+            }
             // Nowhere to go from here: the granary washed away, or a building
             // went up across the only path, or this citizen is standing
             // somewhere the field never reached. Stopping is the honest
@@ -1068,6 +1084,12 @@ impl World {
             return;
         }
 
+        self.nudge(i, (dx, dy));
+    }
+
+    /// One citizen, one step in a direction already decided.
+    fn nudge(&mut self, i: usize, (dx, dy): (i32, i32)) {
+        let (cx, cy) = self.citizens[i].pos.cell();
         let on_road = self.building_at(cx, cy).map(|b| b.carries_traffic()).unwrap_or(false);
         let speed = self.citizens[i].speed(on_road);
 
@@ -1077,6 +1099,39 @@ impl World {
         let dir = V2::new(Fx::cells(dx), Fx::cells(dy)).with_len(speed);
         self.citizens[i].vel = dir;
         self.citizens[i].pos += dir;
+    }
+
+    /// A way out of an impassable cell, for somebody standing in one.
+    ///
+    /// A flow field is built over passable ground, so it has no step for a
+    /// citizen standing inside a building — and every citizen starts inside
+    /// one, because a Hearth blocks movement and the founding party spawns on
+    /// its site. Ordering everybody uphill on the first day therefore left
+    /// whoever had not wandered off yet standing in the fire, unable to be
+    /// sent anywhere for the rest of the game. Anyone who has stepped into a
+    /// granary to eat is in the same position.
+    ///
+    /// Rings outward in a fixed order, which is the only order there is. Not
+    /// just the four neighbours: a citizen in the middle of a three-by-three
+    /// Hearth has four neighbours that are also the Hearth.
+    fn step_off_a_building(&self, cx: i32, cy: i32) -> Option<(i32, i32)> {
+        if nav::passable(self, cx, cy) {
+            return None;
+        }
+        for r in 1..=3i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    if nav::passable(self, cx + dx, cy + dy) {
+                        // One step of the eight, toward it.
+                        return Some((dx.signum(), dy.signum()));
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Whether citizen `i` has reached what it was walking to.
@@ -1820,23 +1875,36 @@ mod tests {
     }
 
     #[test]
-    fn a_citizen_the_field_never_reached_stops_where_it_is() {
+    fn a_citizen_standing_where_nobody_can_walks_out_of_it() {
         let (mut w, mut nav, ox, oy) = walker();
-        // Standing on rock, which no field ever reaches. This is the "the
-        // path is gone" branch, and stopping is the honest answer: the citizen
-        // is not stuck in a wall, it is standing still.
+        // Standing on rock, which no flow field ever reaches.
+        //
+        // This assertion used to be that the citizen stopped and stayed put,
+        // on the grounds that "the citizen is not stuck in a wall, it is
+        // standing still, and whatever wanted it to move can ask again". That
+        // reasoning holds when there is a path from where it stands and fails
+        // completely when there is not: asking again changes nothing, and the
+        // citizen is stuck for the rest of the run. It matters because every
+        // citizen starts inside a building — a Hearth blocks movement and the
+        // founding party spawns on its site — so "select everybody and send
+        // them uphill" on the first day left whoever had not wandered off yet
+        // standing in the fire, permanently unorderable. Walking out of the
+        // footprint first is the only reading of the order that can be obeyed.
         let rock = (0..MAP_H)
             .flat_map(|y| (0..MAP_W).map(move |x| (x, y)))
             .find(|&(x, y)| w.map.ground_at(x, y) == Ground::Rock)
             .unwrap();
         w.citizens[0].pos = V2::cell_centre(rock.0, rock.1);
-        let before = w.citizens[0].pos;
 
         w.citizens[0].walk_to(Dest::Cell(ox as u8, oy as u8));
-        w.tick(&mut nav, &[]);
-        assert_eq!(w.citizens[0].state, State::Idle, "kept trying");
-        assert_eq!(w.citizens[0].pos, before, "moved anyway");
-        assert_eq!(w.citizens[0].dest, None);
+        for _ in 0..600 {
+            w.tick(&mut nav, &[]);
+        }
+        let (cx, cy) = w.citizens[0].pos.cell();
+        assert!(
+            nav::passable(&w, cx, cy),
+            "it is still standing where nobody can stand: ({cx},{cy})"
+        );
     }
 
     #[test]
