@@ -1,7 +1,10 @@
-# FLOODLINE — MVP build plan for Claude Code
+# FLOODLINE — MVP build plan for Claude Code (v2-noserver)
 
 This is the working plan for an agent building the minimum viable product. It
-sits next to `floodline-design.md` (the design) and `CLAUDE.md` (the rules).
+sits next to `floodline-design-v2-noserver.md` (the design) and `CLAUDE.md`
+(the rules). v2 means: no server of ours. The host's browser is the hub, peers
+reach it through public signalling (Trystero) or a pasted code, and the only
+thing deployed is static files on GitHub Pages.
 Read all three before writing code. The design says *what*; this says *in what
 order and how you know each step is done*.
 
@@ -15,11 +18,13 @@ A stranger with the GitHub Pages link and a room code can, with one friend:
 4. build a dike;
 5. survive — or not — an age-1 flood that comes out of the low corner;
 6. see the score screen, and start a new run with a new seed;
-7. never see a desync, and see a clear banner if one happens anyway.
+7. never see a desync, and see a clear banner if one happens anyway;
+8. do all of this with nothing running anywhere except GitHub Pages — both the
+   Trystero path and the pasted-code path work.
 
 Out of scope for MVP, deliberately: families and children, friendships,
 Guildhall specialisation, Tavern, Watchtower, Lend, debris physics, any
-disaster after the flood, chat, spectating, host migration. Each is a later
+disaster after the flood, chat, spectating, host migration, TURN. Each is a later
 milestone; none is needed to know whether the flood is fun.
 
 Ages 1–3 exist (flood, escalating height); the run ends when both cities fall
@@ -38,13 +43,15 @@ or after age 3, whichever first.
   nothing else is worked on until it passes.
 * **Work in the dependency order of the crates.** `sim` → `net` → transports →
   `gui`. Do not start `gui` polish while `net` is unproven.
-* **Riskiest thing first.** The JS WebRTC plugin (phase 3) is done before the
-  game has a second building type.
+* **Riskiest thing first.** The JS WebRTC plugin (phase 4) is done before the
+  game has a second building type. Lockstep (phase 3) is proven on the
+  in-process loopback before the plugin exists, so the two can never be
+  confused.
 * **Small commits, each runnable.** Message in the imperative, body says why.
   `make test` passes at every commit. No commit that only says "WIP".
 * **Copy the discipline, not the code, from the reference repos.** Clone
   `sgilson7/gear-master`, `sgilson7/perturbation-workbench`,
-  `sgilson7/pdf-redactor` and `johanhelsing/matchbox` into `reference/`
+  `sgilson7/pdf-redactor` and `dmotz/trystero` into `reference/`
   (gitignored). Take: `Rng`, the fixed logical canvas and letterbox code, the
   `Makefile` and `packaging/package-web.sh` conventions, the panic hook, the
   cache-busting stamp, the workspace `[profile.test]`. Do not copy the 13 000
@@ -53,9 +60,9 @@ or after age 3, whichever first.
   decide, write the decision in `DECISIONS.md` with one paragraph of why, and
   keep going.
 * **No third-party physics, ECS or networking framework** beyond what the
-  plan names: `serde`, `postcard`, `macroquad`, `sapp-jsutils`,
-  `matchbox_socket` (native only), `matchbox_server` (as a dependency of
-  nothing — it is deployed, not linked).
+  plan names: `serde`, `postcard`, `macroquad`, `sapp-jsutils` on the Rust
+  side; a pinned, vendored copy of `trystero`'s browser bundle on the JS side.
+  No npm at build time, no server code of any kind.
 
 ## Phases
 
@@ -64,15 +71,17 @@ checked. Estimated effort is in agent-sessions, not hours.
 
 ### Phase 0 — Repository and pipeline (½ session)
 
-* Workspace `floodline/` with the crate layout from design §7 (empty crates
-  compile). `rust-version = "1.88"`, same `[profile.release]` and
+* Workspace `floodline/` with the crate layout from design §7 — `sim`,
+  `net`, `net-web`, `gui` — empty crates compile. `rust-version = "1.88"`, same `[profile.release]` and
   `[profile.test]` as the workbench.
 * `Makefile`: `make`, `make test`, `make check`, `make web`, `make serve`,
-  `make publish`, `make signal`, `make bot`, `make help`.
+  `make publish`, `make help`. (No `make signal`, no `make bot`: there is
+  nothing to run but the game.)
 * `packaging/package-web.sh` adapted from gear-master: builds `gui` for
   `wasm32-unknown-unknown`, copies `mq_js_bundle.js` and `sapp_jsutils.js`
-  from the pinned crate versions, copies `web/quad_rtc.js` and
-  `web/config.js`, stamps the wasm sha256 into `index.html` and exports it as
+  from the pinned crate versions, copies `web/quad_rtc.js`,
+  `web/config.js` and `web/vendor/trystero-<ver>.js` (pinned by filename and
+  sha256), stamps the wasm sha256 into `index.html` and exports it as
   `window.FLOODLINE_BUILD`.
 * `.github/workflows/pages.yml`: on push to `main`, run `make test`, then
   `make web`, then deploy `dist/web/` to Pages with `actions/deploy-pages`.
@@ -139,49 +148,66 @@ determinism test passes.
 dike was built, and the determinism test still passes with the flood in the
 script.
 
-### Phase 3 — `quad_rtc.js` and the two transports (1½ sessions) — **do this before phase 4**
+### Phase 3 — Lockstep on loopback (1 session)
 
-1. `net::Peer` trait: `join(room_url, players)`, `poll() -> Option<Event>`,
-   `send(peer, bytes, reliable)`, `local_id()`, `peers()`.
-2. `web/quad_rtc.js`: miniquad plugin implementing matchbox's signaling
-   protocol (design §9.1–9.2). One `RTCPeerConnection` per peer, reliable and
-   unreliable data channels, lower-id offers, ICE relayed as it arrives,
-   `KeepAlive` every 10 s, incoming bytes queued for `rtc_poll`. Byte and
-   string transfer through `sapp-jsutils`. Reconnect is *not* in MVP: a
-   dropped signaling socket after all peers are connected is fine; a dropped
-   peer is `Event::Left`.
-3. `net-web`: the `Peer` impl over the plugin.
-4. `net-native`: the `Peer` impl over `matchbox_socket` 0.14 with the same
-   two channels.
-5. `bot` crate: joins a room natively, prints events, echoes bytes.
-6. A `web/echo.html` test page (not published) that loads a tiny macroquad
-   binary using only `net-web`, joins `?room=`, and shows peers and round-trip
-   time on screen.
+1. `net::Peer` trait: `poll() -> Option<Event>`, `send(peer, bytes, reliable)`,
+   `peers()`, `is_host()`. Events: `Peer(id)`, `Left(id)`, `Msg{id, reliable,
+   bytes}`, `Error(text)`.
+2. `net::Loopback`: N in-process peers in a star, with configurable one-way
+   latency (in ticks) and unreliable-channel loss. Deterministic itself (uses
+   its own seeded rng for loss) so tests are repeatable.
+3. Wire format (design §8): `Hello`, `Welcome`, `Roster`, `Turn`, `Bye`;
+   `postcard`.
+4. `net::Lockstep`: host collects one `Turn` per player per tick, emits the
+   bundle, all peers advance on the bundle; input delay 3; checksum
+   comparison at the host; "waiting on" status; `Drop` after 30 s of silence,
+   emitted by the host as a command so it is deterministic.
+5. Host answers `Hello` with `Welcome { player_id, seed, tick, snapshot }`;
+   refuses mismatched `build_hash`. Late join via snapshot (MVP: only before
+   age 1 starts).
+6. Tests, all in `cargo test -p net`: three loopback players play the phase-1
+   scenario to age 2 with 200 ms latency and identical checksums; a player
+   whose `sim` is deliberately fed an extra command desyncs and everyone
+   freezes at the same tick; a silent player is dropped at the same tick on
+   every peer; a fourth player joins before age 1 from a snapshot and stays
+   in sync.
 
-**Done when:** two browser tabs and one `make bot` process, all in the same
-room on a local `matchbox_server`, exchange bytes on both channels, and a
-closed tab produces `Left` on the others within a few seconds. Then repeat
-with the signaling server on Fly.io over `wss://` and the tabs on two
-different networks. Screenshot or log both in `DECISIONS.md`.
+**Done when:** those tests pass and the native `gui` (phase 5 stub is fine —
+a blank canvas that logs ticks) runs a two-player loopback game in one window.
 
-### Phase 4 — Lockstep (1 session)
+### Phase 4 — `quad_rtc.js` and `net-web` (1½ sessions) — **the risky one**
 
-1. Wire format (design §8): `Hello`, `Welcome`, `Turn`, `Bye`; `postcard`.
-2. `net::Lockstep`: input delay 3 ticks, advance only when every live peer's
-   `Turn` is held, checksum comparison, "waiting on" status, drop after 30 s
-   (as a `Command::Drop` agreed by the others, so it is deterministic).
-3. Host = first `IdAssigned` with no peers present; host answers `Hello` with
-   `Welcome { seed, tick, snapshot }`. Build hash check refuses mismatches.
-4. Late join via snapshot (MVP: only before age 1 starts; mid-age join is
-   later).
-5. `bot` gains a script mode: it plays a scenario from a file so a real
-   browser can be tested against a deterministic partner.
+1. Vendor `trystero`'s browser bundle into `web/vendor/`; record version and
+   sha256 in `DECISIONS.md`. Load it with a script tag in `index.html`.
+2. `web/quad_rtc.js` as a miniquad plugin (design §9.2) with both modes:
+   * **trystero**: host and joiners `joinRoom({appId, password, rtcConfig},
+     "<build_hash>/<room>")`; the host accepts every `onPeerJoin`, joiners
+     accept only the first peer (the host) and ignore others. Two data
+     channels attached per connection.
+   * **code**: host builds an `RTCPeerConnection`, creates both channels,
+     waits for ICE gathering to complete, exposes a compressed base64 offer;
+     joiner consumes it and produces an answer blob; host applies it.
+     Compression: drop inferable SDP lines, `CompressionStream("deflate-raw")`,
+     base64url. Target: an offer under 600 characters.
+   Incoming bytes queued for `rtc_poll`; byte/string transfer via
+   `sapp-jsutils`. Reconnect is not in MVP.
+3. `net-web`: the `Peer` impl over the plugin, including star semantics
+   (joiners see exactly one peer).
+4. `web/echo.html` (not published): loads a tiny macroquad binary using
+   `net-web` only; Host / Join by room / Host by code / Join by code
+   buttons; shows peers, round trip and bytes per second on screen.
+5. Write in `DECISIONS.md`, *before* coding step 2, the exact sequence of
+   events you expect for one host and two joiners in each mode, by reading
+   trystero's source and MDN. Implement to that; update it if reality differs.
 
-**Done when:** browser tab + bot play a scripted two-player game; the tab's
-checksums match the bot's every tick; killing the bot shows the banner; a
-deliberately introduced `f32` in `sim` is caught by the desync banner in a
-mixed native/wasm session (then reverted — keep that as a documented
-experiment, it proves the guard works).
+**Done when:** on two machines on two different home networks, via the Pages
+build of `echo.html`: (a) trystero mode connects two joiners to a host and
+bytes flow on both channels, (b) code mode connects with one pasted exchange,
+(c) closing a joiner's tab produces `Left` at the host within 10 s, (d) a
+mismatched `build_hash` is refused. Log the measured join time for the
+trystero strategy used; if Nostr is slow from either network, try MQTT and
+record which one is the default. Then swap `Loopback` for `net-web` under
+the phase-3 lockstep and play the phase-1 scenario in two tabs.
 
 ### Phase 5 — `gui` (2 sessions)
 
@@ -197,38 +223,45 @@ gear-master. Map cells at 8 px. Everything drawn with primitives.
   when the other player proposes.
 * Panel: population, food/wood/stone, age and day, warning line, peers and
   their status, build hash.
-* Lobby: enter or generate a room code, `?room=` in the URL, "Start" when
-  2–6 players are present (host only); config-driven signaling URL and ICE
-  list from `web/config.js`.
+* Lobby: *Host* (generates a room code, shows it and a shareable
+  `?room=` link), *Join* (room code field, filled from the URL), and a
+  *by code* toggle that shows the paste boxes instead; "Start" when 2–6
+  players are present, host only; strategy, appId and ICE list from
+  `web/config.js`.
 * Score screen: ages survived, peak population, seed, "New run".
 * Single player is the lockstep with one peer, so there is no separate path.
 
 **Done when:** two people on two machines play a full run to age 3 on the
-Pages build with the Fly.io signaling server, and the design's step-7 test
+Pages build with nothing else running anywhere, and the design's step-7 test
 ("playtest the flood until it is fun") has been run at least three times with
 notes in `DECISIONS.md` about what was tuned.
 
-### Phase 6 — Deployment hardening (½ session)
+### Phase 6 — Hardening the serverless deployment (½ session)
 
-* Fly.io: `deploy/fly.toml` and a `deploy/README.md` with the exact commands
-  used, TLS on, `?next=` honoured.
-* TURN: `web/config.js` carries an ICE list; document adding coturn or a
-  metered.ca entry. Not required to pass, required to be one edit away.
-* Pages: confirm the build hash namespacing of rooms (`/<hash>/<room>`) works
-  end-to-end so a stale tab cannot join a new build's room.
-* `README.md`: play link, how to host a game, how to run locally, how to run a
-  bot, the determinism rules in one paragraph.
+* Failure messages that say what to do: "no peers found on the relays —
+  try *Join by code*", "direct connection failed — one of you may be behind
+  a strict NAT; try another network or add a TURN server in config.js".
+* `web/config.js` carries `rtcConfig.iceServers` with public STUN and a
+  commented example of a free-tier TURN entry; `README.md` explains when it
+  is needed and that it is the only thing in the game that can cost money.
+* Strategy fallback: if Trystero reports no relay connection within 15 s,
+  the lobby offers *by code* automatically.
+* Confirm the `build_hash` prefix on room names keeps a stale tab out of a
+  newer build's game, end-to-end on Pages.
+* `README.md`: play link, how to host a game (both ways), how to run
+  locally, the determinism rules in one paragraph, and one sentence stating
+  that the project runs no servers.
 
-**Done when:** a fresh clone can `make serve` and reach the deployed signaling
-server, and the README's play instructions were followed by someone who did
-not write them.
+**Done when:** a fresh clone can `make serve` and host a game reachable from
+another machine, and the README's play instructions were followed by someone
+who did not write them.
 
 ## Later milestones (not MVP)
 
 M2 families and children · M3 Guildhall and skilled trades · M4 friendships,
 Tavern, mood · M5 Watchtower and early warning · M6 debris physics ·
-M7 second disaster (fire) · M8 Lend, chat, spectating, host migration,
-mid-age join · M9 map variety and the age-4+ table.
+M7 second disaster (fire) · M8 Lend, chat, spectating, host migration (re-signal to the new host),
+mid-age join, optional TURN · M9 map variety and the age-4+ table.
 
 ## How to report progress
 

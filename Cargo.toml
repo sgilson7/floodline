@@ -4,9 +4,7 @@ members = [
     "crates/sim",
     "crates/net",
     "crates/net-web",
-    "crates/net-native",
     "crates/gui",
-    "crates/bot",
 ]
 
 [workspace.package]
@@ -17,7 +15,6 @@ rust-version = "1.88"
 sim = { path = "crates/sim" }
 net = { path = "crates/net" }
 net-web = { path = "crates/net-web" }
-net-native = { path = "crates/net-native" }
 
 serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
 # Default features drag in heapless, which nothing here uses; `alloc` is what
@@ -25,8 +22,6 @@ serde = { version = "1.0.229", default-features = false, features = ["derive", "
 postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
 macroquad = "0.4.16"
 sapp-jsutils = "0.1.7"
-matchbox_socket = "0.14.0"
-futures = "0.3"
 
 # Copied from perturbation-workbench, comment and all, because the reasoning is
 # the part worth keeping.

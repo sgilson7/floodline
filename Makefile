@@ -8,19 +8,11 @@
 
 CARGO ?= cargo
 GUI   := gui
-BOT   := bot
 
 ROOT  := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
-# The signaling server is deployed, never linked: it is not a workspace member
-# and appears in no Cargo.toml (design 9.3). `make signal` runs whatever is on
-# PATH and tells you how to get one if there is nothing there.
-SIGNAL_VERSION := 0.14.0
-SIGNAL_PORT    ?= 3536
-ROOM           ?= floodline
-
 .DEFAULT_GOAL := run
-.PHONY: run play test check build web serve publish signal bot clean help
+.PHONY: run play test check build web serve publish clean help
 
 ## run: play the native build
 run play:
@@ -62,19 +54,6 @@ publish: web
 	   || (git commit -q -m "Publish web build" && git push -q && \
 	       echo "Pushed. Pages redeploys in about a minute."))
 
-## signal: run a local matchbox_server on :3536
-signal:
-	@command -v matchbox_server >/dev/null || { \
-	  echo "matchbox_server is not on PATH."; \
-	  echo "  cargo install matchbox_server --version $(SIGNAL_VERSION)"; \
-	  exit 1; }
-	@echo "Signaling on ws://localhost:$(SIGNAL_PORT)/<room>?next=<players>"
-	@matchbox_server 0.0.0.0:$(SIGNAL_PORT)
-
-## bot: join a room as a headless peer (make bot ROOM=x)
-bot:
-	@$(CARGO) run -p $(BOT) -- --room $(ROOM)
-
 ## clean: delete build artifacts and packaged output
 clean:
 	@$(CARGO) clean
@@ -87,5 +66,5 @@ help:
 	@grep -E '^## [a-z]' $(MAKEFILE_LIST) | sed 's/^## //' \
 	  | awk -F': ' '{ printf "  make %-10s %s\n", $$1, $$2 }'
 	@echo
-	@echo "  Two players: one runs 'make signal', both open the page with"
-	@echo "  the same ?room= code."
+	@echo "  Two players: one hosts and shares the room code or a pasted"
+	@echo "  offer. Nothing of ours runs on a server."

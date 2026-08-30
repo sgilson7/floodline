@@ -11,16 +11,19 @@ records choices already made; `PROGRESS.md` says where the last session ended.
   this; if either fails, fix it before anything else.
 - The world changes only through `World::apply(player, Command)`. `gui` and
   `net` never mutate `World` directly.
-- The riskiest work goes first: `web/quad_rtc.js` (phase 3) is proven before
-  phase 4 or 5 begins.
+- The riskiest work goes first, but it is now phase 4, not phase 3: lockstep
+  is built and tested on `net::Loopback` with no browser at all, and only then
+  does `web/quad_rtc.js` have to work. A networking regression and a lockstep
+  regression can then never be confused for one another.
 - Every commit passes `make test`. Commit messages: imperative subject, body
   says why. No "WIP" commits on `main`.
 - Reference repos are cloned into `reference/` (gitignored). Borrow
   conventions and small pieces (`Rng`, letterbox math, Makefile, packaging
   script, panic hook, cache stamp). Do not import their code wholesale.
 - Toolchain: stable Rust ≥ 1.88, `wasm32-unknown-unknown` target, macroquad
-  0.4, matchbox 0.14 (server deployed, `matchbox_socket` native-only). No
-  other framework without a written decision.
+  0.4, and a vendored `trystero` browser bundle for signalling. **Nothing of
+  ours runs anywhere but GitHub Pages.** No server, no crate that implies one.
+  No other framework without a written decision.
 - Anything design §11 leaves open: ask. Anything else: decide, write one
   paragraph in `DECISIONS.md`, continue.
 
@@ -37,7 +40,7 @@ records choices already made; `PROGRESS.md` says where the last session ended.
 
 ## Commands
 - `make test` — whole suite, no window.
-- `make` — run the native GUI. `make bot ROOM=x` — headless peer.
-- `make signal` — local matchbox_server on :3536.
+- `make` — run the native GUI, which plays against `net::Loopback`.
 - `make web` / `make serve` — browser build and local server.
 - Push to `main` deploys to GitHub Pages via `.github/workflows/pages.yml`.
+  There is nothing else to deploy: if Pages is up, the game is up.

@@ -12,6 +12,3 @@ macroquad.workspace = true
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 net-web.workspace = true
 sapp-jsutils.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-net-native.workspace = true

@@ -1,10 +1,10 @@
 # FLOODLINE — design and multiplayer plan
 
-*Working title. A multiplayer medieval city builder — one map, one city per player, roads and trade between them — where every age ends in a
+*v2-noserver. A multiplayer medieval city builder — one map, one city per player, roads and trade between them — where every age ends in a
 catastrophe, played in the browser, built on the gear-master / workbench /
 redactor toolchain.*
 
-Draft 2 — separate cities on a shared map, roads and trade. For review. Everything below is a proposal; the sections marked
+Draft 3 (v2-noserver) — separate cities on a shared map, roads and trade; no server of ours anywhere: the host's browser is the hub and peers find it through public signaling or a pasted code. For review. Everything below is a proposal; the sections marked
 **Decision** are the ones that lock in architecture and are expensive to change
 later.
 
@@ -277,7 +277,8 @@ One map, two to six cities, one player each.
   barter along a road you can watch.
 * **Aid.** `Command::Lend { citizens, to }` sends idle citizens to work at
   another city for one age; they keep their home and walk back.
-* Cursors are shared (unreliable channel, 20 Hz) so players can point.
+* Cursors are shared (unreliable channel, 20 Hz, relayed by the host) so
+  players can point.
 * Ping is a command (`Command::Ping { cell }`) so it lands on the same tick
   for everyone and can be replayed.
 * Text chat goes over the unreliable channel and is not part of the sim.
@@ -290,25 +291,29 @@ One map, two to six cities, one player each.
 ```
 floodline/
   Cargo.toml                 workspace, same profile settings as gear-master
-  Makefile                   make / make web / make serve / make publish / make signal
-  packaging/package-web.sh   gear-master's, plus copying quad_rtc.js and sapp_jsutils.js
-  docs/                      published web build (GitHub Pages)
+  Makefile                   make / make test / make web / make serve / make publish
+  packaging/package-web.sh   gear-master's, plus copying quad_rtc.js and the vendored trystero build
+  docs/                      published web build (GitHub Pages) — the only thing on the internet
   crates/
     sim/        World, Citizen, Building, Water, Command, tick(), checksum()
-                deps: serde. Never macroquad, never a physics crate.
-    net/        Peer trait; Lockstep scheduler; Welcome/snapshot for late joiners
+                deps: serde, postcard. Never macroquad, never a physics crate.
+    net/        Peer trait; Star topology (host relays); Lockstep scheduler;
+                Welcome/snapshot for joiners; Loopback peer for tests
                 deps: sim, serde, postcard
     net-web/    Peer impl over the quad_rtc.js plugin (wasm32 only)
                 deps: net, sapp-jsutils
-    net-native/ Peer impl over matchbox_socket (native only)
-                deps: net, matchbox_socket, futures
-    gui/        macroquad: render, input → Command, panels
-                deps: sim, net, net-web | net-native, macroquad
-    bot/        headless peer that joins a room and follows a script
-                deps: sim, net, net-native
+    gui/        macroquad: render, input → Command, lobby, panels
+                deps: sim, net, net-web (wasm) — native build uses net::Loopback only
   web/
-    quad_rtc.js              the plugin: signaling + RTCPeerConnection + data channels
+    quad_rtc.js              the plugin: signaling (trystero or pasted codes) + RTCPeerConnection
+    vendor/trystero-*.js     pinned copy of trystero's browser bundle (no npm at build time)
+    config.js                ICE servers, trystero strategy and appId
 ```
+
+There is no server crate and nothing to deploy but static files. Native
+builds are for development: the GUI runs against `net::Loopback`, which
+hosts N in-process peers in one binary, so lockstep, desync detection and
+late-join can all be tested in `cargo test` with no browser and no network.
 
 The dependency rule is the gear-master one, and `tests/boundary.rs` asserts
 it: `sim` names no graphics or network crate; `gui` never constructs a
@@ -341,131 +346,164 @@ identically everywhere, whether by bug, desync or tampering.
 
 ---
 
-## 8. Lockstep protocol
+## 8. Lockstep over a star
+
+**Decision: star topology. Every joiner connects only to the host; the host
+relays. No full mesh.**
+
+Reasons: a joiner needs exactly one WebRTC connection, which makes the
+pasted-code path a single exchange; the host already owns the seed and the
+snapshot; and browsers cap the number of `RTCPeerConnection`s, which mesh hits
+first. Cost is one extra hop for non-host players — invisible under a 300 ms
+input delay.
 
 Messages on the **reliable, ordered** channel:
 
 ```
-Hello    { proto_version, build_hash, name, colour }
-Welcome  { seed, tick, snapshot: Option<World>, players }     host → joiner
-Turn     { tick, commands: Vec<Command>, checksum_prev }      every peer, every tick
+Hello    { proto_version, build_hash, name, colour }          joiner → host
+Welcome  { player_id, seed, tick, snapshot: Option<World>, players }   host → joiner
+Roster   { players }                                          host → all, on change
+Turn     { player, tick, commands: Vec<Command>, checksum_prev }
+                                                              joiner → host; host → all (relayed, plus its own)
 Bye      { reason }
 ```
 
-Messages on the **unreliable** channel: `Cursor { x, y }`, `Chat { text }`.
+Messages on the **unreliable** channel: `Cursor { player, x, y }`,
+`Chat { player, text }`, relayed by the host the same way.
 
 Rules:
 
 * A command issued locally at tick `T` is scheduled for `T + DELAY`, `DELAY`
-  = 3 ticks (300 ms). Peers advance tick `T` only when they hold a `Turn` for
-  `T` from every live peer. Nobody simulates ahead; nobody rolls back.
-* `checksum_prev` is a 64-bit FNV of `World` after tick `T − 1`. A mismatch
-  freezes the game with a "desync with Alice at tick T" banner. In development
-  the sim also dumps both worlds so the divergence can be diffed. This is the
-  test that keeps §3's rules honest.
-* `build_hash` in `Hello` is the wasm's sha256 (the same stamp
-  `package-web.sh` already computes). Mismatched builds cannot join, which
-  prevents the most common desync before it happens.
-* The **host** is whoever received `IdAssigned` first with no other peers in
-  the room; hosting only means owning the seed and answering `Welcome`. If the
-  host leaves, the lowest surviving `PeerId` inherits it. Since the sim is
-  identical everywhere, host migration is one assignment.
-* A peer whose `Turn` is more than 5 s late is shown as "waiting on …"; after
-  30 s the others vote it out with a `Drop` command and continue. Browser tabs
-  in the background stop rendering but keep timers at 1 Hz, so a backgrounded
-  peer still sends turns, slowly; the 5 s banner is what you will see.
+  = 3 ticks (300 ms). The host collects one `Turn` per live player per tick,
+  and once it has them all it emits the bundle for `T`; everyone (host
+  included) advances tick `T` only on that bundle. Nobody simulates ahead;
+  nobody rolls back. The host is a relay with a clock, not an authority: it
+  runs the same `sim` as everyone else.
+* `checksum_prev` is a 64-bit FNV of `World` after tick `T − 1`. The host
+  compares all of them; a mismatch freezes the game everywhere with a
+  "desync with Alice at tick T" banner. In development the sim also dumps
+  both worlds so the divergence can be diffed.
+* `build_hash` in `Hello` is the wasm's sha256 (the stamp `package-web.sh`
+  already computes). Mismatched builds cannot join.
+* **The host is whoever clicked Host.** If the host's tab closes, the game is
+  over for MVP; host migration (the lowest surviving `PlayerId` re-hosting and
+  everyone reconnecting to it through a fresh signal) is a later milestone.
+  Because the sim is identical everywhere, that migration is a reconnect, not
+  a state transfer.
+* A player whose `Turn` is more than 5 s late is shown as "waiting on …";
+  after 30 s the host emits a `Drop` command and continues without them.
+  Background tabs keep timers at 1 Hz, so a backgrounded player still sends
+  turns, slowly; the 5 s banner is what you will see.
 * **Late join:** host serialises `World` with `postcard` (~ 50–150 KB at 500
   citizens), sends `Welcome { snapshot }`, and the joiner starts contributing
-  `Turn`s from `tick + DELAY`. The host keeps sending its own turns while the
-  joiner catches up.
+  `Turn`s from `tick + DELAY`.
 
 ---
 
-## 9. Deploying multiplayer with matchbox
+## 9. Multiplayer without a server
 
-**Decision: matchbox_server for signaling, unchanged; a miniquad JS plugin for
-the browser side of WebRTC; matchbox_socket for native peers.**
+**Decision: nothing of ours runs anywhere except GitHub Pages. Game traffic is
+browser-to-browser over WebRTC. The introduction step uses public decentralised
+signalling by default and a pasted code as the fallback.**
 
-### 9.1 Why not matchbox_socket in the browser
+### 9.1 What WebRTC needs and who provides it
 
-Macroquad boots wasm through its own `mq_js_bundle.js` and never runs
-wasm-bindgen, while `matchbox_socket` is built on web-sys. The known shims for
-combining the two break on version bumps. Matchbox's *protocol*, however, is
-tiny and stable:
+Two browsers cannot dial each other by address. Before a direct link exists
+they must exchange a few kilobytes of connection information (an SDP
+offer/answer and ICE candidates) through some third channel — *signalling*.
+After that exchange the third channel is idle; the game never touches it
+again. Matchbox's server did only this. The v2 design replaces it with two
+channels nobody has to operate:
 
-* connect a WebSocket to `wss://<signal-host>/<room>?next=<players>`
-* the server sends `IdAssigned(uuid)`, then `NewPeer(uuid)` for each other peer,
-  `PeerLeft(uuid)` on departure, and relays `Signal { sender, data }`
-* a peer sends `Signal { receiver, data }` and `KeepAlive`
-* `data` is one of `Offer(sdp)`, `Answer(sdp)`, `IceCandidate(json)`
+1. **Trystero** (`web/vendor/trystero-*.js`, pinned). A JS library that does
+   WebRTC matchmaking over public infrastructure that already exists — Nostr
+   relays by default, with MQTT brokers and BitTorrent trackers as
+   alternatives — and hands back connected `RTCPeerConnection`s. Your app data
+   never touches the signalling medium. The host joins room
+   `floodline/<build_hash>/<room_code>` and waits; joiners join the same room
+   name and Trystero introduces them. Config lives in `web/config.js`:
+   strategy (`nostr`), `appId`, an optional password (which encrypts the
+   signalling so an untrusted relay cannot tamper with it), and `rtcConfig`.
+2. **Pasted codes.** Host clicks *Host by code*, waits for ICE gathering to
+   finish (no trickle), and shows a compressed base64 blob of its offer. The
+   joiner pastes it, gets an answer blob, sends it back over whatever chat
+   they are already using, host pastes it. One round trip per joiner, thanks
+   to the star. This path has no dependency on anyone's relays and is the one
+   to reach for when a tracker is down or a network blocks them.
 
-All JSON. That is a ~150-line browser script.
+Both paths end in the same object — one `RTCPeerConnection` to the host with
+a reliable and an unreliable data channel — so `net-web` cannot tell them
+apart.
 
 ### 9.2 `web/quad_rtc.js`
 
 A miniquad plugin (registered with `miniquad_add_plugin` before `load()`),
-with these imports exposed to Rust:
+exposing to Rust:
 
 ```
-rtc_join(room_url: JsObject, next: u32)          open signaling, become a peer
-rtc_leave()
-rtc_poll() -> JsObject                             next event or null:
-                                                   {kind:"id", id} | {kind:"peer", id}
-                                                   | {kind:"left", id} | {kind:"msg", id, reliable, bytes}
-rtc_send(peer: JsObject, reliable: u32, ptr, len)  copy bytes out of wasm memory, send
-rtc_ice(servers: JsObject)                         set STUN/TURN list before join
+rtc_host(room: JsObject, mode: u32)       mode 0 = trystero, 1 = code; returns immediately
+rtc_join(room: JsObject, mode: u32)
+rtc_code_offer() -> JsObject              host: the offer blob once gathered, else null
+rtc_code_answer(blob: JsObject)           host: accept a joiner's answer
+rtc_code_accept(blob: JsObject) -> JsObject   joiner: consume offer, produce answer blob
+rtc_poll() -> JsObject                    next event or null:
+                                          {kind:"peer", id} | {kind:"left", id}
+                                          | {kind:"msg", id, reliable, bytes} | {kind:"error", text}
+rtc_send(peer: JsObject, reliable: u32, ptr, len)
+rtc_close()
 ```
 
-Inside the script: one `RTCPeerConnection` per peer, two `RTCDataChannel`s
-(`{ordered:true}` and `{ordered:false, maxRetransmits:0}`), the offer/answer
-dance mirroring `matchbox_socket/src/webrtc_socket/wasm.rs` (the peer with the
-lower id offers), ICE candidates forwarded as they arrive, a 10 s `KeepAlive`.
-Incoming bytes are queued and drained by `rtc_poll` from the macroquad frame
-loop. Strings and byte buffers cross the boundary through `sapp-jsutils`, as
-gear-master's existing loader already permits.
+Inside: per connection two `RTCDataChannel`s (`{ordered:true}` and
+`{ordered:false, maxRetransmits:0}`); with Trystero, `room.onPeerJoin` gives
+the connection and the plugin attaches its own channels; with codes, the
+plugin builds the connection itself, disables trickle by waiting for
+`icegatheringstatechange === "complete"`, and compresses the SDP (strip
+lines the other side can infer, then deflate via `CompressionStream`,
+base64) so the blob fits comfortably in a chat message. Incoming bytes are
+queued and drained by `rtc_poll` from the macroquad frame loop. Strings and
+byte buffers cross the boundary through `sapp-jsutils`.
 
-`net-web` wraps this in the `Peer` trait; `net-native` implements the same
-trait over `matchbox_socket` with two channels configured identically. The
-lockstep code above the trait does not know which it is on.
+Trystero is loaded as a plain script tag from `web/vendor/`, no bundler —
+the same "no npm at build time" rule the workbench and redactor follow.
+Updating it is copying a new file and bumping the pin in `package-web.sh`.
 
-### 9.3 Running the signaling server
+### 9.3 STUN / TURN — the one thing that is not free
 
-`matchbox_server` (crate version 0.14 at time of writing) is a single binary
-that uses a couple of megabytes of memory and ships as a Docker image. Options,
-cheapest first:
+ICE needs STUN to learn public addresses; Google's public servers are fine
+and cost nothing. When both players are behind strict NATs, no direct path
+exists and only a TURN relay can carry traffic. There is no serverless
+substitute for that case. The plan is: ship with STUN only, show a clear
+"could not connect directly" message (Trystero reports this via
+`onJoinError`; the code path reports it via `iceconnectionstate === failed`),
+and keep `rtcConfig.iceServers` in `config.js` so a free-tier hosted TURN
+entry (Cloudflare's or metered.ca's) is one edit away for anyone who forks the
+game and wants it. For friends on home connections this is the uncommon
+case, not the common one.
 
-1. **Fly.io** — `fly launch` with the upstream Dockerfile, one shared-cpu
-   machine, TLS terminated by Fly so the client uses `wss://`. Free-tier-sized.
-2. Any VPS behind Caddy for TLS.
-3. During development, `cargo run -p matchbox_server` locally and
-   `ws://localhost:3536/room?next=2`.
+### 9.4 Rooms
 
-The client reads the signaling URL from a query parameter or a small
-`config.js`, so the GitHub Pages build never has to change when the server
-moves. `make signal` in the Makefile runs the local server.
+A room is a short code (`brisk-otter-42`) the host shares; the URL
+`https://<user>.github.io/floodline/?room=brisk-otter-42` opens the lobby
+with it filled in. Trystero room names are prefixed with the build hash, so a
+stale tab cannot find a newer build's game. Code-mode games need no room
+name at all — the pasted offer is the invitation.
 
-### 9.4 STUN / TURN
-
-Start with Google's public STUN (`stun:stun.l.google.com:19302`). Full-mesh
-WebRTC connects directly for most home networks; for the ones it does not, add
-a TURN server (coturn on the same VPS, or a metered.ca free tier) to the
-`rtc_ice` list. Budget for this from day one in the config, not the code.
-
-### 9.5 Rooms
-
-A room is a short code (`brisk-otter-42`) the host shares. The URL is
-`https://<user>.github.io/floodline/?room=brisk-otter-42`. Room names are
-namespaced with the build hash server-side by putting it in the path
-(`/<hash>/<room>`), so a stale tab cannot land in a room with a newer build.
-
-### 9.6 What "publish" means
+### 9.5 What "publish" means
 
 Unchanged from gear-master: `make web` builds the wasm, copies
-`mq_js_bundle.js`, `sapp_jsutils.js` and `quad_rtc.js`, stamps hashes,
-writes `dist/web/`; `make publish` copies to `docs/` and pushes. The only new
-moving part on the internet is the signaling server, which holds no game
-state and can be restarted at any time without ending a game in progress —
-established peers keep talking directly.
+`mq_js_bundle.js`, `sapp_jsutils.js`, `quad_rtc.js`, `config.js` and the
+vendored trystero file, stamps hashes, writes `dist/web/`; the Pages workflow
+(or `make publish` into `docs/`) puts it online. Nothing else exists. If
+GitHub Pages is up, the game is up.
+
+### 9.6 Testing without browsers
+
+`net::Loopback` implements `Peer` with in-process queues, optional simulated
+latency and message loss, and N players in one binary. The lockstep, desync
+banner, drop-after-timeout and late-join logic are all tested there in
+`cargo test`. The browser plugin is tested separately with an `echo.html`
+page (not published) that only exercises connect/send/receive, so a
+networking regression and a lockstep regression can never be confused.
 
 ---
 
@@ -481,11 +519,12 @@ Each step ends in something runnable.
    volume minus what leaves the edges; a level-2 dike holds a height-12 surge.
 3. **Bodies.** Citizens pushed by flow, drowning, debris. Test: a citizen in a
    height-18 flow with no obstacles ends at the far edge.
-4. **`quad_rtc.js` and `net-web`.** Two tabs, one local `matchbox_server`,
-   bytes both ways. No game yet. This is the riskiest step; do it before
-   committing more to §3.
-5. **Lockstep.** `net` scheduler on top of the trait; `bot` peer for testing
-   from the command line; desync banner. Play step 1's sim with two tabs.
+4. **`net::Loopback` and lockstep.** Star scheduler on top of the `Peer`
+   trait, tested with N in-process peers, simulated latency, a forced desync,
+   a dropped player and a late join. No browser yet.
+5. **`quad_rtc.js` and `net-web`.** Two tabs on two networks, both paths
+   (trystero and pasted code), bytes both ways, a closed tab produces `Left`.
+   This is the riskiest step; do it before the game has a second building.
 6. **`gui`.** Render the map, select and command citizens, place buildings,
    the side panel. Single-player is just lockstep with one peer.
 7. **The first age.** Warning, impact, aftermath, score. Playtest the flood
@@ -506,6 +545,9 @@ Each step ends in something runnable.
 * Map size vs. citizen count: 128 × 128 and ~500 citizens should be fine in
   wasm at 10 ticks/s, but the water automaton is 16 k cells per tick and the
   first profile will say whether it needs to run at 5 Hz.
+* Trystero's default Nostr strategy versus MQTT or BitTorrent for this game:
+  pick by measured join time from two home networks, and keep the pasted-code
+  path regardless.
 * Whether to reuse gear-master's actual `Rng`, fixed-canvas layout code and
   panel style, or start `gui` clean. Reusing saves a week; starting clean
   avoids inheriting a 13 000-line `main.rs`.

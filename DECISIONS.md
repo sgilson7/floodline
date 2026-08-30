@@ -549,3 +549,44 @@ Terrain relief was tried at 64 instead of 255 to make the flood spread further.
 It moved coverage from nine per cent to fifteen and cost more than it bought:
 sixty-four distinct heights make the quantile bands that keep every seed
 playable much coarser. Reverted, and recorded here so it is not tried twice.
+
+---
+
+## 2026-08-30 — v2: no server anywhere, and the phases swap
+
+The design and plan were replaced with their `v2-noserver` drafts. Sections 1–6
+— the whole simulation — are unchanged, so everything phases 0 to 2 built
+stands. What changed is §7 to §9, and it changes the rest of the project.
+
+**There is no server.** Not matchbox, not Fly.io, nothing. Signalling goes
+through trystero over public infrastructure that already exists (Nostr relays
+by default), with a pasted offer/answer blob as the fallback for when relays
+are down or blocked. Both paths end in the same object — one
+`RTCPeerConnection` with a reliable and an unreliable channel — so `net-web`
+cannot tell them apart. If GitHub Pages is up, the game is up.
+
+This removes the one thing I had flagged as needing the author's own account.
+There is nothing left to deploy but static files.
+
+**Star, not mesh.** Every joiner connects only to the host and the host relays.
+A joiner needs exactly one connection, which is what makes a single pasted
+exchange enough; the host already owns the seed and the snapshot; and browsers
+cap `RTCPeerConnection`s, which a mesh hits first. The host is a relay with a
+clock, not an authority — it runs the same `sim` as everyone else.
+
+**Phases 3 and 4 swap, and that is the best part.** Lockstep is now built and
+tested on `net::Loopback` — N in-process peers in a star with configurable
+latency and loss — before any browser is involved, and only then does
+`quad_rtc.js` have to work. Under v1 the riskiest thing was also the first
+thing, and a desync and a dropped data channel would have looked identical.
+Now a networking regression and a lockstep regression cannot be confused.
+
+**Crates removed: `net-native` and `bot`.** Both existed to reach a
+`matchbox_socket` peer from a terminal. `net::Loopback` does that job better —
+in-process, deterministic, and inside `cargo test` — and `bot`'s scripted play
+becomes a loopback test. `make signal` and `make bot` go with them.
+
+The earlier entry about matchbox deciding who offers by arrival order is now
+history rather than guidance: trystero owns that handshake. It stays because it
+records a real correction to design §9.2, and because the star still has to
+decide who offers if the pasted-code path is ever generalised.
