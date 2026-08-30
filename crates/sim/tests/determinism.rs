@@ -12,7 +12,9 @@
 //! arrives with `Command` in item 7.
 
 use sim::balance::TICKS_PER_DAY;
+use sim::building::{Good, Kind};
 use sim::citizen::PlayerId;
+use sim::nav::{Dest, Nav};
 use sim::World;
 
 /// The full length the plan asks for. Ten thousand ticks is fifty in-game
@@ -37,12 +39,13 @@ fn two_worlds_from_one_seed_stay_identical_for_ten_thousand_ticks() {
         for players in [2u32, 6] {
             let mut a = World::new(seed, players);
             let mut b = World::new(seed, players);
+            let (mut na, mut nb) = (Nav::new(), Nav::new());
 
             assert_eq!(a.checksum(), b.checksum(), "seed {seed}: differed before tick 1");
 
             for t in 1..=TICKS {
-                a.tick();
-                b.tick();
+                a.tick(&mut na);
+                b.tick(&mut nb);
 
                 // Everything a tick can touch. The map and the occupancy grid
                 // are written when the world is built and then only by a
@@ -80,13 +83,13 @@ fn two_worlds_from_one_seed_stay_identical_for_ten_thousand_ticks() {
 fn a_run_replays_from_its_seed() {
     let mut first = World::new(0xD1FF, 3);
     for _ in 0..TICKS_PER_DAY * 4 {
-        first.tick();
+        first.tick_alone();
     }
     let want = first.checksum();
 
     let mut again = World::new(first.seed, 3);
     for _ in 0..TICKS_PER_DAY * 4 {
-        again.tick();
+        again.tick_alone();
     }
     assert_eq!(again.checksum(), want);
     assert_eq!(again, first);
@@ -99,8 +102,8 @@ fn the_checksum_would_actually_catch_a_divergence() {
     let mut a = World::new(9, 2);
     let mut b = World::new(9, 2);
     for _ in 0..500 {
-        a.tick();
-        b.tick();
+        a.tick_alone();
+        b.tick_alone();
     }
     assert_eq!(a.checksum(), b.checksum());
 
@@ -168,4 +171,133 @@ fn first_difference(a: &World, b: &World) -> String {
 fn player_ids_are_stable() {
     let w = World::new(1, 4);
     assert_eq!(w.players, vec![PlayerId(0), PlayerId(1), PlayerId(2), PlayerId(3)]);
+}
+
+
+/// The same world, driven through everything that changes it, still agrees.
+///
+/// The plain tick test above only exercises needs decaying. This one places
+/// buildings, hauls to them, builds them, sends citizens walking across the
+/// map and demolishes things underneath them — which is where the ordering
+/// bugs live. Two peers doing the same things in the same order must end up
+/// byte-identical, and the fact that the flow fields are a cache outside
+/// `World` must not change that.
+#[test]
+fn a_scripted_game_runs_the_same_twice() {
+    let run = |seed: u64| -> Vec<u64> {
+        let mut w = World::new(seed, 3);
+        let mut nav = Nav::new();
+        let mut marks = Vec::new();
+
+        // Somewhere legal for each player to build, found the same way both
+        // times because the world it searches is the same world.
+        let mut sites = Vec::new();
+        for p in 0..3u8 {
+            let (hx, hy) = w.map.hearth_sites[p as usize];
+            let mut placed = Vec::new();
+            'kinds: for kind in [Kind::Cottage, Kind::Granary, Kind::Farm] {
+                for r in 3..25i32 {
+                    for dy in -r..=r {
+                        for dx in -r..=r {
+                            if dx.abs() != r && dy.abs() != r {
+                                continue;
+                            }
+                            if w.can_place(PlayerId(p), kind, hx + dx, hy + dy).is_ok() {
+                                let id = w.place(PlayerId(p), kind, hx + dx, hy + dy).unwrap();
+                                placed.push((kind, id));
+                                continue 'kinds;
+                            }
+                        }
+                    }
+                }
+            }
+            sites.push(placed);
+        }
+        marks.push(w.checksum());
+
+        // Haul the materials in, from each city's own hearth.
+        for (p, placed) in sites.iter().enumerate() {
+            let hearth = w.buildings[p].id;
+            for &(kind, id) in placed {
+                for g in [Good::Wood, Good::Stone] {
+                    let want = kind.cost().get(g);
+                    let have = w.buildings[hearth.0 as usize].store.take(g, want);
+                    w.deliver_to(id, g, have);
+                }
+            }
+        }
+        marks.push(w.checksum());
+
+        // Send everybody somewhere: half to their city's first building, half
+        // to a fixed cell, so both kinds of destination are exercised.
+        for i in 0..w.citizens.len() {
+            let owner = w.citizens[i].owner.0 as usize;
+            let dest = if i % 2 == 0 {
+                match sites[owner].first() {
+                    Some(&(_, id)) => Dest::Building(id),
+                    None => Dest::Cell(64, 64),
+                }
+            } else {
+                Dest::Cell(64, 64)
+            };
+            w.citizens[i].walk_to(dest);
+        }
+
+        // Build while they walk, and take one thing away underneath them.
+        for t in 0..1200u32 {
+            if t % 3 == 0 {
+                for placed in &sites {
+                    for &(_, id) in placed {
+                        w.build_at(id, 1);
+                    }
+                }
+            }
+            if t == 600 {
+                if let Some(&(_, id)) = sites[1].first() {
+                    let _ = w.demolish(PlayerId(1), id);
+                }
+            }
+            w.tick(&mut nav);
+            if t % 200 == 0 {
+                marks.push(w.checksum());
+            }
+        }
+        marks.push(w.checksum());
+        marks
+    };
+
+    for seed in [5u64, 1234, 0xBEEF] {
+        let a = run(seed);
+        let b = run(seed);
+        assert_eq!(a, b, "seed {seed}: a scripted game did not replay");
+        // And it actually did something, rather than agreeing about nothing.
+        let distinct: std::collections::BTreeSet<u64> = a.iter().copied().collect();
+        assert!(distinct.len() > 4, "seed {seed}: the world barely changed: {a:?}");
+    }
+}
+
+/// A cold cache and a warm one must produce the same world.
+///
+/// This is the property that lets flow fields live outside `World`: a late
+/// joiner rebuilds them from a snapshot and must then agree, tick for tick,
+/// with a peer that has had them in memory the whole time.
+#[test]
+fn a_fresh_nav_cache_navigates_like_a_warm_one() {
+    let mut warm = World::new(44, 2);
+    let mut nav = Nav::new();
+
+    for i in 0..warm.citizens.len() {
+        warm.citizens[i].walk_to(Dest::Cell(64, 64));
+    }
+    let mut cold = warm.clone();
+
+    for _ in 0..300 {
+        warm.tick(&mut nav);
+        // A brand new cache every single tick, as if the peer had just been
+        // handed a snapshot.
+        cold.tick(&mut Nav::new());
+    }
+    assert_eq!(warm.checksum(), cold.checksum());
+    assert_eq!(warm, cold);
+    assert!(nav.len() > 0, "the warm cache was never used");
 }

@@ -245,3 +245,68 @@ braces, and it costs a branch per operation. Phase 2 item 4 profiles `tick()`
 against a 20 ms budget at 500 citizens with the flood running; if the branch
 turns out to be the cost, that is the place to find out and this is the entry
 to revisit.
+
+---
+
+## 2026-08-30 — Roads and bridges are buildings; a Dike is walkable
+
+The plan's phase 1 item 4 lists Road and Bridge among the buildings, and they
+are modelled as exactly that: 1 x 1 buildings that cost builder-ticks, occupy a
+cell, and take damage. The alternative was a flag on the cell, which would have
+been less code today and two rules by phase 2 — the flood breaks road cells
+(design §6) and it breaks buildings (§3.4), and those would have been two
+separate pieces of damage logic to keep in step. One kind of thing, one rule.
+
+A **Dike does not block movement**, which the design does not say either way.
+It is a raised bank of earth and stone, and the alternative is worse than
+unrealistic: a player who rings their city with a dike to keep the water out
+would have walled their own citizens in, would lose them to it, and would learn
+not to build dikes — the exact opposite of the lesson design §5 exists to
+teach. It carries no traffic bonus either; it is walkable, not a road.
+
+Roads and bridges also mean construction has to go through `World` rather than
+through `Building` directly: the tick a bridge is finished is the tick the map
+becomes passable somewhere it was not, and every cached flow field is then
+wrong. `Building::build`, `deliver` and `damage` are crate-private and
+`World::build_at`, `deliver_to` and `damage_building` are the door, so bumping
+the navigation generation is impossible to forget.
+
+---
+
+## 2026-08-30 — Flow fields are a cache, and live outside `World`
+
+Design §3.2 wants one Dijkstra field per destination rather than five hundred
+A* searches. Each field is two vectors of sixteen thousand cells, so a dozen of
+them would be more state than the entire rest of the game — and if they lived
+in `World` they would be in the snapshot a late joiner receives (§8 budgets
+50–150 KB for that) and in the checksum computed every tick.
+
+So `Nav` is passed to `World::tick` rather than owned by it. `World` stays the
+authoritative state; the fields are derived from it and rebuilt identically on
+every peer, which is a claim `a_fresh_nav_cache_navigates_like_a_warm_one`
+tests directly: one world ticked with a warm cache and its clone ticked with a
+brand new cache every single tick must agree, checksum and all. That is exactly
+the situation a late joiner is in.
+
+What *is* in `World` is `nav_generation`, a counter bumped whenever a footprint
+appears or disappears. It is cheap, it tells the cache when it has gone stale,
+and it is checksummed because two peers with different generations have placed
+different numbers of buildings — worth catching directly rather than inferring
+from the wreckage two minutes later.
+
+---
+
+## 2026-08-30 — Starving is a condition, not a state
+
+`State` was written with a `Starving` variant, and the walking tests found what
+that costs: `tick_needs` set it, which overwrote `Walking`, so the moment a
+citizen ran out of food it stopped moving — including on its way to the granary
+that would have saved it. The bug is not the assignment, it is the modelling.
+
+`State` is now only what somebody is doing — Idle, Walking, Working, Eating,
+Sleeping, Dead — and hunger and exhaustion are separate fields with
+`starving()` and `tired()` reading them. The two are independent, which is what
+lets a starving citizen run for food and a tired one keep walking at half
+speed. Death is the one condition that *is* a state, because it ends every
+activity, and `Citizen::die` clears the destination and job that only make
+sense for the living.

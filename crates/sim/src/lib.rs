@@ -15,6 +15,7 @@ pub mod citizen;
 pub mod fx;
 pub mod map;
 pub mod names;
+pub mod nav;
 pub mod rng;
 pub mod world;
 

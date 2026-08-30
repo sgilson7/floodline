@@ -140,3 +140,16 @@ pub const BUILDER_SLOTS: usize = 4;
 /// of height 12 dead, which is the teaching moment in design §5.
 pub const DIKE_HEIGHT_PER_LEVEL: u16 = 3;
 pub const DIKE_MAX_LEVEL: u8 = 4;
+
+// ---- getting about ---------------------------------------------------------
+
+/// How far a citizen walks in a tick on open ground, in 256ths of a cell.
+/// A quarter of a cell a tick is two and a half cells a second, which crosses
+/// a city in a few seconds and the whole map in about a minute.
+pub const WALK_SPEED: i32 = 64;
+
+/// How many flow fields are kept before the least recently used is dropped.
+/// A field is sixteen thousand cells; a dozen is plenty for one city's
+/// granary, cottages and building sites, and a group sent to a cell shares
+/// one between all of them.
+pub const NAV_CACHE_MAX: usize = 24;

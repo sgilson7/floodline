@@ -356,7 +356,11 @@ impl Building {
 
     /// Take delivery of materials. Returns what was accepted, so a hauler
     /// carrying more than is wanted keeps the rest.
-    pub fn deliver(&mut self, g: Good, amount: u16) -> u16 {
+    ///
+    /// Crate-private, like `build` and `damage`: finishing a road or a bridge
+    /// changes what the map is passable through, and only `World` knows to
+    /// tell the flow fields. Callers outside `sim` go through `World`.
+    pub(crate) fn deliver(&mut self, g: Good, amount: u16) -> u16 {
         if self.state != BuildState::Site {
             return 0;
         }
@@ -372,7 +376,7 @@ impl Building {
     }
 
     /// Apply builder-ticks. Returns true on the tick it finishes.
-    pub fn build(&mut self, effort: u32) -> bool {
+    pub(crate) fn build(&mut self, effort: u32) -> bool {
         if !self.ready_to_build() {
             return false;
         }
@@ -386,7 +390,7 @@ impl Building {
     }
 
     /// Take damage. Returns true on the tick it becomes rubble.
-    pub fn damage(&mut self, amount: u16) -> bool {
+    pub(crate) fn damage(&mut self, amount: u16) -> bool {
         if self.state == BuildState::Rubble {
             return false;
         }
@@ -425,10 +429,17 @@ impl Building {
         self.standing_now() && matches!(self.kind, Kind::Road | Kind::Bridge)
     }
 
-    /// Whether this blocks movement. A site does not — builders have to stand
-    /// in it — and nor does a road.
+    /// Whether this blocks movement.
+    ///
+    /// A construction site does not — builders have to stand in it. Roads and
+    /// bridges do not, obviously. Neither does a **Dike**: it is a raised bank
+    /// of earth and stone, and a player who rings their city with one to keep
+    /// the water out must not thereby wall their own citizens in. That would
+    /// turn the single most important defensive structure in the game into a
+    /// trap, and a player would learn to stop building them, which is the
+    /// opposite of what design §5 wants taught.
     pub fn blocks_movement(&self) -> bool {
-        self.standing_now() && !matches!(self.kind, Kind::Road | Kind::Bridge)
+        self.standing_now() && !matches!(self.kind, Kind::Road | Kind::Bridge | Kind::Dike)
     }
 
     /// Whether the footprint would fit on the map at all, ignoring what is
@@ -641,18 +652,33 @@ mod tests {
     }
 
     #[test]
-    fn roads_carry_traffic_and_do_not_block_it() {
+    fn roads_carry_traffic_and_only_walls_stop_it() {
         for k in Kind::ALL {
             let mut b = Building::standing(BuildingId(0), PlayerId(0), k, 5, 5);
+
             let is_way = matches!(k, Kind::Road | Kind::Bridge);
             assert_eq!(b.carries_traffic(), is_way, "{k:?}");
-            assert_eq!(b.blocks_movement(), !is_way, "{k:?}");
+
+            // A Dike is walkable but not fast: a raised bank of earth. If it
+            // blocked, a player who ringed their city with one to keep the
+            // water out would have walled their own citizens in, and would
+            // learn to stop building the one structure design §5 exists to
+            // teach.
+            let walkable = matches!(k, Kind::Road | Kind::Bridge | Kind::Dike);
+            assert_eq!(b.blocks_movement(), !walkable, "{k:?}");
+            assert!(!Kind::Dike.accepts(Ground::Shallows), "and it is built on dry land");
 
             // A construction site is walked through, not around: builders have
             // to stand in it.
             b.state = BuildState::Site;
             assert!(!b.blocks_movement(), "{k:?} site blocked movement");
             assert!(!b.carries_traffic(), "{k:?} site carried traffic");
+
+            // Rubble is neither. A ruined road is ground again and a ruined
+            // bridge is open water.
+            b.state = BuildState::Rubble;
+            assert!(!b.blocks_movement(), "{k:?} rubble blocked movement");
+            assert!(!b.carries_traffic(), "{k:?} rubble carried traffic");
         }
     }
 

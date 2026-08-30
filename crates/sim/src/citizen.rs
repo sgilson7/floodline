@@ -7,7 +7,8 @@
 
 use crate::balance::*;
 use crate::building::BuildingId;
-use crate::fx::V2;
+use crate::nav::Dest;
+use crate::fx::{Fx, V2};
 use serde::{Deserialize, Serialize};
 
 /// Index into `World::citizens`. Citizens are never removed from that vector —
@@ -39,8 +40,6 @@ pub enum State {
     Eating,
     /// In a bed, filling `rest`.
     Sleeping,
-    /// `food` is empty and the clock is running.
-    Starving,
     Dead,
 }
 
@@ -61,6 +60,8 @@ pub struct Citizen {
     pub food: u16,
     pub rest: u16,
     pub state: State,
+    /// Where this citizen is walking, if anywhere.
+    pub dest: Option<Dest>,
     /// Ticks spent with no food. Only counts while `Starving`.
     pub starved_for: u32,
 }
@@ -78,6 +79,7 @@ impl Citizen {
             food: NEED_FULL,
             rest: NEED_FULL,
             state: State::Idle,
+            dest: None,
             starved_for: 0,
         }
     }
@@ -90,8 +92,63 @@ impl Citizen {
         self.food < HUNGRY
     }
 
+    /// Out of food and on the clock.
+    ///
+    /// A condition, deliberately **not** a `State`. The first version of this
+    /// made `Starving` a state, which overwrote `Walking` — so the moment a
+    /// citizen ran out of food it stopped moving, including on its way to the
+    /// granary that would have saved it. `State` is what somebody is doing;
+    /// hunger and exhaustion are how they are, and the two are independent.
+    pub fn starving(&self) -> bool {
+        self.alive() && self.food == 0
+    }
+
     pub fn tired(&self) -> bool {
         self.rest < TIRED
+    }
+
+    /// Send this citizen somewhere. Does nothing to the dead.
+    pub fn walk_to(&mut self, dest: Dest) {
+        if !self.alive() {
+            return;
+        }
+        self.dest = Some(dest);
+        self.state = State::Walking;
+    }
+
+    /// Stop being. Clears everything that only makes sense for the living, so
+    /// a corpse is not still walking somewhere in the state it leaves behind.
+    pub fn die(&mut self) {
+        self.state = State::Dead;
+        self.vel = V2::ZERO;
+        self.dest = None;
+        self.job = None;
+    }
+
+    /// Stop walking, wherever this is.
+    pub fn halt(&mut self) {
+        self.dest = None;
+        self.vel = V2::ZERO;
+        if self.state == State::Walking {
+            self.state = State::Idle;
+        }
+    }
+
+    /// How far this citizen moves in a tick, in 256ths of a cell.
+    ///
+    /// Twice as fast on a road (design §6) and half speed when exhausted
+    /// (design §3.2). Multiplication before division, so a tired citizen on a
+    /// road walks at exactly the base rate rather than at whatever an integer
+    /// division of an integer division would leave.
+    pub fn speed(&self, on_road: bool) -> Fx {
+        let mut v = WALK_SPEED;
+        if on_road {
+            v *= 2;
+        }
+        if self.tired() {
+            v /= 2;
+        }
+        Fx(v)
     }
 
     /// One tick of getting hungrier and more tired.
@@ -108,18 +165,13 @@ impl Citizen {
         self.rest = self.rest.saturating_sub(REST_DECAY);
 
         if self.food == 0 {
-            if self.state != State::Starving {
-                self.state = State::Starving;
-                self.starved_for = 0;
-            }
             self.starved_for += 1;
             if self.starved_for >= STARVE_TICKS {
-                self.state = State::Dead;
-                self.vel = V2::ZERO;
+                self.die();
             }
-        } else if self.state == State::Starving {
-            // Fed again before the clock ran out.
-            self.state = State::Idle;
+        } else {
+            // Fed before the clock ran out. The next famine starts from the
+            // beginning rather than resuming where this one left off.
             self.starved_for = 0;
         }
     }

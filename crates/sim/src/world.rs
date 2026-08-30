@@ -7,10 +7,12 @@
 
 use crate::balance::*;
 use crate::building::{BuildState, Building, BuildingId, Good, Goods, Kind};
-use crate::citizen::{Citizen, CitizenId, PlayerId};
+use crate::citizen::{Citizen, CitizenId, PlayerId, State};
 use crate::fx::V2;
+use crate::fx::Fx;
 use crate::map::Map;
 use crate::names::NAMES;
+use crate::nav::{self, Dest, FlowField, Nav};
 use crate::rng::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +64,15 @@ pub struct World {
     /// so of the checksum: if it ever disagrees with the list, that is a bug
     /// worth catching on the tick it happens rather than an invisible one.
     pub occupancy: Vec<Option<BuildingId>>,
+    /// Bumped whenever a footprint appears or disappears.
+    ///
+    /// Flow fields are a cache outside `World` (see `nav`), and this is how
+    /// they know they have gone stale. It lives in the world, and so in the
+    /// checksum, because it counts something the world did: two peers whose
+    /// generations differ have placed different numbers of buildings, and
+    /// that is worth catching directly rather than inferring from the
+    /// wreckage two minutes later.
+    pub nav_generation: u32,
     pub players: Vec<PlayerId>,
 }
 
@@ -100,6 +111,7 @@ impl World {
             citizens,
             buildings: Vec::new(),
             occupancy: vec![None; crate::map::CELLS],
+            nav_generation: 0,
             players: (0..players).map(|p| PlayerId(p as u8)).collect(),
         };
 
@@ -213,6 +225,7 @@ impl World {
                 self.occupancy[Map::idx(cx, cy)] = None;
             }
         }
+        self.nav_generation += 1;
         let b = &mut self.buildings[id.0 as usize];
         b.state = BuildState::Rubble;
         b.integrity = 0;
@@ -247,6 +260,49 @@ impl World {
         found.into_iter().map(|(_, id)| id).collect()
     }
 
+    /// Haul materials to a site. Returns what it accepted.
+    pub fn deliver_to(&mut self, id: BuildingId, g: Good, amount: u16) -> u16 {
+        match self.buildings.get_mut(id.0 as usize) {
+            Some(b) => b.deliver(g, amount),
+            None => 0,
+        }
+    }
+
+    /// Apply builder-ticks to a site. Returns true on the tick it finishes.
+    ///
+    /// This exists rather than letting callers reach into `buildings` because
+    /// of one case: the tick a Road or a Bridge is finished is the tick the
+    /// map becomes passable somewhere it was not, and every cached flow field
+    /// is then wrong. Routing construction through here is what makes that
+    /// impossible to forget.
+    pub fn build_at(&mut self, id: BuildingId, effort: u32) -> bool {
+        let finished = match self.buildings.get_mut(id.0 as usize) {
+            Some(b) => b.build(effort),
+            None => false,
+        };
+        if finished {
+            self.nav_generation += 1;
+        }
+        finished
+    }
+
+    /// Damage a building. Returns true on the tick it becomes rubble.
+    ///
+    /// A ruined road is ordinary ground again and a ruined bridge is open
+    /// water, so this bumps the generation for the same reason `build_at`
+    /// does. Rubble keeps its footprint until somebody clears it with
+    /// `demolish`.
+    pub fn damage_building(&mut self, id: BuildingId, amount: u16) -> bool {
+        let ruined = match self.buildings.get_mut(id.0 as usize) {
+            Some(b) => b.damage(amount),
+            None => false,
+        };
+        if ruined {
+            self.nav_generation += 1;
+        }
+        ruined
+    }
+
     /// Mark a building's cells as taken. Private, because the occupancy grid
     /// and the building list must only ever change together.
     fn occupy(&mut self, b: &Building) {
@@ -255,6 +311,7 @@ impl World {
                 self.occupancy[Map::idx(cx, cy)] = Some(b.id);
             }
         }
+        self.nav_generation += 1;
     }
 
     /// The number two peers compare every tick.
@@ -287,11 +344,110 @@ impl World {
     /// is. That is not a stylistic preference: a `HashMap` here would give two
     /// peers two different orders and the flood would push their citizens in
     /// two different directions.
-    pub fn tick(&mut self) {
-        for c in &mut self.citizens {
-            c.tick_needs();
+    ///
+    /// `nav` is passed in rather than owned because flow fields are a cache
+    /// and `World` is the authoritative state; see the `nav` module. It is
+    /// `&mut` because a tick may need a field that has not been built yet.
+    pub fn tick(&mut self, nav: &mut Nav) {
+        for i in 0..self.citizens.len() {
+            self.citizens[i].tick_needs();
         }
+        self.walk(nav);
         self.tick += 1;
+    }
+
+    /// A tick without anywhere to walk to. For tests and for the phases where
+    /// nothing has a destination yet.
+    pub fn tick_alone(&mut self) {
+        let mut nav = Nav::new();
+        self.tick(&mut nav);
+    }
+
+    /// Move everyone who is going somewhere, one step along their field.
+    fn walk(&mut self, nav: &mut Nav) {
+        // Gather the destinations in use first, so the borrow of `self` for
+        // the field lookup does not overlap the mutation of the citizens. The
+        // list is deduplicated, which is the entire point of a shared field:
+        // eight people walking to the granary consult one.
+        let mut wanted: Vec<Dest> = self
+            .citizens
+            .iter()
+            .filter(|c| c.alive() && c.state == State::Walking)
+            .filter_map(|c| c.dest)
+            .collect();
+        wanted.sort_unstable();
+        wanted.dedup();
+        if wanted.is_empty() {
+            return;
+        }
+
+        for dest in wanted {
+            // One field, then everyone using it, in citizen-id order.
+            let field = nav.field(self, dest).clone();
+            for i in 0..self.citizens.len() {
+                if self.citizens[i].dest != Some(dest)
+                    || !self.citizens[i].alive()
+                    || self.citizens[i].state != State::Walking
+                {
+                    continue;
+                }
+                self.step_citizen(i, &field);
+            }
+        }
+    }
+
+    /// One citizen, one step.
+    fn step_citizen(&mut self, i: usize, field: &FlowField) {
+        let (cx, cy) = self.citizens[i].pos.cell();
+
+        if self.arrived(i, cx, cy) {
+            self.citizens[i].halt();
+            return;
+        }
+
+        let Some((dx, dy)) = field.step_at(cx, cy) else {
+            // Nowhere to go from here: the granary washed away, or a building
+            // went up across the only path, or this citizen is standing
+            // somewhere the field never reached. Stopping is the honest
+            // answer — the citizen is not stuck in a wall, it is standing
+            // still, and whatever wanted it to move can ask again.
+            self.citizens[i].halt();
+            return;
+        };
+
+        // A goal cell can be somewhere nobody can stand: `MoveTo` a boulder is
+        // a legal order, and the field is seeded there whether it is passable
+        // or not. Getting as close as possible and stopping is what the player
+        // meant; walking onto the rock is not.
+        if !nav::passable(self, cx + dx, cy + dy) {
+            self.citizens[i].halt();
+            return;
+        }
+
+        let on_road = self.building_at(cx, cy).map(|b| b.carries_traffic()).unwrap_or(false);
+        let speed = self.citizens[i].speed(on_road);
+
+        // The step is one of the eight neighbours, so its length is 1 or
+        // sqrt(2); `with_len` scales it to the distance walked this tick and
+        // keeps a diagonal from being 41% faster than a straight line.
+        let dir = V2::new(Fx::cells(dx), Fx::cells(dy)).with_len(speed);
+        self.citizens[i].vel = dir;
+        self.citizens[i].pos += dir;
+    }
+
+    /// Whether citizen `i` has reached what it was walking to.
+    fn arrived(&self, i: usize, cx: i32, cy: i32) -> bool {
+        match self.citizens[i].dest {
+            None => true,
+            Some(Dest::Cell(gx, gy)) => cx == gx as i32 && cy == gy as i32,
+            Some(Dest::Building(id)) => match self.buildings.get(id.0 as usize) {
+                // Near enough to hand something over or to work in it.
+                Some(b) if b.state != BuildState::Rubble => nav::at_building(b, cx, cy),
+                // It is not there any more. Arriving is the kindest reading:
+                // the citizen stops where it is instead of walking to a hole.
+                _ => true,
+            },
+        }
     }
 }
 
@@ -310,7 +466,6 @@ pub fn fnv1a(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::citizen::State;
     use crate::map::{Ground, MAP_H, MAP_W};
 
     #[test]
@@ -433,7 +588,7 @@ mod tests {
 
         // Nobody eats, because nothing has been built to eat at yet.
         for _ in 0..100 {
-            w.tick();
+            w.tick_alone();
         }
         assert_eq!(w.tick, 100);
         assert_eq!(w.citizens[0].food, start - FOOD_DECAY * 100);
@@ -442,20 +597,21 @@ mod tests {
         // Empty by tick 250, then three days of starving.
         let empty_at = (NEED_FULL / FOOD_DECAY) as u32;
         while w.tick < empty_at {
-            w.tick();
+            w.tick_alone();
         }
         assert_eq!(w.citizens[0].food, 0);
-        assert_eq!(w.citizens[0].state, State::Starving);
+        assert!(w.citizens[0].starving());
+        assert_eq!(w.citizens[0].state, State::Idle, "starving is a condition, not an activity");
 
         // Death lands exactly STARVE_TICKS ticks after the food ran out —
         // stated against `starved_for` rather than against a tick arithmetic
         // expression, because the first version of this test got that
         // arithmetic wrong by one and blamed the code.
         while w.citizens[0].starved_for < STARVE_TICKS - 1 {
-            w.tick();
+            w.tick_alone();
         }
         assert!(w.citizens[0].alive(), "alive with one tick of the three days left");
-        w.tick();
+        w.tick_alone();
         assert_eq!(w.citizens[0].state, State::Dead);
         assert_eq!(w.citizens[0].starved_for, STARVE_TICKS);
         assert_eq!(w.tick, empty_at + STARVE_TICKS - 1);
@@ -467,20 +623,20 @@ mod tests {
         let mut w = World::new(3, 2);
         let empty_at = (NEED_FULL / FOOD_DECAY) as u32;
         while w.tick < empty_at + STARVE_TICKS / 2 {
-            w.tick();
+            w.tick_alone();
         }
-        assert_eq!(w.citizens[0].state, State::Starving);
+        assert!(w.citizens[0].starving());
         assert!(w.citizens[0].starved_for > 0);
 
         w.citizens[0].eat(NEED_FULL);
-        w.tick();
-        assert_eq!(w.citizens[0].state, State::Idle);
+        w.tick_alone();
+        assert!(!w.citizens[0].starving());
         assert_eq!(w.citizens[0].starved_for, 0);
 
         // And the clock starts from the beginning next time, rather than
         // resuming where it left off.
         while w.citizens[0].food > 0 {
-            w.tick();
+            w.tick_alone();
         }
         assert_eq!(w.citizens[0].starved_for, 1);
     }
@@ -673,11 +829,10 @@ mod tests {
         assert_eq!(carried, 50);
         assert_eq!(w.buildings[hearth.0 as usize].store.wood, STARTING_WOOD - 50);
 
-        let b = &mut w.buildings[id.0 as usize];
-        assert_eq!(b.deliver(Good::Wood, carried), 50);
-        assert!(b.ready_to_build());
+        assert_eq!(w.deliver_to(id, Good::Wood, carried), 50);
+        assert!(w.buildings[id.0 as usize].ready_to_build());
         for _ in 0..Kind::Granary.build_ticks() {
-            b.build(BUILDER_EFFORT);
+            w.build_at(id, BUILDER_EFFORT);
         }
         assert!(w.buildings[id.0 as usize].standing_now());
     }
@@ -687,8 +842,8 @@ mod tests {
         let mut w = World::new(12, 2);
         let (x, y) = free_spot(&w, 0, Kind::Cottage);
         let id = w.place(PlayerId(0), Kind::Cottage, x, y).unwrap();
-        w.buildings[id.0 as usize].deliver(Good::Wood, 30);
-        w.buildings[id.0 as usize].build(Kind::Cottage.build_ticks());
+        w.deliver_to(id, Good::Wood, 30);
+        w.build_at(id, Kind::Cottage.build_ticks());
 
         assert_eq!(w.demolish(PlayerId(1), id), Err(RuleError::NotYours));
         let salvage = w.demolish(PlayerId(0), id).unwrap();
@@ -724,16 +879,16 @@ mod tests {
         let id = w.place(PlayerId(0), Kind::Dike, x, y).unwrap();
         assert_eq!(w.effective_height(x, y), base, "a site holds nothing back");
 
-        w.buildings[id.0 as usize].deliver(Good::Stone, 40);
-        w.buildings[id.0 as usize].build(Kind::Dike.build_ticks());
+        w.deliver_to(id, Good::Stone, 40);
+        w.build_at(id, Kind::Dike.build_ticks());
         assert_eq!(w.effective_height(x, y), base + DIKE_HEIGHT_PER_LEVEL);
 
         // Raising it puts it back under construction until the stone arrives.
         w.raise_dike(PlayerId(0), id).unwrap();
         assert_eq!(w.effective_height(x, y), base, "and it is a site again while it grows");
         assert_eq!(w.buildings[id.0 as usize].outstanding(), Goods::stone(40));
-        w.buildings[id.0 as usize].deliver(Good::Stone, 40);
-        w.buildings[id.0 as usize].build(Kind::Dike.build_ticks());
+        w.deliver_to(id, Good::Stone, 40);
+        w.build_at(id, Kind::Dike.build_ticks());
         assert_eq!(w.effective_height(x, y), base + DIKE_HEIGHT_PER_LEVEL * 2);
 
         // A level-2 dike stops an age-1 surge of height 12 (design §5), and
@@ -746,14 +901,14 @@ mod tests {
         let mut w = World::new(16, 2);
         let (x, y) = free_spot(&w, 0, Kind::Dike);
         let id = w.place(PlayerId(0), Kind::Dike, x, y).unwrap();
-        w.buildings[id.0 as usize].deliver(Good::Stone, 40);
-        w.buildings[id.0 as usize].build(Kind::Dike.build_ticks());
+        w.deliver_to(id, Good::Stone, 40);
+        w.build_at(id, Kind::Dike.build_ticks());
 
         for _ in 1..DIKE_MAX_LEVEL {
             w.raise_dike(PlayerId(0), id).unwrap();
             let cost = w.buildings[id.0 as usize].outstanding();
-            w.buildings[id.0 as usize].deliver(Good::Stone, cost.stone);
-            w.buildings[id.0 as usize].build(Kind::Dike.build_ticks());
+            w.deliver_to(id, Good::Stone, cost.stone);
+            w.build_at(id, Kind::Dike.build_ticks());
         }
         assert_eq!(w.buildings[id.0 as usize].level, DIKE_MAX_LEVEL);
         assert_eq!(w.raise_dike(PlayerId(0), id), Err(RuleError::TooHigh));
@@ -789,7 +944,7 @@ mod tests {
                 }
             }
             let id = placed.expect("somewhere to put a stockpile");
-            w.buildings[id.0 as usize].build(Kind::Stockpile.build_ticks());
+            w.build_at(id, Kind::Stockpile.build_ticks());
             ids.push(id);
         }
 
@@ -829,8 +984,252 @@ mod tests {
             !w.stores_for(PlayerId(0), Good::Wood, x, y).contains(&id),
             "an unfinished stockpile is a hole in the ground"
         );
-        w.buildings[id.0 as usize].build(Kind::Stockpile.build_ticks());
+        w.build_at(id, Kind::Stockpile.build_ticks());
         assert!(w.stores_for(PlayerId(0), Good::Wood, x, y).contains(&id));
+    }
+
+    // ---- walking -----------------------------------------------------------
+
+    /// A world, a clear patch of ground, and one citizen standing in it.
+    fn walker() -> (World, Nav, i32, i32) {
+        let mut w = World::new(31, 2);
+        let (mut ox, mut oy) = (0, 0);
+        'find: for y in 8..MAP_H - 8 {
+            for x in 8..MAP_W - 8 {
+                if (-7..=7).all(|dy| (-7..=7).all(|dx| nav::passable(&w, x + dx, y + dy))) {
+                    ox = x;
+                    oy = y;
+                    break 'find;
+                }
+            }
+        }
+        assert!(ox > 0, "no open ground to walk on");
+        w.citizens[0].pos = V2::cell_centre(ox, oy);
+        (w, Nav::new(), ox, oy)
+    }
+
+    #[test]
+    fn a_citizen_walks_to_a_cell_and_stops_there() {
+        let (mut w, mut nav, ox, oy) = walker();
+        let goal = (ox + 5, oy);
+        w.citizens[0].walk_to(Dest::Cell(goal.0 as u8, goal.1 as u8));
+        assert_eq!(w.citizens[0].state, State::Walking);
+
+        for _ in 0..400 {
+            w.tick(&mut nav);
+            if w.citizens[0].state != State::Walking {
+                break;
+            }
+        }
+        assert_eq!(w.citizens[0].pos.cell(), goal, "did not arrive");
+        assert_eq!(w.citizens[0].state, State::Idle, "did not stop");
+        assert_eq!(w.citizens[0].dest, None);
+        assert_eq!(w.citizens[0].vel, V2::ZERO, "still drifting after arriving");
+    }
+
+    #[test]
+    fn walking_takes_the_time_the_speed_says_it_should() {
+        let (mut w, mut nav, ox, oy) = walker();
+        w.citizens[0].walk_to(Dest::Cell((ox + 8) as u8, oy as u8));
+
+        let mut ticks = 0;
+        while w.citizens[0].state == State::Walking && ticks < 1000 {
+            w.tick(&mut nav);
+            ticks += 1;
+        }
+        // Eight cells at WALK_SPEED 256ths of a cell per tick, give or take
+        // the tick it notices it has arrived.
+        let want = 8 * 256 / WALK_SPEED;
+        assert!(
+            (want - 2..=want + 2).contains(&ticks),
+            "walked eight cells in {ticks} ticks, expected about {want}"
+        );
+    }
+
+    #[test]
+    fn a_road_gets_you_there_in_half_the_time() {
+        let (mut w, mut nav, ox, oy) = walker();
+        let goal = (ox + 6, oy);
+
+        let plain = {
+            let mut w = w.clone();
+            let mut nav = Nav::new();
+            w.citizens[0].walk_to(Dest::Cell(goal.0 as u8, goal.1 as u8));
+            let mut n = 0;
+            while w.citizens[0].state == State::Walking && n < 2000 {
+                w.tick(&mut nav);
+                n += 1;
+            }
+            n
+        };
+
+        // Pave every cell from the citizen to the goal, the one it starts on
+        // included — speed is read from the cell being left.
+        for i in 0..=6 {
+            let id = w.place(PlayerId(0), Kind::Road, ox + i, oy).unwrap();
+            assert!(w.build_at(id, Kind::Road.build_ticks()));
+        }
+        w.citizens[0].walk_to(Dest::Cell(goal.0 as u8, goal.1 as u8));
+        let mut paved = 0;
+        while w.citizens[0].state == State::Walking && paved < 2000 {
+            w.tick(&mut nav);
+            paved += 1;
+        }
+
+        assert_eq!(w.citizens[0].pos.cell(), goal);
+        assert!(
+            paved * 2 <= plain + 2,
+            "the road saved nothing: {paved} ticks paved against {plain} on grass"
+        );
+    }
+
+    #[test]
+    fn tired_citizens_walk_at_half_speed() {
+        let c = &World::new(1, 2).citizens[0];
+        assert_eq!(c.speed(false), Fx(WALK_SPEED));
+        assert_eq!(c.speed(true), Fx(WALK_SPEED * 2), "a road doubles it");
+
+        let mut tired = c.clone();
+        tired.rest = TIRED - 1;
+        assert_eq!(tired.speed(false), Fx(WALK_SPEED / 2));
+        assert_eq!(
+            tired.speed(true),
+            Fx(WALK_SPEED),
+            "tired on a road is the plain rate, not a quarter of it"
+        );
+    }
+
+    #[test]
+    fn everyone_walking_to_one_place_shares_one_field() {
+        let (mut w, mut nav, ox, oy) = walker();
+        let goal = Dest::Cell((ox + 4) as u8, oy as u8);
+        for i in 0..8 {
+            w.citizens[i].pos = V2::cell_centre(ox - 3 + (i as i32 % 3), oy - 1 + (i as i32 / 3));
+            w.citizens[i].walk_to(goal);
+        }
+        w.tick(&mut nav);
+        assert_eq!(nav.len(), 1, "eight citizens built {} fields", nav.len());
+
+        for _ in 0..400 {
+            w.tick(&mut nav);
+        }
+        for i in 0..8 {
+            assert_eq!(w.citizens[i].state, State::Idle, "citizen {i} never arrived");
+            // Four hundred ticks is past the point where food runs out, and
+            // that must not have stopped anybody: starving is a condition, not
+            // an activity.
+            assert!(w.citizens[i].starving(), "nobody has eaten in four hundred ticks");
+        }
+        assert_eq!(nav.len(), 1, "and still one field at the end");
+    }
+
+    #[test]
+    fn walking_to_a_building_stops_beside_it_rather_than_inside() {
+        let (mut w, mut nav, ox, oy) = walker();
+        let id = w.place(PlayerId(0), Kind::Granary, ox + 5, oy).unwrap();
+        w.deliver_to(id, Good::Wood, 50);
+        assert!(w.build_at(id, Kind::Granary.build_ticks()));
+
+        w.citizens[0].walk_to(Dest::Building(id));
+        for _ in 0..500 {
+            w.tick(&mut nav);
+            if w.citizens[0].state != State::Walking {
+                break;
+            }
+        }
+        let (cx, cy) = w.citizens[0].pos.cell();
+        assert_eq!(w.citizens[0].state, State::Idle, "never got there");
+        assert!(nav::at_building(&w.buildings[id.0 as usize], cx, cy), "stopped short");
+        assert!(
+            w.building_at(cx, cy).is_none(),
+            "ended up standing inside the granary at ({cx},{cy})"
+        );
+    }
+
+    #[test]
+    fn ordering_somebody_onto_a_rock_walks_them_up_to_it_and_no_further() {
+        let (mut w, mut nav, _ox, _oy) = walker();
+        // `MoveTo` a boulder is a legal order and the field is seeded there
+        // whether anyone can stand on it or not. Getting as close as possible
+        // is what the player meant.
+        let rock = (0..MAP_H)
+            .flat_map(|y| (0..MAP_W).map(move |x| (x, y)))
+            .find(|&(x, y)| w.map.ground_at(x, y) == Ground::Rock)
+            .unwrap();
+
+        w.citizens[0].walk_to(Dest::Cell(rock.0 as u8, rock.1 as u8));
+        for _ in 0..3000 {
+            w.tick(&mut nav);
+            if w.citizens[0].state != State::Walking {
+                break;
+            }
+        }
+        let (cx, cy) = w.citizens[0].pos.cell();
+        assert_eq!(w.citizens[0].state, State::Idle, "still trying to climb it");
+        assert_ne!(w.map.ground_at(cx, cy), Ground::Rock, "stood on the rock");
+        assert!(nav::passable(&w, cx, cy), "ended up somewhere nobody can stand");
+    }
+
+    #[test]
+    fn a_citizen_the_field_never_reached_stops_where_it_is() {
+        let (mut w, mut nav, ox, oy) = walker();
+        // Standing on rock, which no field ever reaches. This is the "the
+        // path is gone" branch, and stopping is the honest answer: the citizen
+        // is not stuck in a wall, it is standing still.
+        let rock = (0..MAP_H)
+            .flat_map(|y| (0..MAP_W).map(move |x| (x, y)))
+            .find(|&(x, y)| w.map.ground_at(x, y) == Ground::Rock)
+            .unwrap();
+        w.citizens[0].pos = V2::cell_centre(rock.0, rock.1);
+        let before = w.citizens[0].pos;
+
+        w.citizens[0].walk_to(Dest::Cell(ox as u8, oy as u8));
+        w.tick(&mut nav);
+        assert_eq!(w.citizens[0].state, State::Idle, "kept trying");
+        assert_eq!(w.citizens[0].pos, before, "moved anyway");
+        assert_eq!(w.citizens[0].dest, None);
+    }
+
+    #[test]
+    fn the_dead_do_not_walk() {
+        let (mut w, mut nav, ox, oy) = walker();
+        w.citizens[0].walk_to(Dest::Cell((ox + 5) as u8, oy as u8));
+        w.tick(&mut nav);
+        assert_eq!(w.citizens[0].state, State::Walking);
+
+        // Dying clears what only makes sense for the living, so a corpse is
+        // not left holding a destination it will never reach.
+        w.citizens[0].die();
+        assert_eq!(w.citizens[0].dest, None);
+        assert_eq!(w.citizens[0].vel, V2::ZERO);
+
+        let before = w.citizens[0].pos;
+        for _ in 0..50 {
+            w.tick(&mut nav);
+        }
+        assert_eq!(w.citizens[0].pos, before, "a corpse went for a walk");
+
+        // And they cannot be sent anywhere.
+        w.citizens[0].walk_to(Dest::Cell(ox as u8, oy as u8));
+        assert_eq!(w.citizens[0].state, State::Dead);
+        assert_eq!(w.citizens[0].dest, None);
+    }
+
+    #[test]
+    fn losing_the_destination_mid_walk_stops_the_citizen() {
+        let (mut w, mut nav, ox, oy) = walker();
+        let id = w.place(PlayerId(0), Kind::Cottage, ox + 6, oy).unwrap();
+        w.citizens[0].walk_to(Dest::Building(id));
+        for _ in 0..10 {
+            w.tick(&mut nav);
+        }
+        assert_eq!(w.citizens[0].state, State::Walking, "should still be on its way");
+
+        // The flood takes it, or the player pulls it down.
+        w.demolish(PlayerId(0), id).unwrap();
+        w.tick(&mut nav);
+        assert_eq!(w.citizens[0].state, State::Idle, "walked on to a hole in the ground");
+        assert_eq!(w.citizens[0].dest, None);
     }
 
     #[test]
@@ -838,7 +1237,7 @@ mod tests {
         let mut w = World::new(1, 2);
         assert_eq!(w.day(), 1);
         for _ in 0..TICKS_PER_DAY {
-            w.tick();
+            w.tick_alone();
         }
         assert_eq!(w.day(), 2);
     }
