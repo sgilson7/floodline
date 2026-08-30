@@ -29,6 +29,15 @@ pub enum Tool {
     /// Put one of these down. A dike is also raised with this tool, by
     /// clicking one that is already there.
     Build(Kind),
+    /// Draw a wall. Press where it starts, drag, release where it ends.
+    ///
+    /// A drag rather than the road tool's two clicks, and its own variant
+    /// rather than `Build(Kind::Dike)`, because a wall is the one thing in the
+    /// game you draw a length of: two clicks would hide the run and the price
+    /// of it behind a second gesture, and the whole point of the ghost is that
+    /// you see both before you commit. Pressing and releasing on the same
+    /// dike still raises it, which is design §3.3's "dikes grow".
+    Wall { from: Option<(u8, u8)> },
     /// Two clicks: where from, where to.
     Road { from: Option<(u8, u8)> },
     /// Point at something, for the other player to see.
@@ -72,12 +81,24 @@ pub struct Input {
     trade: Draft,
     /// The last thing the rules said no to, and when, so it fades.
     notice: Option<(String, f64)>,
+    /// How many segments the wall under the cursor would be, and what they
+    /// would cost. Worked out with the ghost, drawn with the panel.
+    wall_hint: Option<(usize, u16)>,
+}
+
+/// Which tool puts a kind down. Everything is placed with a click except the
+/// dike, which is drawn.
+fn tool_for(kind: Kind) -> Tool {
+    match kind {
+        Kind::Dike => Tool::Wall { from: None },
+        _ => Tool::Build(kind),
+    }
 }
 
 impl Default for Input {
     fn default() -> Input {
         Input { tool: Tool::Select, selected: Vec::new(), drag: None, trade: Draft::default(),
-                notice: None }
+                notice: None, wall_hint: None }
     }
 }
 
@@ -116,13 +137,14 @@ impl Input {
             self.trade_dialog(ui, session, me);
         }
         self.tools(ui, session, me, panel_top, view);
+        self.wall_cost(ui);
         self.notice();
     }
 
     fn keys(&mut self) {
         for (kind, _, key) in BUILDABLE {
             if is_key_pressed(key) {
-                self.tool = Tool::Build(kind);
+                self.tool = tool_for(kind);
             }
         }
         if is_key_pressed(KeyCode::R) {
@@ -205,24 +227,49 @@ impl Input {
             Tool::Select => self.select(ui, session, me, cell, view),
             Tool::Build(kind) => {
                 if let (true, Some((x, y))) = (ui.clicked, cell) {
-                    // A dike clicked with the dike tool is a dike to raise,
-                    // which is design §3.3's "dikes grow" and the only way to
-                    // spell `RaiseDike` from a mouse.
-                    let existing = session.world().building_at(x, y).filter(|b| {
-                        b.owner == me && b.kind == Kind::Dike && kind == Kind::Dike
+                    // Everything this tool places is square, so east-west is
+                    // the only answer that means anything here. `tool_for`
+                    // sends the one kind that is not down the wall tool.
+                    self.issue(session, Command::Place {
+                        kind,
+                        facing: Facing::EastWest,
+                        x: x as u8,
+                        y: y as u8,
                     });
-                    match existing.map(|b| b.id) {
-                        Some(dike) => self.issue(session, Command::RaiseDike { dike }),
-                        // Every kind but the dike is square, so east-west is
-                        // the only answer that means anything here. The dike
-                        // gets its facing from the drag it is drawn with.
-                        None => self.issue(session, Command::Place {
-                            kind,
-                            facing: Facing::EastWest,
-                            x: x as u8,
-                            y: y as u8,
-                        }),
+                }
+                if ui.right_clicked {
+                    self.tool = Tool::Select;
+                }
+            }
+            Tool::Wall { from } => {
+                // The anchor is tracked through this frame rather than read
+                // back out of `self.tool`, because a click fast enough to go
+                // down and up inside one frame arrives with `clicked` and
+                // `released` both set — and a wall tool that ignored quick
+                // clicks would also have stopped raising dikes.
+                let mut start = from;
+                if let (true, Some((x, y))) = (ui.clicked, cell) {
+                    start = Some((x as u8, y as u8));
+                    self.tool = Tool::Wall { from: start };
+                }
+                if ui.released {
+                    if let (Some(start), Some((x, y))) = (start, cell) {
+                        let end = (x as u8, y as u8);
+                        // A press and a release on the same dike is a click,
+                        // and a click on a dike raises it.
+                        let raise = session
+                            .world()
+                            .building_at(x, y)
+                            .filter(|b| b.owner == me && b.kind == Kind::Dike && start == end)
+                            .map(|b| b.id);
+                        match raise {
+                            Some(dike) => self.issue(session, Command::RaiseDike { dike }),
+                            None => {
+                                self.issue(session, Command::DikeLine { from: start, to: end })
+                            }
+                        }
                     }
+                    self.tool = Tool::Wall { from: None };
                 }
                 if ui.right_clicked {
                     self.tool = Tool::Select;
@@ -324,9 +371,44 @@ impl Input {
 
     /// What the cursor is over: a ghost of what would be built, or the name of
     /// what is already there.
-    fn hover(&self, w: &World, me: PlayerId, cell: Option<(i32, i32)>) {
+    fn hover(&mut self, w: &World, me: PlayerId, cell: Option<(i32, i32)>) {
+        self.wall_hint = None;
         let Some((x, y)) = cell else { return };
         match self.tool {
+            Tool::Wall { from } => {
+                // The ghost is the run `sim` would actually lay, asked of the
+                // same function that will lay it, so a player cannot be shown
+                // one wall and sold another.
+                let start = from.unwrap_or((x as u8, y as u8));
+                let end = (x as u8, y as u8);
+                let plan = w.plan_dike_line(me, start, end);
+                for (sx, sy) in &plan {
+                    let (bw, bh) = Kind::Dike.size(Facing::of_run(
+                        (start.0 as i32, start.1 as i32),
+                        (x, y),
+                    ));
+                    draw_rectangle(
+                        *sx as f32 * CELL,
+                        *sy as f32 * CELL,
+                        bw as f32 * CELL,
+                        bh as f32 * CELL,
+                        Color { a: 0.35, ..palette::GOOD },
+                    );
+                }
+                if plan.is_empty() {
+                    draw_rectangle(
+                        x as f32 * CELL,
+                        y as f32 * CELL,
+                        CELL,
+                        CELL,
+                        Color { a: 0.35, ..palette::ALARM },
+                    );
+                }
+                self.wall_hint = Some((
+                    plan.len(),
+                    Kind::Dike.cost().stone.saturating_mul(plan.len() as u16),
+                ));
+            }
             Tool::Build(kind) => {
                 let (bw, bh) = kind.size(Facing::EastWest);
                 let ok = w.can_place(me, kind, Facing::EastWest, x, y).is_ok();
@@ -378,9 +460,9 @@ impl Input {
                 && goods.stone >= cost.stone;
             let label = format!("{} {}", i + 1, name);
             if ui.button(r, &label, true) {
-                self.tool = Tool::Build(*kind);
+                self.tool = tool_for(*kind);
             }
-            if self.tool == Tool::Build(*kind) {
+            if self.tool == tool_for(*kind) {
                 draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, palette::INK);
             }
             // The cost, under the name, greyed when it is out of reach. Not a
@@ -399,6 +481,8 @@ impl Input {
 
         let road = Rect::new(left, y, half, 36.0);
         let ping = Rect::new(left + half + 8.0, y, half, 36.0);
+        // The dike is picked from the build menu above like anything else; it
+        // is the gesture that differs, not the shopping.
         if ui.button(road, "r road", true) {
             self.tool = Tool::Road { from: None };
         }
@@ -417,6 +501,8 @@ impl Input {
             match self.tool {
                 Tool::Select => "drag to choose. right-click to send them",
                 Tool::Build(_) => "click the ground. right-click to stop",
+                Tool::Wall { from: None } => "drag to draw a wall. click one to raise it",
+                Tool::Wall { from: Some(_) } => "let go where the wall should end",
                 Tool::Road { from: None } => "click where the road starts",
                 Tool::Road { from: Some(_) } => "click where it ends",
                 Tool::Ping => "click what you want them to look at",
@@ -660,6 +746,25 @@ impl Input {
     }
 
     /// The last refusal, under the map, fading.
+    /// The length and the price of the wall under the cursor.
+    ///
+    /// Drawn here rather than with the ghost because the ghost is in map
+    /// space, where the camera would blow this up or shrink it away; a label
+    /// is the same size at every zoom.
+    fn wall_cost(&self, ui: &Ui) {
+        let Some((segments, stone)) = self.wall_hint else { return };
+        if segments == 0 {
+            return;
+        }
+        let text = format!("{segments} x dike - {stone} stone");
+        let m = measure_text(&text, None, 16, 1.0);
+        let x = (ui.mouse.x + 14.0).min(LOGICAL_W - PANEL_W - m.width - 8.0);
+        let y = (ui.mouse.y - 10.0).max(m.height + 4.0);
+        draw_rectangle(x - 5.0, y - m.height - 3.0, m.width + 10.0, m.height + 8.0,
+                       Color { a: 0.82, ..palette::PANEL });
+        draw_text(&text, x, y, 16.0, palette::INK);
+    }
+
     fn notice(&mut self) {
         let Some((text, at)) = &self.notice else { return };
         let age = get_time() - at;

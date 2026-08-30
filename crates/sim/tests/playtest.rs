@@ -304,28 +304,43 @@ fn assign_to_farms(w: &mut World) {
 /// water simply went round it, which is a fact about that wall and not about
 /// dikes.
 ///
-/// Every cell goes down as a `Place` and is hauled and built by the same eight
-/// people who are farming, out of the same stone the city started with. The
-/// first version of this built the wall by fiat, which was the right way to
-/// find out whether a wall in the right place changes the outcome and no way
-/// at all to find out whether anybody could have one.
+/// Every segment goes down as a `DikeLine` and is hauled and built by the same
+/// eight people who are farming, out of the same stone the city started with.
+/// The first version of this built the wall by fiat, which was the right way
+/// to find out whether a wall in the right place changes the outcome and no
+/// way at all to find out whether anybody could have one.
+///
+/// A wall is drawn straight now, so a barrier across a diagonal is a flight of
+/// short runs — a tread across the water's path and a riser back down it —
+/// rather than a diagonal line of single cells. That is what the drag tool
+/// draws, and unlike a diagonal of cells it does not leak at the corners.
 fn order_a_wall(w: &mut World, hx: i32, hy: i32) -> usize {
+    let dikes = |w: &World| {
+        w.buildings.iter().filter(|b| b.owner == ME && b.kind == Kind::Dike).count()
+    };
+    let before = dikes(w);
+
     let (cx, cy) = w.map.low_corner.cell();
     let (sx, sy) = ((MAP_W / 2 - cx).signum(), (MAP_H / 2 - cy).signum());
     let out = (hx - cx).abs() + (hy - cy).abs() - 10;
     let mid = (hx - cx).abs();
-    let mut placed = 0;
-    for k in -25..=25 {
-        let along = mid + k;
-        if along < 0 || along > out {
-            continue;
+    let at = |along: i32| (cx + sx * along, cy + sy * (out - along));
+    let on_map = |(x, y): (i32, i32)| (0..MAP_W).contains(&x) && (0..MAP_H).contains(&y);
+
+    let mut along = (mid - 24).max(0);
+    let top = (mid + 24).min(out);
+    while along < top {
+        let run = DIKE_LENGTH.min(top - along);
+        let (ax, ay) = at(along);
+        let (bx, by) = at(along + run - 1);
+        if on_map((ax, ay)) && on_map((bx, by)) {
+            let corner = (bx as u8, ay as u8);
+            let _ = w.apply(ME, &Command::DikeLine { from: (ax as u8, ay as u8), to: corner });
+            let _ = w.apply(ME, &Command::DikeLine { from: corner, to: (bx as u8, by as u8) });
         }
-        let (x, y) = (cx + sx * along, cy + sy * (out - along));
-        if w.apply(ME, &Command::Place { kind: Kind::Dike, facing: Facing::EastWest, x: x as u8, y: y as u8 }).is_ok() {
-            placed += 1;
-        }
+        along += run;
     }
-    placed
+    dikes(w) - before
 }
 
 /// Raise every finished dike a level, while there is stone for it.

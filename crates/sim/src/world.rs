@@ -734,6 +734,7 @@ impl World {
                 self.pings.push(Ping { by: player, x: *x, y: *y, at: self.tick });
                 Ok(())
             }
+            Command::DikeLine { from, to } => self.lay_dike_line(player, *from, *to).map(|_| ()),
             Command::Road { from, to } => self.lay_road(player, *from, *to).map(|_| ()),
             Command::AcceptRoad { road } => {
                 let r = self.roads.get_mut(road.0 as usize).ok_or(RuleError::NoSuchRoad)?;
@@ -846,6 +847,92 @@ impl World {
         let id = RoadId(self.roads.len() as u16);
         self.roads.push(Road { id, by: player, reaches, joined: false, cells });
         Ok(id)
+    }
+
+    /// Where a dike line drawn from `from` to `to` would put its segments.
+    ///
+    /// Answered without changing anything so the drag tool can draw the ghost
+    /// and total the cost from the same arithmetic that will lay the wall —
+    /// the mistake the letterbox made twice was two places doing one sum.
+    ///
+    /// A wall is straight. The run snaps to whichever axis it is longer along
+    /// and keeps the cell it started from, because a road takes the cheapest
+    /// path and a wall stays where you drew it. It also snaps to a whole
+    /// number of segments, so the far end can overshoot the cursor by up to
+    /// `DIKE_LENGTH - 1`: a wall with a one-cell hole in it is not a wall, and
+    /// the ghost shows the run that will actually be built.
+    ///
+    /// Segments the ground or another building refuses are skipped rather than
+    /// failing the whole line, so drawing across a farm walls both sides of it.
+    pub fn plan_dike_line(
+        &self,
+        owner: PlayerId,
+        from: (u8, u8),
+        to: (u8, u8),
+    ) -> Vec<(i32, i32)> {
+        let a = (from.0 as i32, from.1 as i32);
+        let b = (to.0 as i32, to.1 as i32);
+        if !Map::contains(a.0, a.1) || !Map::contains(b.0, b.1) {
+            return Vec::new();
+        }
+        let facing = Facing::of_run(a, b);
+        // Along the run, and across it — the axis the wall does not move on.
+        let (start, end, fixed) = match facing {
+            Facing::EastWest => (a.0, b.0, a.1),
+            Facing::NorthSouth => (a.1, b.1, a.0),
+        };
+        let (lo, hi) = (start.min(end), start.max(end));
+
+        let mut segments = Vec::new();
+        let mut at = lo;
+        while at <= hi {
+            let (x, y) = match facing {
+                Facing::EastWest => (at, fixed),
+                Facing::NorthSouth => (fixed, at),
+            };
+            if self.can_place(owner, Kind::Dike, facing, x, y).is_ok() {
+                segments.push((x, y));
+            }
+            at += DIKE_LENGTH;
+        }
+        segments
+    }
+
+    /// Lay a wall along a straight run. Returns what was actually built, which
+    /// is empty when every segment was refused.
+    pub fn lay_dike_line(
+        &mut self,
+        owner: PlayerId,
+        from: (u8, u8),
+        to: (u8, u8),
+    ) -> Result<Vec<BuildingId>, RuleError> {
+        if !Map::contains(from.0 as i32, from.1 as i32)
+            || !Map::contains(to.0 as i32, to.1 as i32)
+        {
+            return Err(RuleError::NoSuchCell);
+        }
+        let facing = Facing::of_run(
+            (from.0 as i32, from.1 as i32),
+            (to.0 as i32, to.1 as i32),
+        );
+        let mut placed = Vec::new();
+        for (x, y) in self.plan_dike_line(owner, from, to) {
+            // `plan_dike_line` asked `can_place` for every one of these and
+            // nothing has moved since, so a failure here would be a bug rather
+            // than something the player could act on.
+            if let Ok(id) = self.place(owner, Kind::Dike, facing, x, y) {
+                placed.push(id);
+            }
+        }
+        if placed.is_empty() {
+            // The whole run was refused, so the player gets the reason the
+            // cell they started from was refused rather than silence.
+            return Err(self
+                .can_place(owner, Kind::Dike, facing, from.0 as i32, from.1 as i32)
+                .err()
+                .unwrap_or(RuleError::Occupied));
+        }
+        Ok(placed)
     }
 
     /// The height of every cell as the water sees it: terrain, plus whatever

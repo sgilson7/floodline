@@ -1651,3 +1651,72 @@ sums were quietly measuring.
 gaps where segments overlap. It is a measurement, not an assertion, and it
 becomes a single `DikeLine` in the next commit, so it is left alone rather than
 half-fixed twice.
+
+---
+
+## 2026-08-30 — A wall is drawn, and it is drawn straight
+
+M3's second commit. `Command::DikeLine { from, to }` lives beside
+`Command::Road` and deliberately does not reuse it: a road takes the cheapest
+path between two cells and a wall stays on the line you drew, so they would
+share a name and nothing else.
+
+**Three rules, and each of them is a refusal to be clever.** A run snaps to
+whichever axis it is longer along and keeps the cell it started from, because a
+wall that wandered would be a wall you could not aim. It snaps to a whole
+number of segments and may overshoot the cursor by up to two cells, because a
+wall with a one-cell hole in it is not a wall — and the ghost shows the run
+that will actually be built, so the overshoot is visible before the mouse comes
+up. And a segment the ground or another building refuses is skipped rather than
+failing the line, because the alternative is a tool that rejects a
+forty-cell wall over one segment clipping the corner of a farm, which is a tool
+a player stops using.
+
+**`plan_dike_line` and `lay_dike_line` are one arithmetic, not two.** The drag
+tool draws the ghost and totals the price from `plan_dike_line`; `lay_dike_line`
+lays exactly what it returns. The letterbox has been wrong twice in this repo
+because two places did one sum, and being shown one wall and sold another is
+the same bug wearing a different hat. `the_ghost_and_the_wall_are_the_same_
+arithmetic` holds it.
+
+**The dike leaves the build tool for a drag tool.** Press where the wall
+starts, drag, let go where it ends; the ghost and a running cost follow the
+cursor. Pressing and releasing on the same dike still raises it, which is
+design §3.3's "dikes grow" and the only way to spell `RaiseDike` from a mouse.
+The anchor is tracked through the frame rather than read back out of
+`self.tool`, because a click fast enough to go down and up inside one rendered
+frame arrives with `clicked` and `released` both set — and the browser check
+that presses `7` and clicks does exactly that.
+
+**A segment is priced per cell, and the playtest is why.** A dike segment is
+three cells, and leaving `cost` at ten stone would have made a wall a third of
+its measured price and a third of its measured build time overnight. Nobody
+asked for that and no assertion would have caught it: the five-strategy
+playtest did, by reporting a dike strategy that no longer had to choose where
+to spend. Stone and builder-ticks now both scale with `DIKE_LENGTH`.
+
+**What the shape cost, measured rather than guessed.** `playtest.rs` drew its
+wall as a diagonal of single cells, which against a four-neighbour water
+automaton is a perfect seal for one cell of stone per cell of front. Straight
+segments cannot draw a diagonal, so it now draws a staircase — a tread across
+the water's path and a riser back down it — and half of every staircase runs
+parallel to the flow rather than across it. Same seeds, same stone:
+
+|                    | wall | stone | survivors: dike | both |
+|--------------------|------|-------|-----------------|------|
+| diagonal of cells  | 33   | 410   | 2               | 4    |
+| staircase, mispriced | 33 | 190   | 0               | 0    |
+| staircase, priced per cell | 33 | 420 | 1            | 1    |
+
+The wall is worse per cell than it was, and that is a true fact about walls
+drawn straight rather than a bug to be tuned away here. M4 replaces the corner
+flood with a river, where a wall along a bank *is* a straight line and the
+staircase does not arise; M5 re-derives all of these numbers against it. Fixing
+it now would be tuning a barrier against a flood that is about to be replaced.
+
+The L in `scenario.rs` learned the same lesson in miniature: three-cell
+segments do not tile a corner, so the second arm skips the segment that would
+have overlapped the first and leaves one cell either side. The test patches the
+seam with a short run across it, which is what a player watching the ghost skip
+would do, and then asserts there is no gap — an assertion the old cell-by-cell
+wall never needed and never made.

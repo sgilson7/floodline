@@ -239,11 +239,17 @@ impl Kind {
             Kind::Granary => Goods::wood(50),
             // Free — it is a patch of ground somebody agreed to keep tidy.
             Kind::Stockpile => Goods::NONE,
-            // Ten a level, not forty. A wall that changes the outcome of a
-            // run is about thirty-four cells long — measured, in
-            // `tests/playtest.rs` — and at forty a level that is 2 720 stone
+            // Ten a level *per cell*, not forty. A wall that changes the
+            // outcome of a run is about thirty-four cells long — measured, in
+            // `tests/playtest.rs` — and at forty a cell that is 2 720 stone
             // against a purse of 120. See `balance::STARTING_STONE`.
-            Kind::Dike => Goods::stone(10),
+            //
+            // The price is per cell and the segment is the unit, so it scales
+            // with `DIKE_LENGTH`. Making a segment three cells long without
+            // this made a wall a third of its measured price overnight, and
+            // the playtest noticed before anybody would have: the dike
+            // strategy stopped needing to choose where to spend.
+            Kind::Dike => Goods::stone(10 * DIKE_LENGTH as u16),
             // Design and plan both leave the cost of a road unstated. Time
             // only: a road is packed earth, and the thing it actually costs
             // is builders who could have been doing something else while the
@@ -264,7 +270,9 @@ impl Kind {
             Kind::Quarry => 220,
             Kind::Granary => 250,
             Kind::Stockpile => 60,
-            Kind::Dike => 150,
+            // Per cell, for the same reason the stone is: a segment is three
+            // cells of earth to move, not one.
+            Kind::Dike => 150 * DIKE_LENGTH as u32,
             Kind::Road => 20,
             Kind::Bridge => 80,
         }

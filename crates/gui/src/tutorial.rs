@@ -73,7 +73,7 @@ pub fn next_thing(w: &World, me: PlayerId) -> Option<&'static str> {
 
     // Then the flood.
     if !placed(Kind::Dike) {
-        return Some("press 7 for a dike, between your city and the water");
+        return Some("press 7 and drag a wall between your city and the water");
     }
     if w.omen() == sim::Omen::Uneasy {
         return Some("the water comes tomorrow: choose everybody, send them uphill");
@@ -139,7 +139,7 @@ impl Welcome {
 
         line("THEN", 15.0, palette::FAINT, 26.0, &mut y);
         line("4 and 5             a forester's hut and a quarry: wood and stone", 18.0, palette::INK, 26.0, &mut y);
-        line("7                   a dike, between your city and the water", 18.0, palette::INK, 26.0, &mut y);
+        line("7 then drag         a wall between your city and the water", 18.0, palette::INK, 26.0, &mut y);
         line("right-click ground  send them there, and they stay", 18.0, palette::INK, 40.0, &mut y);
 
         ui::centred(

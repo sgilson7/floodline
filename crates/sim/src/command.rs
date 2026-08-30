@@ -41,6 +41,12 @@ pub enum Command {
     /// chat message so it lands on the same tick for everyone and replays with
     /// the rest of the game (design §6).
     Ping { x: u8, y: u8 },
+    /// Draw a wall along a straight run, in three-cell segments.
+    ///
+    /// Beside `Road` rather than reusing it, because the two are opposites: a
+    /// road takes the cheapest path between two cells and a wall stays on the
+    /// line you drew. They would share a name and nothing else.
+    DikeLine { from: (u8, u8), to: (u8, u8) },
     /// Lay a road from one cell to another along the cheapest path, bridging
     /// shallows where it must (design §6).
     Road { from: (u8, u8), to: (u8, u8) },
@@ -97,6 +103,9 @@ impl Command {
             Command::MoveTo { citizens, x, y } => format!("move {} {x} {y}", ids(citizens)),
             Command::SetHome { citizens, cottage } => {
                 format!("home {} @{}", ids(citizens), cottage.0)
+            }
+            Command::DikeLine { from, to } => {
+                format!("dikeline {} {} {} {}", from.0, from.1, to.0, to.1)
             }
             Command::Road { from, to } => {
                 format!("road {} {} {} {}", from.0, from.1, to.0, to.1)
@@ -160,6 +169,10 @@ impl Command {
                 Command::MoveTo { citizens: ids(c)?, x: x.parse().ok()?, y: y.parse().ok()? }
             }
             ["home", c, b] => Command::SetHome { citizens: ids(c)?, cottage: bid(b)? },
+            ["dikeline", fx, fy, tx, ty] => Command::DikeLine {
+                from: (fx.parse().ok()?, fy.parse().ok()?),
+                to: (tx.parse().ok()?, ty.parse().ok()?),
+            },
             ["road", fx, fy, tx, ty] => Command::Road {
                 from: (fx.parse().ok()?, fy.parse().ok()?),
                 to: (tx.parse().ok()?, ty.parse().ok()?),
@@ -244,6 +257,7 @@ mod tests {
             Command::Unassign { citizens: vec![CitizenId(4), CitizenId(5)] },
             Command::MoveTo { citizens: vec![CitizenId(8)], x: 127, y: 3 },
             Command::SetHome { citizens: vec![CitizenId(2)], cottage: BuildingId(11) },
+            Command::DikeLine { from: (40, 12), to: (40, 60) },
             Command::Road { from: (5, 6), to: (100, 120) },
             Command::AcceptRoad { road: RoadId(2) },
             Command::Trade {
@@ -282,8 +296,8 @@ mod tests {
             .collect();
         assert_eq!(
             seen.len(),
-            15,
-            "one_of_each names {} distinct commands, not 15: {seen:?}",
+            16,
+            "one_of_each names {} distinct commands, not 16: {seen:?}",
             seen.len()
         );
     }
@@ -295,7 +309,7 @@ mod tests {
             "place cottage 1", "place cottage 1 2", "place cottage 1 2 up",
             "demolish 7", "demolish @", "move 1 2 3", "assign #1",
             "pause now", "resume please", "ping 1", "home #1 2",
-            "road 1 2 3", "acceptroad 2", "trade !1 food 20 wood",
+            "road 1 2 3", "dikeline 1 2 3", "acceptroad 2", "trade !1 food 20 wood",
             "trade !1 gold 20 wood 15", "accepttrade 0",
         ] {
             assert_eq!(Command::parse(line), None, "{line:?} parsed as a command");

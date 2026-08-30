@@ -410,28 +410,43 @@ fn a_city_in_the_path(with_a_dike: bool) -> u32 {
         // also the depth a citizen drowns in — the band where a two-level dike
         // is both necessary and sufficient is a single unit wide. That is a
         // fine thing for a *game* to be tight about and a hopeless thing to
-        // hang a test on. The two arms meet at the
-        // corner, so a cell already taken is skipped rather than placed twice.
-        let wall = |w: &mut World, x: i32, y: i32| {
-            if w.can_place(PlayerId(0), Kind::Dike, Facing::EastWest, x, y).is_err() {
-                return;
-            }
-            let id = w.place(PlayerId(0), Kind::Dike, Facing::EastWest, x, y).unwrap();
-            for _ in 0..DIKE_MAX_LEVEL {
-                w.deliver_to(id, Good::Stone, w.buildings[id.0 as usize].outstanding().stone);
-                w.build_at(id, Kind::Dike.build_ticks());
-                if w.buildings[id.0 as usize].level < DIKE_MAX_LEVEL {
-                    w.raise_dike(PlayerId(0), id).unwrap();
+        // hang a test on.
+        //
+        // Drawn the way a player draws it: two `DikeLine`s that meet at the
+        // corner. The second one starts past the first so the shared corner is
+        // walled once, and a segment the other arm already took is skipped
+        // rather than failing the line.
+        let wall = |w: &mut World, from: (u8, u8), to: (u8, u8)| {
+            for id in w.lay_dike_line(PlayerId(0), from, to).unwrap() {
+                for _ in 0..DIKE_MAX_LEVEL {
+                    w.deliver_to(id, Good::Stone, w.buildings[id.0 as usize].outstanding().stone);
+                    w.build_at(id, Kind::Dike.build_ticks());
+                    if w.buildings[id.0 as usize].level < DIKE_MAX_LEVEL {
+                        w.raise_dike(PlayerId(0), id).unwrap();
+                    }
                 }
+                assert_eq!(w.buildings[id.0 as usize].level, DIKE_MAX_LEVEL);
+                assert!(w.buildings[id.0 as usize].standing_now());
             }
-            assert_eq!(w.buildings[id.0 as usize].level, DIKE_MAX_LEVEL);
-            assert!(w.buildings[id.0 as usize].standing_now());
         };
+        wall(&mut w, (11, 4), (11, 29));
+        wall(&mut w, (4, 11), (29, 11));
+
+        // Three-cell segments do not tile an L. The corner cell belongs to the
+        // first arm, so the second arm skips the segment that would have
+        // overlapped it and leaves one cell either side. A player sees the
+        // ghost skip and patches the seam with a short run across it; so does
+        // the test. This is the cost of a wall being segments rather than
+        // cells, and it is a cost worth naming rather than designing around.
+        wall(&mut w, (10, 9), (10, 11));
+        wall(&mut w, (12, 11), (12, 13));
+
+        // The L has no holes in it: the water may only go round the ends.
         for y in 4..30 {
-            wall(&mut w, 11, y);
+            assert!(w.building_at(11, y).is_some(), "a gap in the wall at (11, {y})");
         }
         for x in 4..30 {
-            wall(&mut w, x, 11);
+            assert!(w.building_at(x, 11).is_some(), "a gap in the wall at ({x}, 11)");
         }
     }
 
