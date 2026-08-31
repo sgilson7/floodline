@@ -13,6 +13,31 @@ This document is also an artifact, if a link is easier to hand on than a file:
 
 ---
 
+## Where this stands
+
+| | | |
+|---|---|---|
+| M10.1 | Two agents in one room | **done** — green on localhost and the deployed build |
+| M10.2 | The clock, decided and written down | **done** — three paragraphs in `DECISIONS.md` |
+| M10.3 | Hands and eyes | **done** — `table.py`, `panel.py`, `driver.py`, `driver_check.py` |
+| M10.4 | The referee, and ten minutes of nothing going wrong | ← **next** |
+| M10.5 | A rehearsal: one age | |
+| M10.6 | The run | |
+| M10.7 | The account | |
+| M10.8 | What the run demands | two findings already waiting for it |
+
+Setting the table found three things, which is what the ordering was for. Two
+are fixed (`peers at` said nothing in a browser; the panel's variable row still
+moved three fixed rows). Two are recorded and deliberately left for M10.8: only
+the host can notice a desync, and on one the joiner freezes without being told.
+All four are in `DECISIONS.md`.
+
+The one addition to the plan below: `table.py`, which owns the lobby dance so
+that `two_agents.py` and a real run cannot drift apart, and which leaves the
+browsers standing with a debugging port each.
+
+---
+
 ## What M10 is, and what it is not
 
 It is **a game, played to the end, by two hands that do not share a screen** —

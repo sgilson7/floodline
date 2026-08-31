@@ -27,6 +27,9 @@ after that it is about a minute. `.venv-test/` is gitignored.
 | `play.py` | the mouse reaching the simulation: choosing citizens, ordering them about, a cottage, a road, a ping, a trade, a wall drawn with a drag, and a refusal that says so |
 | `game_two_tabs.py` | the whole stack: two tabs reach the lobby, join by room code or by pasted code, and both leave the lobby into the same world |
 | `two_agents.py` | the same world reached by two *browsers* that share no clipboard, storage or renderer — M10's ground, and the one setup that has to hold for thirty-six minutes |
+| `table.py` | not a check: the one copy of the lobby dance. Run it directly to leave two browsers standing in one game with a debugging port each, which is how a run starts |
+| `driver.py` | not a check: an agent's hands and eyes, one CDP command at a time, because an agent's turns are separate processes |
+| `driver_check.py` | one of each of the driver's verbs doing something visible in a live game — the hands, proven before a run depends on them |
 
 The three `echo_*` scripts drive `web/echo.html`, which drives `window.FLOODLINE_RTC`
 directly — no wasm, no `sim`, no lockstep. That separation is design 9.6's and

@@ -342,3 +342,73 @@ gets written down.
 The single next action inside it: two browser *contexts* (not two pages in one)
 into one room on the deployed build, green and committed, before anything
 decides what to build.
+
+---
+
+## Session 8 — 2026-08-31
+
+**M10.1, M10.2 and M10.3 done, and the setup found three things nobody had
+played long enough to see.** 278 cargo tests, 17 browser checks, no warnings.
+`HANDOFF-M10.md`'s ten-milestone plan is now broken into eight steps in
+`PLAN-M10.md`, ordered so nothing that can fail cheaply is allowed to fail
+during the thirty-six minutes.
+
+### The two decisions the handoff asked for
+
+* **Real speed, no clock multiplier.** It closes itself: the done-condition
+  names the deployed build and a multiplier must never reach a shipped build,
+  so both cannot hold. It would also compress the variable under test, since a
+  day is two minutes of *thinking* time.
+* **Two browsers, not two contexts.** `DROP_AFTER_TICKS` is 300 ticks counted
+  in the waiting peer's own ticks — thirty seconds of wall clock — and
+  `MOST_PER_FRAME` is 8, so a page must render at least 1.25 frames a second.
+  Chromium throttles backgrounded pages and two pages in one browser cannot
+  both be in front, so a run would have been decided by which tab Chromium
+  thought was visible.
+
+### What the setup found
+
+* **`peers at` said nothing in a browser.** It reported one number — the peer's
+  own tick, which the row above it already said — because a page has one
+  `Lockstep` and `Session::ticks` had nothing else to give. It was only ever
+  true of the native build, where every peer's lockstep is in-process.
+  `Lockstep::peer_ticks` fixes it from `seen_at`, with no wire change; two
+  browsers now show `peers at [74, 71]`.
+* **The panel's variable row still moved three fixed rows.** `8ead1b8` moved
+  the level/move row and its comment says it "sits below everything fixed" —
+  but the hover line, the selection row and the trade button were all still
+  under it and all still shifted by forty-eight pixels whenever a building was
+  picked. It is genuinely last now, and `panel_rows.py` is the check that says
+  so — verified to fail on the old layout.
+* **Only the host can notice a desync, and the joiner freezes without being
+  told.** Both written up in `DECISIONS.md` and deliberately not fixed: the
+  second is a shipped failure path that has never fired, and changing it on
+  evidence from reading rather than playing is the kind of change this project
+  has twice regretted. M10.8 answers them with a run behind them.
+
+### Built
+
+* `two_agents.py` — two browsers, one room, green against localhost and the
+  deployed build. Checks something `game_two_tabs.py` does not: that both tabs
+  are still *ticking* three seconds later.
+* `table.py` — the one copy of the lobby dance, and the launcher that leaves
+  two browsers standing with a debugging port each.
+* `panel.py` — the one copy of the panel's running totals. `play.py` and
+  `assign.py` keep their own literals on purpose.
+* `driver.py` — an agent's hands and eyes over CDP, one command at a time,
+  because an agent's turns are separate processes.
+* `driver_check.py`, `panel_rows.py` — both in `make browser-test`.
+
+### Blocked
+
+Nothing.
+
+### Next action
+
+**M10.4 — the referee, and ten minutes of nothing going wrong.**
+`referee.py` attaches to both pages, issues no input, and every fifteen seconds
+saves a crop of each panel's foot and records whether the status row has gone
+red. Then a ten-minute soak on the deployed build: both pages holding about ten
+ticks a second, `peers at` never parted by more than the pipeline, no drop.
+That is the milestone that pays for itself — rendering throttle is invisible
+for four minutes and fatal at thirty.

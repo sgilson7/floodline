@@ -88,4 +88,11 @@ say "two_agents.py"
 "$VENV/bin/python" "$ROOT/packaging/browser/two_agents.py" \
   "http://localhost:$PORT/index.html" || fail=1
 
+# An agent's hands: every verb it has, doing something visible. A verb that is
+# missing or wrong is otherwise found halfway through a run that cannot be
+# repeated cheaply.
+say "driver_check.py"
+"$VENV/bin/python" "$ROOT/packaging/browser/driver_check.py" \
+  "http://localhost:$PORT/index.html" || fail=1
+
 exit $fail
