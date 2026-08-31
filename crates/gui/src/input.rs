@@ -60,7 +60,9 @@ const BUILDABLE: [(Kind, &str, KeyCode); 11] = [
     (Kind::Dike, "dike", KeyCode::Key7),
     (Kind::TradingPost, "post", KeyCode::Key8),
     (Kind::Nursery, "nursery", KeyCode::Key9),
-    (Kind::BuildersHut, "builders hut", KeyCode::Key0),
+    // `b`, not `0`: zero frames the map (`main.rs`), and a key that both
+    // framed the map and picked a building would have done both.
+    (Kind::BuildersHut, "builders hut", KeyCode::B),
     (Kind::Cookery, "cookery", KeyCode::C),
 ];
 
@@ -1791,7 +1793,6 @@ fn rect_between(a: Vec2, b: Vec2) -> Rect {
 /// The digit on a build button, read off the key that picks it.
 fn digit_of(key: KeyCode) -> char {
     match key {
-        KeyCode::Key0 => '0',
         KeyCode::Key1 => '1',
         KeyCode::Key2 => '2',
         KeyCode::Key3 => '3',
@@ -1801,8 +1802,9 @@ fn digit_of(key: KeyCode) -> char {
         KeyCode::Key7 => '7',
         KeyCode::Key8 => '8',
         KeyCode::Key9 => '9',
-        // The cookery is `c`: the digits ran out at ten and a building is
-        // worth more than the shape of its shortcut.
+        // The digits ran out at nine, and zero was already taken by the
+        // camera. A building is worth more than the shape of its shortcut.
+        KeyCode::B => 'b',
         KeyCode::C => 'c',
         // Unreachable while `BUILDABLE` carries only these, and a question
         // mark on a button is a better failure than a panic in a draw loop.

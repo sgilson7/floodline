@@ -38,7 +38,7 @@ the first thing that can kill you.
     panel                     read your side panel - do this most often
     shot                      the whole window, map included
     rows                      the status line and the three rows at the foot
-    key <Name>                Digit0..Digit9, KeyC, KeyH, KeyR, KeyP, KeyM, Escape
+    key <Name>                Digit0..Digit9, KeyB, KeyC, KeyH, KeyR, KeyP, KeyM, Escape
     button <name>             a panel button by name
     click-cell <x> <y>        the map, 0..127 both ways
     right-click-cell <x> <y>  give an order, or put the current tool down
@@ -140,7 +140,7 @@ the panel:
 * **8 trading post** — its workers are mules that carry goods to the other city
   and come back with gold. They need a way across.
 * **9 nursery** — no nursery, no children.
-* **0 builders hut** — free, and a roster rather than a workplace: nobody
+* **b builders hut** — free, and a roster rather than a workplace: nobody
   stands in it. Anyone you assign to it becomes a **builder**, and a builder
   takes a construction site first and carries loads only when there is no site
   to work on. That is the opposite of an unassigned citizen, who carries first
@@ -218,7 +218,7 @@ How a city grows, which is all the game will tell you and all you need:
   three-age run** and the panel no longer suggests it: a child comes of age
   twelve days after it is born and a run is eighteen days. The buildings work;
   the arithmetic does not. Do not spend days on it unless you are asked to.
-* **0 builders hut** — free. Assign people to it and they build before they
+* **b builders hut** — free. Assign people to it and they build before they
   haul, and go on doing so until you say otherwise.
 * **c cookery** — turns raw food into meals worth two of it. Needs cooks.
 * A child does not work, and it eats. It comes of age two ages after it is
