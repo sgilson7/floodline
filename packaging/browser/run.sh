@@ -76,4 +76,10 @@ for mode in room code; do
     "http://localhost:$PORT/index.html" 1 "$mode" || fail=1
 done
 
+# The same world reached by two browsers that share nothing - the ground a
+# playtest is run on, and the one that has to hold for thirty-six minutes.
+say "two_agents.py"
+"$VENV/bin/python" "$ROOT/packaging/browser/two_agents.py" \
+  "http://localhost:$PORT/index.html" || fail=1
+
 exit $fail
