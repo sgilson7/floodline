@@ -488,20 +488,33 @@ game.
 ### Next action
 
 **M11 — make the world legible**, which is what M10.8 turned out to be. The run
-demanded more than one milestone, so it is seven, in `PLAN-M11.md`, and
+demanded more than one milestone, so it is nine, in `PLAN-M11.md`, and
 **not one of them changes a balance constant**. Every one is the game failing
 to say something it already knows.
 
-Two of them change what a run *is*, and the rest can wait behind them:
+**Start with M11.1 — the clock**, because it is free and it halves the
+wall-clock cost of every test after it. `TICKS_PER_SECOND` turns out to be a
+pure wall-clock knob once `SURGE_TICKS` and `DROWN_TICKS` are pinned in ticks
+rather than seconds; measured, the five-strategy table at twice the rate is
+identical, and a run becomes eighteen minutes. **Not `WALK_SPEED`** — doubling
+that is the obvious way and the wrong one, and the same table says so: the
+tallest wall a city can raise before the first flood goes from 60 stone to 540.
 
-* **M11.1 — a panel that tells the truth.** A pending trade offer overdraws
+Then the two that change what a run *is*:
+
+* **M11.2 — a panel that tells the truth.** A pending trade offer overdraws
   `tick`, `peers at` and `build`/`seed`, which are the rows a player is told to
   read when something is wrong. Partly this session's doing.
-* **M11.2 — ground you can read.** Both players asked for the last flood's
+* **M11.3 — ground you can read.** Both players asked for the last flood's
   high-water line above everything else. `Map::height` already exists, so
   hovering ground is display only; the mark is a running maximum of
   `Water::depth`, and one bit a cell costs 2 KB of the `Welcome` snapshot.
 
-The single next action is M11.1's first deliverable: decide how the foot of the
-panel stops being overdrawn, write it down, and get `panel_rows.py` failing on
-today's build with an offer pending and a building selected.
+And **M11.9 ends the phase the way M10 did**: two agents, a full run, an
+account — this time asked to get a city *above* eight souls. Both M10 runs
+ended smaller than they started, so families, children and the nursery have
+never been played on purpose by anybody. `AGENT-BRIEF.md` already carries the
+growth objective.
+
+The single next action is M11.1: pin the two constants, set the rate to 20, and
+re-run `three_full_runs_of_each_strategy` to confirm the table has not moved.

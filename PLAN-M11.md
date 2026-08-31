@@ -5,7 +5,7 @@ that account asks for, as milestones.
 
 The plan of record for M10 is `PLAN-M10.md`; its M10.8 was a placeholder for
 "what the run demands", written before anybody knew what that would be. **It is
-this.** M10.8 is closed and replaced by the seven steps below.
+this.** M10.8 is closed and replaced by the nine steps below.
 
 This document is also an artifact, if a link is easier to hand on than a file:
 **<https://claude.ai/code/artifact/73e39edb-7920-4b0e-953f-25732dc49111>**
@@ -50,7 +50,71 @@ paste the table into the doc comment, and do it in its own commit.
 
 ---
 
-## M11.1 — A panel that tells the truth
+## M11.1 — The clock
+
+First, because it costs nothing and it halves the wall-clock price of every
+test that comes after it, including M11.9's.
+
+A run is thirty-six minutes and both accounts read like people who had been at
+it a while. Design §11 has suspected since phase 1 that an age is too long.
+`TICKS_PER_SECOND` is the knob, and **it is a pure wall-clock knob** — it
+appears in no rule in `sim`, only in `gui`'s `Clock`, two `net` timeouts and
+three balance constants.
+
+**Two of those three are balance written in seconds, and have to be pinned
+first** or doubling the rate quietly changes the game:
+
+```rust
+pub const SURGE_TICKS: u32 = 300;   // was 30 * TICKS_PER_SECOND
+pub const DROWN_TICKS: u32 = 50;    // was  5 * TICKS_PER_SECOND
+```
+
+Left as they are, doubling the rate makes the surge pour for six hundred ticks
+instead of three hundred — twice the water — and doubles how long a citizen
+takes to drown *relative to the day*. The other three are genuinely wall-clock
+and should keep scaling: `DROP_AFTER_TICKS` stays thirty real seconds,
+`WAIT_WARN_TICKS` five, `PING_LIFETIME` three.
+
+**Measured, not assumed.** With the two pinned and the rate at 20, the
+five-strategy table is identical to the baseline:
+
+```text
+                      survivors        tallest wall by flood 1
+  10 ticks/s   idle 0 grow 8 dike 8 flee 4 both 0     60 stone
+  20 ticks/s   idle 0 grow 8 dike 8 flee 4 both 0     60 stone
+```
+
+Same game, half the clock, and everything on screen moves twice as fast because
+there are twice as many ticks in a second.
+
+**Deliverables**
+* `SURGE_TICKS` and `DROWN_TICKS` pinned in ticks, each with a doc comment
+  saying why it is no longer written in seconds.
+* `TICKS_PER_SECOND` at 20, and a `sim` test that the two pinned constants do
+  not move when it changes.
+* Re-run `three_full_runs_of_each_strategy` and paste the table above into
+  `TICKS_PER_SECOND`'s doc comment, in the house style.
+* A note in `DECISIONS.md`: a run is eighteen minutes now, which is design
+  §11's worry answered rather than deferred.
+* **`AGENT-BRIEF.md` says "a day is two minutes of real time. A whole run is
+  thirty-six minutes."** That line moves with the clock, and so does the
+  polling cadence written beside it — an agent told to look every twenty-five
+  seconds is looking twice as rarely once a day is half as long.
+
+**Not** `WALK_SPEED`. Doubling that is the obvious way to make people move
+faster and it is the wrong one: it is safe at exactly 128 — a road doubles it
+and 256 is one cell a tick, which is the point at which a citizen would step
+over a wall without the passability check seeing it — but it is not
+balance-neutral. Measured, it takes the tallest wall a city can raise before
+the first flood from 60 stone to 540, because haulers carry stone nine times
+better, and `flee` drops from four survivors to one. That would undo M5.
+
+**Done when** a full run is eighteen minutes and the strategy table is
+unchanged.
+
+---
+
+## M11.2 — A panel that tells the truth
 
 The instrument first, because M10's own referee was fooled by it and because
 half of this is self-inflicted.
@@ -84,7 +148,7 @@ refused, and whether their city is alive — and a browser check says so.
 
 ---
 
-## M11.2 — Ground you can read
+## M11.3 — Ground you can read
 
 **The thing both players asked for above everything else**, from opposite banks
 and without conferring.
@@ -121,7 +185,7 @@ is a judgement rather than a guess.
 
 ---
 
-## M11.3 — A wall you can read
+## M11.4 — A wall you can read
 
 The dike is the game's central purchase and the only building whose value
 cannot be estimated before buying it.
@@ -149,7 +213,7 @@ finally play a run with a level-three wall, which nobody ever has.
 
 ---
 
-## M11.4 — Sending some of the people
+## M11.5 — Sending some of the people
 
 Named by both players, independently, as the worst part of the game. City 0
 spent about a third of its entire run on a workaround.
@@ -175,7 +239,7 @@ and a player can see where everybody is without hovering the map.
 
 ---
 
-## M11.5 — What the flood did
+## M11.6 — What the flood did
 
 **Deliverables**
 * **Who died, and of what.** The soul count drops and nothing else is said.
@@ -194,7 +258,7 @@ routine order given on the eve of a flood does not silently kill people.
 
 ---
 
-## M11.6 — Small honesties
+## M11.7 — Small honesties
 
 Each of these is one sentence the game already knows and does not say. Cheap,
 and together they account for a lot of the confusion in both accounts.
@@ -220,7 +284,7 @@ and together they account for a lot of the confusion in both accounts.
 
 ---
 
-## M11.7 — Legible at the fit
+## M11.8 — Legible at the fit
 
 Last, because it is the only group nobody died of.
 
@@ -238,19 +302,65 @@ Last, because it is the only group nobody died of.
 
 **Done when** a player can find their own city on a flooded map at a glance.
 
+
+---
+
+## M11.9 — The second run, and a city that grows
+
+M10's two play sessions produced more usable design feedback than every probe
+in the repo put together, so M11 ends the same way it began: two agents, one
+browser each, a full run on the deployed build, and a written account.
+
+**With one thing asked of them that nobody has ever done.** Both M10 runs ended
+with cities *smaller* than they started — eight down to two, and eight down to
+three. City 0 skipped cottages and a nursery entirely, reasoning that "with
+food at 1 and the flood two days out, growth was not the problem". So **M9 —
+families, households, children, the nursery, the largest addition to `sim`
+since the MVP — has never been played on purpose by anybody**, and no city has
+ever risen above the eight it was founded with.
+
+**Deliverables**
+* **`AGENT-BRIEF.md` gains a growth objective**: both players are asked to get
+  their city *above* eight souls, and to say what it cost them. In the game's
+  own words and nothing more — two adults sharing a fed cottage become a
+  household, a fed household with a nursery place and a spare bed has a child,
+  and a child works two ages later.
+* **The account asks four new questions**: how many souls at its height;
+  whether growing was worth it against the flood that followed; whether a child
+  born in age one ever paid its way by age three; and whether the households
+  tab was worth opening.
+* **And whether M11 worked.** Did the high-water mark change where the wall
+  went? Did anyone raise a dike past level one? Could they tell who drowned?
+  Each of M11.2–M11.8 either changed a decision or it did not, and the account
+  is where that is settled.
+* The harness needs nothing new: `table.py`, `driver.py`, `referee.py` and
+  `panel.py` all still stand, and at 20 ticks a second the run is eighteen
+  minutes rather than thirty-six.
+
+**This is a directed playtest and that is a change.** M10's runs asked "what
+does a player do?"; this one asks "can a player do this?" It measures something
+narrower on purpose, because the alternative is shipping a family system nobody
+has ever used. Keep the open-ended questions in the brief as well — the best
+findings in M10 came from things neither agent was asked about.
+
+**Done when** two agents have finished a run having tried to grow, and the
+account says whether a city that grows survives better than a city that walls.
+
 ---
 
 ## The order, and why
 
 | | | why here |
 |---|---|---|
-| M11.1 | A panel that tells the truth | the instrument everything else is judged with, and half of it is our doing |
-| M11.2 | Ground you can read | what both players asked for above everything else |
-| M11.3 | A wall you can read | the game's central purchase, still never tested above level one |
-| M11.4 | Sending some of the people | the worst part of the game by both accounts |
-| M11.5 | What the flood did | the deaths nobody could explain |
-| M11.6 | Small honesties | cheap, and a lot of the confusion |
-| M11.7 | Legible at the fit | nobody died of it |
+| M11.1 | The clock | free, measured neutral, and it halves the wall-clock cost of every test after it |
+| M11.2 | A panel that tells the truth | the instrument everything else is judged with, and half of it is our doing |
+| M11.3 | Ground you can read | what both players asked for above everything else |
+| M11.4 | A wall you can read | the game's central purchase, still never tested above level one |
+| M11.5 | Sending some of the people | the worst part of the game by both accounts |
+| M11.6 | What the flood did | the deaths nobody could explain |
+| M11.7 | Small honesties | cheap, and a lot of the confusion |
+| M11.8 | Legible at the fit | nobody died of it |
+| M11.9 | The second run | the only thing that can say whether any of it worked |
 
 M11.1 and M11.2 are the two that change what a run *is*. If only two get done,
 those are the two — and M11.2 is the one that turns the flood from something

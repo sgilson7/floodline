@@ -112,6 +112,28 @@ Drag a box over them to choose them, or press `choose all`. Then:
 
 Children do not work. They come of age two ages after they are born.
 
+## Grow the city
+
+Your city is founded with eight people and both previous playtests ended
+*smaller* than they started. **This time, getting above eight is part of what
+you are testing.** Try for it, and say what it cost you.
+
+How a city grows, which is all the game will tell you and all you need:
+
+* **1 cottage** — beds. Two adults sharing a fed cottage become a household.
+* **9 nursery** — a fed household with a nursery place and a spare bed has a
+  child. No nursery, no children.
+* A child does not work, and it eats. It comes of age two ages after it is
+  born, so one born in the first age is working by the third and one born just
+  before the last flood never works at all.
+* The **households** tab lists them, and hovering one rings those people on
+  the map.
+
+Growing is not free and it is not obviously right: every mouth eats whether or
+not it works, and the water is still coming on day six. Whether it was worth it
+is one of the things this run is for, so if you decide partway through that it
+was a mistake, say so — that is a finding, not a failure.
+
 ## How to play this run
 
 * **Look every twenty to thirty seconds** through a quiet day. Most ticks want
@@ -128,6 +150,9 @@ The account is the point of the exercise, not a by-product. Keep notes as you
 play, not afterwards:
 
 * what you built, in what order, and **why you chose it**;
+* **how many souls your city held at its height**, whether growing was worth it
+  against the flood that followed, and whether a child born early ever paid its
+  way;
 * when the water arrived, how far it got, and who it took;
 * **whether the wall was worth building** — this is the question the run exists
   to answer;
