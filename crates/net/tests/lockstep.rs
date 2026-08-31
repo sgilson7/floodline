@@ -288,6 +288,38 @@ fn a_peer_whose_world_differs_is_caught_and_the_game_stops() {
     assert_eq!(g.steps[0].tick(), stopped_at, "the host kept simulating after a desync");
 }
 
+/// The panel's "peers at" row: the host can see how far everybody has got, and
+/// a joiner can see only itself.
+///
+/// In the browser that row reported one number — the peer's own tick, which the
+/// row directly above it already said — because a page has one `Lockstep` and
+/// `Session::ticks` had nothing else to hand it. It is the row M10 is supposed
+/// to watch for two worlds parting, so it may as well contain something.
+#[test]
+fn the_host_can_see_how_far_everybody_has_got() {
+    let mut g = Game::new(3, Conditions::default());
+    g.run_to_tick(200);
+
+    let host = g.steps[0].peer_ticks();
+    assert_eq!(host.len(), 3, "the host should report one tick per player");
+
+    let mine = g.steps[0].tick();
+    assert_eq!(host[0], mine, "the host's own entry is the tick it has simulated");
+    for (i, &theirs) in host.iter().enumerate().skip(1) {
+        assert!(theirs > 0, "player {i} never reported a tick at all");
+        assert!(theirs <= mine, "player {i} is somehow ahead of the host");
+        // A steady gap is the pipeline and not a fault: what a peer reports is
+        // a round trip old and `DELAY` ticks behind besides. A growing one is
+        // a peer falling behind, which is the thing worth watching for.
+        assert!(mine - theirs < 20, "player {i} is {} ticks behind", mine - theirs);
+    }
+
+    // A joiner is sent nobody's checksum — `Turn` goes to the host and to no
+    // one else — so it has nothing to report but its own tick, and one number
+    // is the honest answer rather than a short one.
+    assert_eq!(g.steps[1].peer_ticks(), vec![g.steps[1].tick()]);
+}
+
 /// The plan's third: a silent player is dropped, and on the same tick for
 /// everyone.
 #[test]

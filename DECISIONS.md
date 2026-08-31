@@ -2314,3 +2314,52 @@ has read the answer key.
 The referee is the exception and is not a player: it reads both panels on a
 schedule, issues no input, and detects the desync banner as red in the status
 row, the way `assign.py::alarm_band` detects a refusal. It is an instrument.
+
+---
+
+## 2026-08-31 — What "peers at" was, and the two things left beside it
+
+Setting up M10.1 meant reading the panel's bottom rows in a real browser for
+the first time, and the row the handoff calls the instrument to watch — "`peers
+at` is the two peers' tick counts side by side" — showed `peers at [74]`. One
+number, its own, identical to the `tick` row directly above it.
+
+It was true of the native build and only of the native build. `Session::ticks`
+maps over `Local::steps`, and natively every peer's `Lockstep` is in this
+process, so `make` really does show several numbers. In the browser a page has
+exactly one `Lockstep` and the arm read `vec![w.step.tick()]`. Every browser
+that has ever run this game has drawn a row that says nothing, and it went
+unnoticed because the two tabs that have played together were both watched by
+somebody who knew what the number ought to be.
+
+`Lockstep::peer_ticks` replaces it. The host keeps `seen_at`: the last tick each
+player reported a checksum for, which arrives on `Turn` and is already being
+recorded a few lines away for the desync check. It shows `peers at [74, 71]` —
+its own simulated tick and everybody's last reported one. The gap is the
+pipeline, not a fault: what a peer reports is a round trip old and `DELAY` ticks
+behind besides. A steady gap is health, a growing one is a peer falling behind,
+and one that stops moving is a peer that has stopped. A joiner still shows one
+number, because it is genuinely told nothing else.
+
+**Two things were found with it and deliberately left alone.**
+
+**Only the host can notice a desync.** A checksum rides on `Turn`, which every
+peer sends to the host and to nobody else, and `check_agreement` is host-only —
+"the host is the only peer that sees them all, which is why it is the one that
+notices", as the comment there says. A joiner's status can therefore never
+become `Desync`, and `a_peer_whose_world_differs_is_caught_and_the_game_stops`
+only ever asserts on `steps[0]`. So M10's done-condition — "neither client ever
+showed a desync banner" — is half a statement: the joiner's silence proves
+nothing, and the referee must read the *host's* status row to know.
+
+**And on a desync the joiner freezes without being told.** The host sets
+`Desync`, `is_stopped` makes `advance` return early, bundles stop, and the
+joiner sits on "playing" for ever. Two people playing, one is shown the fault
+and the other's game simply stops.
+
+Both are real and neither is fixed here. The second is a shipped failure path
+that has never fired in production, and changing what it does is a decision
+about the game rather than about the playtest; making it during the setup for a
+run, on evidence from reading rather than from playing, is the kind of change
+this project has twice found reasons to regret. They are written down so the
+account has them, and M10.8 is where they are answered — with a run behind them.

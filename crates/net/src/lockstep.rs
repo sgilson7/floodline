@@ -91,6 +91,15 @@ pub struct Lockstep {
     collected: BTreeMap<u32, BTreeMap<PlayerId, Vec<Command>>>,
     /// The checksums each player reported for the tick before.
     reported: BTreeMap<u32, BTreeMap<PlayerId, u64>>,
+    /// The last tick each player said it had simulated.
+    ///
+    /// The same `checked_tick` the checksums arrive on, kept by player rather
+    /// than by tick because the question it answers is "how far has everybody
+    /// got", and `reported` is pruned to a few ticks the moment they are
+    /// applied. Nothing in the lockstep reads it: it exists so the panel can
+    /// show the peers keeping step, which is the one thing a player can watch
+    /// that says a run is still healthy.
+    seen_at: BTreeMap<PlayerId, u32>,
     /// Who is on which connection.
     player_of: BTreeMap<PeerId, PlayerId>,
     peer_of: BTreeMap<PlayerId, PeerId>,
@@ -158,6 +167,7 @@ impl Lockstep {
             bundles: BTreeMap::new(),
             collected: BTreeMap::new(),
             reported: BTreeMap::new(),
+            seen_at: BTreeMap::new(),
             player_of: BTreeMap::new(),
             peer_of: BTreeMap::new(),
             waited: BTreeMap::new(),
@@ -290,6 +300,37 @@ impl Lockstep {
     /// The tick the world is on.
     pub fn tick(&self) -> u32 {
         self.world.tick
+    }
+
+    /// How far each player has got, in `world.players` order — the panel's
+    /// "peers at" row.
+    ///
+    /// **Only the host is told.** A checksum rides on `Turn`, which every peer
+    /// sends to the host and to nobody else, so a joiner knows its own tick and
+    /// nothing about anyone else's and says so by reporting one number. That is
+    /// the same asymmetry that makes the host the only peer able to notice a
+    /// desync, and it is worth reading the row knowing which side you are on.
+    ///
+    /// The numbers are not meant to be equal. The host's own is the tick it has
+    /// simulated; everybody else's is the last one they *told* it about, which
+    /// is a round trip old and `DELAY` ticks behind besides. A steady gap is
+    /// the pipeline; a growing one is a peer falling behind; one that stops
+    /// moving is a peer that has stopped.
+    pub fn peer_ticks(&self) -> Vec<u32> {
+        if !self.host {
+            return vec![self.world.tick];
+        }
+        self.world
+            .players
+            .iter()
+            .map(|p| {
+                if *p == self.me {
+                    self.world.tick
+                } else {
+                    self.seen_at.get(p).copied().unwrap_or(0)
+                }
+            })
+            .collect()
     }
 
     /// Everybody in the game, host first.
@@ -449,6 +490,7 @@ impl Lockstep {
             Message::Turn { player, tick, commands, checked_tick, checksum } if self.host => {
                 self.collected.entry(tick).or_default().insert(player, commands);
                 self.reported.entry(checked_tick).or_default().insert(player, checksum);
+                self.seen_at.insert(player, checked_tick);
                 self.waited.insert(player, 0);
                 self.check_agreement(checked_tick);
             }
@@ -511,6 +553,7 @@ impl Lockstep {
             if self.host {
                 self.collected.entry(self.turn_tick).or_default().insert(self.me, commands);
                 self.reported.entry(checked_tick).or_default().insert(self.me, checksum);
+                self.seen_at.insert(self.me, checked_tick);
             } else {
                 peer.broadcast(&encode(&turn), true);
             }

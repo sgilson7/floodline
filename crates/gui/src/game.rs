@@ -228,12 +228,20 @@ impl Session {
 
     /// Every peer's tick, for the panel. They will not all be the same, and
     /// that is not a fault — see the lockstep tests.
+    ///
+    /// Natively every peer's `Lockstep` is in this process, so this is the
+    /// truth. In the browser there is one, and it can only report what the
+    /// wire has told it: `peer_ticks` on the host is everybody's last reported
+    /// tick, and on a joiner it is one number, because a joiner is told
+    /// nothing about anybody else. It used to be one number on both, which
+    /// made the row a copy of the `tick` row above it on every browser that
+    /// has ever run this.
     pub fn ticks(&self) -> Vec<u32> {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             Session::Local(l) => l.steps.iter().map(|s| s.tick()).collect(),
             #[cfg(target_arch = "wasm32")]
-            Session::Web(w) => vec![w.step.tick()],
+            Session::Web(w) => w.step.peer_ticks(),
         }
     }
 
