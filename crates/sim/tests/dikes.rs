@@ -290,7 +290,17 @@ fn a_level_one_wall_gives_way_where_a_level_two_holds() {
         // Long enough for a level one to go. `dike_pressure_on_flat_ground`
         // says it does so around tick 1900 at the thresholds M5 measured — it
         // was 1100 at the provisional ones, and this window was 1300.
-        drain(&mut w, 1900);
+        //
+        // 2 800 since M12.8, and the reason is worth having. Ground that
+        // drinks does not change *whether* a level-one wall goes - the peak
+        // stress is identical to the world before drainage, 12 751 either way,
+        // which is the number that milestone was measured against. What it
+        // changes is *when*: the apron of shallow water around the pool drains
+        // away and stops feeding it, so the wall takes longer to reach the
+        // same load. A level two still holds for the whole of the longer
+        // window, which is what keeps this test a comparison rather than a
+        // stopwatch.
+        drain(&mut w, 2800);
 
         let standing =
             ids.iter().filter(|id| w.buildings[id.0 as usize].standing_now()).count();
@@ -324,7 +334,7 @@ fn a_wall_under_load_shows_it_before_it_goes() {
 
     for _ in 0..26 {
         pour(&mut w, 12, 50);
-        drain(&mut w, 50);
+        drain(&mut w, 2800);
         seen.push(w.buildings[watch.0 as usize].strain());
         if !w.buildings[watch.0 as usize].standing_now() {
             break;
@@ -368,7 +378,10 @@ fn a_wall_that_gives_way_stops_holding_the_water_up() {
     let held = w.effective_height(bx, by);
 
     pour(&mut w, 12, SURGE_TICKS);
-    drain(&mut w, 1900);
+    // 2 800 for the same reason as
+    // `a_level_one_wall_gives_way_where_a_level_two_holds`: ground that drinks
+    // moves *when* a level-one wall goes, not whether.
+    drain(&mut w, 2800);
 
     assert!(!w.buildings[id.0 as usize].standing_now());
     assert!(

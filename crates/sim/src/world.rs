@@ -1220,9 +1220,12 @@ impl World {
     pub fn step_water(&mut self) {
         let sea = self.sea_surface();
         self.inject_surge();
-        if self.water.volume() > 0 {
+        // Ground that is still holding water has to go on passing it down even
+        // when the surface is dry, or a saturated map stays saturated into the
+        // next age and `accounted` never balances again.
+        if self.water.volume() > 0 || self.water.held_by_ground() > 0 {
             let ground = self.ground_heights();
-            self.water.step(&ground, sea);
+            self.water.step(&ground, &self.map.ground, sea);
         }
     }
 

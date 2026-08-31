@@ -12,6 +12,16 @@ use sim::map::{Ground, CELLS, MAP_H, MAP_W};
 use sim::nav::Nav;
 use sim::world::World;
 
+/// Rock, everywhere, for every test that drives the automaton directly.
+///
+/// M12.8 gave the ground an appetite: sand and grass drink, and what they hold
+/// they pass down to an aquifer that deletes it. Every test in this file is
+/// about the *automaton* - conservation, settling, what a dike holds back -
+/// and running them on soil would fold two questions into one number. Rock
+/// takes nothing, so these measure exactly what they measured before.
+/// `the_ground_drinks_and_the_map_dries` is where the soil is tested.
+const NO_SOIL: [sim::map::Ground; sim::map::CELLS] = [sim::map::Ground::Rock; sim::map::CELLS];
+
 /// A flat world with a surge already scheduled, wound to the impact day.
 fn at_the_impact_day(height: u16) -> (World, Nav) {
     let mut w = World::new(31, 2);
@@ -275,7 +285,7 @@ fn nobody_is_carried_into_a_wall() {
                 w.water.raise_to(x, y, depth(60));
             }
         }
-        w.water.step(&ground, 0);
+        w.water.step(&ground, &NO_SOIL, 0);
         w.flood_bodies();
         let (cx, cy) = w.citizens[0].pos.cell();
         assert!(
@@ -308,7 +318,7 @@ fn drowning_takes_time_and_footing_resets_it() {
                 w.water.raise_to(x, y, SWIM_DEPTH + depth(6));
             }
         }
-        w.water.step(&ground, 0);
+        w.water.step(&ground, &NO_SOIL, 0);
         w.flood_bodies();
     }
     assert!(w.citizens[0].alive(), "drowned early");

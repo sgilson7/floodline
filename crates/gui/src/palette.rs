@@ -22,7 +22,17 @@ pub const ALARM: Color = Color::new(0.90, 0.33, 0.28, 1.0);
 /// large parts of the map — at anything stronger it competes with the ground
 /// it is meant to annotate, and the ground is what tells a player where the
 /// rock and the grass are.
-pub const HIGH_WATER: Color = Color::new(0.36, 0.55, 0.72, 0.16);
+///
+/// **And a colour water is not.** It was a blue tint drawn *under* live water,
+/// which is invisible against live water — so the one readout designed to let
+/// a player site a wall between floods could not be read in the window it
+/// exists for. City 0: *"the one readout specifically designed to let me site
+/// the wall was unreadable in the window where I needed it."* This is the same
+/// mistake M11.8 fixed for a player's own city, which was a light blue and
+/// vanished into the flood.
+///
+/// A silt ochre: what a flood leaves behind rather than what it is made of.
+pub const HIGH_WATER: Color = Color::new(0.62, 0.50, 0.28, 0.20);
 
 /// Ground, shaded by height so the lie of the land reads without contours.
 ///

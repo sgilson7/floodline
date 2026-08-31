@@ -12,6 +12,16 @@ use sim::nav::Nav;
 use sim::water::Water;
 use sim::world::World;
 
+/// Rock, everywhere, for every test that drives the automaton directly.
+///
+/// M12.8 gave the ground an appetite: sand and grass drink, and what they hold
+/// they pass down to an aquifer that deletes it. Every test in this file is
+/// about the *automaton* - conservation, settling, what a dike holds back -
+/// and running them on soil would fold two questions into one number. Rock
+/// takes nothing, so these measure exactly what they measured before.
+/// `the_ground_drinks_and_the_map_dries` is where the soil is tested.
+const NO_SOIL: [sim::map::Ground; sim::map::CELLS] = [sim::map::Ground::Rock; sim::map::CELLS];
+
 /// A world whose map is one flat plain at a given height.
 fn flat(height: u8) -> World {
     let mut w = World::new(31, 2);
@@ -55,7 +65,7 @@ fn volume_is_conserved_except_at_the_edges() {
     assert_eq!(water.volume(), poured);
 
     for t in 0..2000 {
-        water.step(&ground, 0);
+        water.step(&ground, &NO_SOIL, 0);
         assert_eq!(
             water.volume() + water.drained,
             poured,
@@ -94,7 +104,7 @@ fn water_drains_off_a_slope() {
     let poured = water.raise_to(118, 64, depth(400)) as u64;
 
     for _ in 0..6000 {
-        water.step(&ground, 0);
+        water.step(&ground, &NO_SOIL, 0);
         if water.volume() == 0 {
             break;
         }
@@ -114,7 +124,7 @@ fn a_puddle_on_flat_ground_spreads_symmetrically() {
     water.raise_to(64, 64, depth(120));
 
     for _ in 0..60 {
-        water.step(&ground, 0);
+        water.step(&ground, &NO_SOIL, 0);
     }
 
     // Mirrored in both axes about the cell it started in, and about both
@@ -145,7 +155,7 @@ fn a_puddle_settles_instead_of_sloshing_for_ever() {
     let mut previous = water.depth.clone();
     let mut settled_at = None;
     for t in 0..3000 {
-        water.step(&ground, 0);
+        water.step(&ground, &NO_SOIL, 0);
         if water.depth == previous {
             settled_at = Some(t);
             break;
@@ -168,7 +178,7 @@ fn water_runs_downhill_and_pools_in_the_low_ground() {
     water.raise_to(10, 64, depth(60));
 
     for _ in 0..600 {
-        water.step(&ground, 0);
+        water.step(&ground, &NO_SOIL, 0);
     }
     // It has gone east, downhill, and not west.
     assert_eq!(water.depth_at(5, 64), 0, "water ran uphill");
@@ -219,10 +229,10 @@ fn water_behind_a_level_two_dike_stays_behind_it_for_a_height_twelve_surge() {
                 w.water.raise_to(x, y, depth(12));
             }
         }
-        w.water.step(&ground, 0);
+        w.water.step(&ground, &NO_SOIL, 0);
     }
     for _ in 0..600 {
-        w.water.step(&ground, 0);
+        w.water.step(&ground, &NO_SOIL, 0);
     }
 
     let behind: u32 = (wall_back..MAP_W)
@@ -259,7 +269,7 @@ fn water_spills_over_a_dike_it_is_deeper_than() {
                 w.water.raise_to(x, y, depth(60));
             }
         }
-        w.water.step(&ground, 0);
+        w.water.step(&ground, &NO_SOIL, 0);
     }
 
     let behind: u32 = (wall_back..MAP_W)
@@ -450,4 +460,108 @@ fn dry_ground_costs_nothing() {
     assert_eq!(w.water.volume(), 0);
     assert!(w.water.depth.iter().all(|&d| d == 0));
     let _ = Map::idx(0, 0);
+}
+
+#[test]
+fn the_ground_drinks_and_the_map_dries() {
+    // M12.8. City 1 spent age 3 days 1 and 2 reading "all quiet" while its
+    // farm still read `wading`, and lost two souls to standing water on
+    // nominally quiet days. The only way water left the map was over an edge,
+    // so a hollow that filled stayed filled until the run ended - and the map
+    // was blue for most of two ages, which is what made the high-water mark
+    // unreadable in the one window it exists for.
+    //
+    // **What this arranges**: a flat grass map with a hollow in it, filled by
+    // hand rather than by a surge. The question is what the *ground* does with
+    // standing water, and a surge would fold in the whole automaton.
+    use sim::balance::{depth, DAMP, TICKS_PER_DAY, WADE_DEPTH};
+    use sim::map::{Ground, CELLS, MAP_H, MAP_W};
+    use sim::world::World;
+
+    let mut w = World::new(31, 2);
+    for i in 0..CELLS {
+        w.map.height[i] = 40;
+        w.map.ground[i] = Ground::Grass;
+    }
+    // A basin, so the water has nowhere to run off to and only the ground can
+    // take it. Without this the map drains over its edges and this test would
+    // be measuring the automaton again.
+    for y in 0..MAP_H {
+        for x in 0..MAP_W {
+            let edge = x < 8 || y < 8 || x >= MAP_W - 8 || y >= MAP_H - 8;
+            if edge {
+                w.map.height[sim::Map::idx(x, y)] = 90;
+            }
+        }
+    }
+    let (px, py) = (60, 60);
+    for y in py..py + 8 {
+        for x in px..px + 8 {
+            w.water.raise_to(x, y, WADE_DEPTH);
+        }
+    }
+    let start = w.water.volume();
+    assert!(start > 0);
+    assert!(w.water.depth_at(px, py) >= WADE_DEPTH, "the pool was not poured");
+
+    // One day.
+    for _ in 0..TICKS_PER_DAY {
+        w.step_water();
+    }
+
+    let left = w.water.depth_at(px, py);
+    println!(
+        "  a farm under wading water, one day later: {left} (damp is {DAMP}, wading is {WADE_DEPTH})"
+    );
+    assert!(
+        left < WADE_DEPTH,
+        "a day of standing water and the farm is still wading at {left}"
+    );
+    assert!(
+        left <= DAMP,
+        "it drained to {left}, and anything above {DAMP} the map still paints blue"
+    );
+
+    // And none of it vanished into arithmetic: what is on the surface, plus
+    // what the ground holds, plus what has gone to the aquifer and over the
+    // edges, is what was poured.
+    assert_eq!(
+        w.water.accounted(),
+        start,
+        "water went missing: {} on the surface, {} in the ground, {} gone",
+        w.water.volume(),
+        w.water.held_by_ground(),
+        w.water.drained
+    );
+
+    // The ground will not drink water deep enough to swim in, which is what
+    // keeps a dike under load: a wall is held up by the pool against it, and
+    // ground that drank that pool would relieve the wall. `SOAK_CEILING` and
+    // the table in `balance::SOAK_EVERY` are the measurement; this is the rule
+    // itself, on one cell that cannot spread.
+    let mut deep = World::new(31, 2);
+    for i in 0..CELLS {
+        deep.map.height[i] = 40;
+        deep.map.ground[i] = Ground::Grass;
+    }
+    let (dx, dy) = (60, 60);
+    for y in dy - 1..=dy + 1 {
+        for x in dx - 1..=dx + 1 {
+            if (x, y) != (dx, dy) {
+                deep.map.height[sim::Map::idx(x, y)] = 90;
+            }
+        }
+    }
+    deep.water.raise_to(dx, dy, depth(10));
+    let before = deep.water.depth_at(dx, dy);
+    assert!(before > WADE_DEPTH);
+    for _ in 0..TICKS_PER_DAY {
+        deep.step_water();
+    }
+    let after = deep.water.depth_at(dx, dy);
+    println!("  a cell ten deep with nowhere to go, one day later: {before} -> {after}");
+    assert_eq!(
+        after, before,
+        "the ground drank water it is not allowed to reach"
+    );
 }

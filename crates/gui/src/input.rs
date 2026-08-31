@@ -1826,7 +1826,9 @@ fn ground_name(g: sim::Ground) -> &'static str {
 /// lines that matter — `WADE_DEPTH` and `SWIM_DEPTH` — so those are the words.
 fn wetness(w: &World, x: i32, y: i32) -> String {
     let d = w.water.depth_at(x, y);
-    if d < sim::balance::PUDDLE {
+    // The same line the map draws at. Ground the map calls dry must not be
+    // called wet under the cursor - see `balance::DAMP`.
+    if d < sim::balance::DAMP {
         return String::new();
     }
     let how = if d >= sim::balance::SWIM_DEPTH {

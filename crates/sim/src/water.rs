@@ -57,6 +57,35 @@ pub struct Water {
     /// to 0.78 against a 20 ms budget, because the marking is folded into the
     /// sweep `step` already makes rather than given a pass of its own.
     reached: Vec<u8>,
+    /// How much water each cell's ground is holding, in depth-sixteenths.
+    ///
+    /// The ground is a sponge with a bottom in it. It drinks at
+    /// `soak_rate` until it holds `soak_capacity` - *saturated* - and
+    /// separately passes `AQUIFER_RATE` down to somewhere the game does not
+    /// model, which frees room to drink again. So a cell under standing water
+    /// loses its surface at the aquifer's pace and not the sponge's, which is
+    /// the whole point: ground can be full and still be getting rid of water.
+    ///
+    /// **A byte a cell, and the width was priced rather than chosen.** A
+    /// `Welcome` snapshot was 102 479 bytes against design §8's 150 KB, so a
+    /// `u8` a cell is 16 KB of the 47 left and a `u16` would have been 32 -
+    /// most of the headroom for one field. A byte holds 255 sixteenths and the
+    /// largest capacity here is 24, so there is room to spare within the byte
+    /// and none to spare outside it. Measured after: **118 867 bytes**, which
+    /// leaves about 31 KB for everything this game has left to say.
+    soaked: Vec<u8>,
+    /// Steps since the ground last drank. See `balance::SOAK_EVERY`.
+    ///
+    /// **Kept here rather than read off `World::tick`**, and that is not
+    /// tidiness. `step_water` is public so a test can drive the flood without
+    /// a whole world turning over, and half the dike tests do exactly that -
+    /// they pour, they step the water, and `world.tick` never moves. Phased on
+    /// the world's clock, the ground drank on every one of those ticks instead
+    /// of every twelfth, and five dike tests failed with "the surge did not
+    /// lean on the wall at all", because it had been drunk before it arrived.
+    ///
+    /// One byte on the wire, and the automaton cannot be driven wrongly.
+    soak_phase: u8,
 }
 
 impl Water {
@@ -68,7 +97,32 @@ impl Water {
             drained: 0,
             poured: 0,
             reached: vec![0; CELLS.div_ceil(8)],
+            soaked: vec![0; CELLS],
+            soak_phase: 0,
         }
+    }
+
+    /// How much water the ground is holding at this cell, in depth-sixteenths.
+    pub fn soaked_at(&self, x: i32, y: i32) -> u16 {
+        if Map::contains(x, y) {
+            self.soaked[Map::idx(x, y)] as u16
+        } else {
+            0
+        }
+    }
+
+    /// Whether this cell's ground has taken all it can and is now only passing
+    /// water down. Standing water on saturated ground is standing water that
+    /// will be there a while.
+    pub fn saturated_at(&self, ground: crate::map::Ground, x: i32, y: i32) -> bool {
+        let cap = crate::balance::soak_capacity(ground);
+        cap > 0 && self.soaked_at(x, y) >= cap
+    }
+
+    /// Every unit the ground is holding. Neither on the surface nor gone, and
+    /// `accounted` would not add up without it.
+    pub fn held_by_ground(&self) -> u64 {
+        self.soaked.iter().map(|&d| d as u64).sum()
     }
 
     /// Did the water reach this cell, deep enough to matter, since the age
@@ -123,7 +177,7 @@ impl Water {
     /// poured in — by the sea at the edges and by anything else that added to
     /// it. Used by the tests to account for every sixteenth.
     pub fn accounted(&self) -> u64 {
-        self.volume() + self.drained
+        self.volume() + self.drained + self.held_by_ground()
     }
 
     /// Every unit of water currently on the map.
@@ -182,8 +236,9 @@ impl Water {
     /// only the state at the start of the tick; the second applies it. One
     /// pass would make the result depend on the order cells were visited in,
     /// which is a desync with extra steps.
-    pub fn step(&mut self, ground: &[i32], sea_surface: i32) {
+    pub fn step(&mut self, ground: &[i32], surfaces: &[crate::map::Ground], sea_surface: i32) {
         debug_assert_eq!(ground.len(), CELLS);
+        debug_assert_eq!(surfaces.len(), CELLS);
 
         // What each cell will receive, and what it will lose. Signed, because
         // a cell both gives and takes in the same tick.
@@ -191,11 +246,35 @@ impl Water {
         let mut fx = vec![0i32; CELLS];
         let mut fy = vec![0i32; CELLS];
         let mut drained_now: u64 = 0;
+        // What the ground takes in and passes down this tick. Kept apart from
+        // `depth` for the same reason `delta` is: the first pass must see only
+        // the state the tick began with, or the answer depends on which corner
+        // of the map the loop started in.
+        let mut soak_delta = vec![0i32; CELLS];
+        // The ground works on a phase, not every tick. See `SOAK_EVERY`.
+        self.soak_phase = (self.soak_phase + 1) % crate::balance::SOAK_EVERY as u8;
+        // **And not at all while the sea is pouring in.**
+        //
+        // This is what keeps M5's dike balance intact, and it was measured
+        // rather than assumed. Ground that drinks during a surge takes the
+        // flood's leading edge with it - a spreading sheet is thin at the
+        // front by definition - and with it on, a level-one wall that M5
+        // measured as *breaking* under an age-one surge held instead, at 95%
+        // strain and climbing. That is the central balance of the game moving
+        // as a side effect of a drainage fix, which is not a trade anybody
+        // asked for.
+        //
+        // It is also the honest model. Infiltration during a storm surge is
+        // nothing against the sea arriving; between floods it is the only
+        // thing happening. The water this mechanism exists to remove is the
+        // pool left in a hollow afterwards, and that is exactly the water it
+        // now touches.
+        let soaking = self.soak_phase == 0 && sea_surface == 0;
 
         // Borrowed field by field rather than through `self`, so the mark can
         // be written inside the same sweep that reads the depths. `surface`
         // holds `depth` for the whole loop, and `reached` is a different field.
-        let Water { depth, reached, .. } = self;
+        let Water { depth, reached, soaked, .. } = self;
 
         // Ground is in terrain units and depth in sixteenths, so the surface
         // has to be spoken in sixteenths for the two to be compared at all.
@@ -214,6 +293,76 @@ impl Water {
                 if here >= crate::balance::WADE_DEPTH {
                     reached[i / 8] |= 1 << (i % 8);
                 }
+
+                // What the ground does with it, in the same sweep. A pass of
+                // its own would be sixteen thousand cells a tick on a map that
+                // is dry five days out of six, which is the mistake the
+                // high-water mark made once already.
+                //
+                // Before the `PUDDLE` test, deliberately: the aquifer has to
+                // go on working under a cell that is nearly dry, or the last
+                // sixteenth never leaves and the map keeps a film of water for
+                // ever.
+                // **Only water that is standing soaks in.** The flow field
+                // from the tick before is already here and already says which
+                // is which, so this costs a comparison and no state at all.
+                //
+                // Measured, and it is the difference between a model and a
+                // sponge. Soaking every wet cell drinks a surge as it
+                // advances: the leading edge of a spreading sheet is thin by
+                // definition, and ground that takes twenty-four sixteenths out
+                // of it takes most of what is there. A surge that stood 554
+                // deep against a wall thirty-two cells inland reached it not
+                // at all, and five dike tests failed with "the surge did not
+                // lean on the wall".
+                //
+                // Water crossing the map at speed has not had time to go
+                // anywhere; water that has come to rest in a hollow has. That
+                // is both the physics and, more to the point, exactly the
+                // water this exists to get rid of - the pool left behind after
+                // a flood, which used to sit there until the run ended.
+                let mut took = 0u16;
+                // Wading depth, not swimming depth. See `SOAK_CEILING`.
+                if soaking && here <= crate::balance::SOAK_CEILING {
+                    let cap = crate::balance::soak_capacity(surfaces[i]);
+                    let held = soaked[i] as u16;
+                    // **Only saturated ground reaches the aquifer**, and that
+                    // is the whole shape of this model rather than a detail.
+                    //
+                    // Draining every wet cell instead was measured and was far
+                    // too strong: a surge advancing across the map is a *thin*
+                    // sheet at its leading edge, and a sink on every wet cell
+                    // drinks the edge as fast as it arrives. With the aquifer
+                    // on every cell, a surge that used to stand 554 deep
+                    // against a wall thirty-two cells inland never reached it
+                    // at all, and five dike tests failed with "the surge did
+                    // not lean on the wall".
+                    //
+                    // Requiring saturation splits the two behaviours the way
+                    // the ground actually splits them: an advancing front pays
+                    // the sponge once and moves on, while a pool that has sat
+                    // long enough to fill the ground under it goes on losing
+                    // to the aquifer for as long as it stands there. Standing
+                    // water is what should drain; a flood on its way is not.
+                    let down = if held >= cap && cap > 0 {
+                        held.min(crate::balance::AQUIFER_RATE)
+                    } else {
+                        0
+                    };
+                    if down > 0 {
+                        soak_delta[i] -= down as i32;
+                        drained_now += down as u64;
+                    }
+                    let room = cap.saturating_sub(held - down);
+                    took = crate::balance::soak_rate(surfaces[i])
+                        .min(room)
+                        .min(here.saturating_sub(crate::balance::DAMP));
+                    if took > 0 {
+                        soak_delta[i] += took as i32;
+                        delta[i] -= took as i32;
+                    }
+                }
+
                 if here <= PUDDLE {
                     continue;
                 }
@@ -256,7 +405,12 @@ impl Water {
                 // sloshing between two cells for ever.
                 let average = (my_surface + lower_surfaces) / (lower_count + 1);
                 let excess = (my_surface - average).max(0);
-                let give = excess.min(here as i32).min(MAX_TRANSFER as i32 * lower_count);
+                // What the ground drank is no longer here to give away. Both
+                // come out of `delta[i]` and together they may not take the
+                // cell below nought.
+                let give = excess
+                    .min((here - took) as i32)
+                    .min(MAX_TRANSFER as i32 * lower_count);
 
                 if give <= 0 {
                     continue;
@@ -335,6 +489,11 @@ impl Water {
             let d = self.depth[i] as i32 + delta[i];
             debug_assert!(d >= 0, "cell {i} went negative: {d}");
             self.depth[i] = d.clamp(0, u16::MAX as i32) as u16;
+            if soak_delta[i] != 0 {
+                let held = self.soaked[i] as i32 + soak_delta[i];
+                debug_assert!(held >= 0, "cell {i} soaked went negative: {held}");
+                self.soaked[i] = held.clamp(0, u8::MAX as i32) as u8;
+            }
             self.flow_x[i] = fx[i].clamp(i16::MIN as i32, i16::MAX as i32) as i16;
             self.flow_y[i] = fy[i].clamp(i16::MIN as i32, i16::MAX as i32) as i16;
         }

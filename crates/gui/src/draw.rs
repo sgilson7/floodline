@@ -87,7 +87,12 @@ fn water(w: &World, seen: (i32, i32, i32, i32)) {
     for y in seen.1..=seen.3 {
         for x in seen.0..=seen.2 {
             let d = w.water.depth[sim::Map::idx(x, y)];
-            if d == 0 {
+            // A film thinner than `DAMP` is wet ground, not water, and it is
+            // what the ground drains a pool down to and leaves. Drawn, it
+            // painted the whole of two ages blue - which is how M11.9 lost the
+            // high-water mark, the one readout designed for exactly that
+            // window. See `balance::DAMP`.
+            if d < sim::balance::DAMP {
                 continue;
             }
             draw_rectangle(

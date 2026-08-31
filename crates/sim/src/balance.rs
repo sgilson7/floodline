@@ -756,6 +756,140 @@ pub const MAX_TRANSFER: u16 = depth(8);
 /// overshoot, so settling does not depend on this floor being generous.
 pub const PUDDLE: u16 = 1;
 
+// ---- what the ground does with the water ---------------------------------
+//
+// M11.9 lost two souls to standing water on days the panel called quiet: the
+// water from flood 1 had not gone anywhere by flood 2, so two of three ages
+// were played on a blue map and the high-water mark - a faint tint drawn
+// *under* live water - was invisible in the one window it was designed for.
+//
+// The only way water left the map was over an edge. Ground now takes it in as
+// well, at a rate that depends on what the ground is made of, and separately
+// passes it down to deeper aquifers, where it is gone. A cell can therefore
+// **saturate** - stop taking water in - while still getting rid of what it
+// holds, which is what makes standing water a consequence rather than a bug.
+
+/// How often the ground drinks, in ticks.
+///
+/// A phase rather than a fraction. The rates below are whole sixteenths and
+/// the ground has to work far slower than one a tick. Storing a fractional
+/// accumulator per cell would be sixteen thousand more bytes on the wire to
+/// say what a counter says for nothing.
+///
+/// **Forty-eight, and the number is M5's.** Together with `SOAK_CEILING` this
+/// is what keeps the dike balance where M5 measured it. `dike_pressure_on_flat_ground`,
+/// on a level-one wall under an age-one surge:
+///
+/// ```text
+/// drainage        peak stress   broke at
+/// none (before)         12751       2741
+/// every 24               7736      never
+/// every 48              12751       2789
+/// every 96              12751       2109
+/// ```
+///
+/// At twenty-four the ground drank the pool that holds a wall up and nothing
+/// broke at any level. At forty-eight the peak is *identical* to the world
+/// without any drainage at all and the break moves by forty-eight ticks, which
+/// is nothing over a run. Ninety-six is stranger than either - the wall breaks
+/// *sooner*, because the apron of shallow water around the pool drains away
+/// and stops feeding it, so the pool deepens against the wall instead of
+/// spreading. That is a real behaviour and it is the reason this number was
+/// measured across a range rather than turned up until the tests passed.
+///
+/// A farm left under wading water clears to `DAMP` in about seven hundred
+/// ticks - half a day - which is the case M11.9 lost two people to.
+pub const SOAK_EVERY: u32 = 48;
+
+/// The depth below which water is damp ground rather than water.
+///
+/// **One constant doing two jobs, and they are the same job.** It is the depth
+/// the ground will not drink below, and it is the depth the map stops drawing
+/// as water and `wetness` stops naming - so the ground drains standing water
+/// down to exactly the point where nobody would call it water any more, and
+/// stops. Splitting the two would leave either a film the map paints blue and
+/// the ground will not take, or a film the ground has taken and the map still
+/// paints.
+///
+/// **This is the constant that lets a flood cross the map at all**, and it was
+/// found by measurement rather than reasoning. A spreading sheet is thin at
+/// its leading edge by definition: it has to fill each new cell past `PUDDLE`
+/// before it can push into the next one. Ground that takes anything at all out
+/// of that edge takes the advance with it - with no floor, a surge that stands
+/// 554 deep against a wall thirty-two cells inland reached it *not at all*, at
+/// every soak capacity from two sixteenths to twenty-four. It was never the
+/// size of the sponge; it was that the sponge worked on water there was
+/// nothing to spare of.
+///
+/// Below this the ground is left alone, so a pool drains to a film four
+/// sixteenths deep - a quarter of one terrain unit, well under `WADE_DEPTH`
+/// and under what the map draws as water. What it does not do is drain to
+/// nothing, and that is the honest cost of the model.
+pub const DAMP: u16 = depth(1);
+
+/// The depth above which the ground stops drinking, in sixteenths.
+///
+/// **The ground drinks what you could wade through and not what you would swim
+/// in**, and that line is `SWIM_DEPTH`, which the game already draws for its
+/// own reasons.
+///
+/// Measured, and it is what makes this mechanism possible at all. Drainage
+/// that clears a farm is the same drainage that relieves the pool behind a
+/// dike, and a dike is held up by exactly that pool: with no ceiling, **no
+/// wall broke at any level under any surge** - M5's whole measured table, gone
+/// as a side effect of a drainage fix. The two are different water, though.
+/// What M11.9 lost people to was a farm sitting under a couple of units on a
+/// day the panel called quiet; what holds a wall up is fifteen. Soil under a
+/// deep pool is saturated and pressed and takes nothing; soil under a puddle
+/// takes it all.
+pub const SOAK_CEILING: u16 = WADE_DEPTH;
+
+/// How much a cell drinks per soak, in depth-sixteenths, by what it is made of.
+///
+/// Sand drinks fast and fills fast; grass is slower and holds more; rock takes
+/// nothing at all, which is why a rocky shoulder stays a rocky shoulder in a
+/// flood. Shallows and a ford are already water and have nothing to offer.
+pub const fn soak_rate(g: crate::map::Ground) -> u16 {
+    use crate::map::Ground;
+    match g {
+        Ground::Sand => 4,
+        Ground::Grass => 2,
+        Ground::Rock | Ground::Shallows | Ground::Ford => 0,
+    }
+}
+
+/// How much a cell holds before it is saturated, in depth-sixteenths.
+///
+/// Small on purpose, and priced against the flood rather than against
+/// hydrology. Every wet cell absorbing its fill takes a bite out of a surge at
+/// the moment it arrives: sixteen sixteenths over the few thousand cells a
+/// surge reaches is on the order of a sixth of the water, which is a real
+/// effect and not the dominant one. At four times this the ground would drink
+/// the flood and there would be no game left in it.
+pub const fn soak_capacity(g: crate::map::Ground) -> u16 {
+    use crate::map::Ground;
+    match g {
+        Ground::Sand => 16,
+        // More than sand and slower to take it, which is what soil is.
+        Ground::Grass => 24,
+        Ground::Rock | Ground::Shallows | Ground::Ford => 0,
+    }
+}
+
+/// How much saturated ground passes down to the aquifer per soak, in
+/// depth-sixteenths. **This water leaves the world.**
+///
+/// One, which with `SOAK_EVERY` is a twelfth of a sixteenth a tick. That is
+/// the number that decides whether the map dries between ages, because a cell
+/// under standing water is already saturated - the only way the surface falls
+/// is for the aquifer to make room and the ground to drink again. A hundred
+/// sixteenths of standing water therefore clears in about twelve hundred
+/// ticks, which is one day.
+///
+/// It is counted into `Water::drained` with what runs off the edges, because
+/// both answer the same question: water that is no longer anybody's problem.
+pub const AQUIFER_RATE: u16 = 1;
+
 /// Wading slows a citizen, swimming takes away its control, and long enough
 /// under drowns it (design §3.4).
 pub const WADE_DEPTH: u16 = depth(2);

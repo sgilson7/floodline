@@ -2960,3 +2960,104 @@ Nothing was changed. If it recurs with a human at the keyboard it is a real
 fault and this paragraph is wrong; until then, an agent that pressed Enter is
 the whole of the explanation and the alternative is to make the score screen
 harder to leave, which would be worse.
+
+---
+
+## 2026-08-31 — Ground that drinks, and an aquifer that deletes
+
+M11.9: city 1 spent age 3 days 1 and 2 reading *"all quiet"* while its farm
+still read `wading`, and lost two souls to standing water on nominally quiet
+days. The only way water had ever left the map was over an edge, so a hollow
+that filled stayed filled until the run ended — and the map was blue for most
+of two ages, which is what made the high-water mark unreadable in the one
+window it exists for.
+
+Ground now takes water in at a rate that depends on what it is made of, and
+saturated ground passes it down to an aquifer, where it is gone. Sand drinks
+fast and holds little; grass is slower and holds more; rock takes nothing.
+
+**Four constants, and every one of them was found by measurement rather than
+reasoning. The first three attempts each broke something central.**
+
+**`DAMP`, the floor.** A spreading sheet is thin at its leading edge by
+definition: it has to fill each new cell past `PUDDLE` before it can push into
+the next one. Ground that takes *anything* out of that edge takes the advance
+with it — with no floor, a surge that stands 554 deep against a wall
+thirty-two cells inland reached it **not at all**, at every soak capacity from
+two sixteenths to twenty-four. It was never the size of the sponge; it was that
+the sponge worked on water there was nothing to spare of. It is also the depth
+the map stops drawing as water and `wetness` stops naming, and that is one
+constant doing one job: **the ground drains standing water down to exactly the
+point where nobody would call it water, and stops.** Splitting the two would
+leave either a film the map paints blue and the ground will not take, or a film
+the ground has taken and the map still paints.
+
+**Not during a surge.** Infiltration while the sea is arriving is nothing
+against the sea; between floods it is the only thing happening. Without this
+the ground drank the flood on its way in.
+
+**`SOAK_CEILING`, at `WADE_DEPTH`: the ground drinks what you could wade
+through and not what you would swim in.** This is the one that matters most and
+it is not tidiness. Drainage that clears a farm is the same drainage that
+relieves the pool behind a dike, and **a dike is held up by exactly that pool**.
+With no ceiling, no wall broke at any level under any surge — M5's whole
+measured table gone as a side effect of a drainage fix. They are different
+water: what M11.9 lost people to was a farm under a couple of units on a quiet
+day; what holds a wall up is fifteen.
+
+**`SOAK_EVERY`, at forty-eight, and the number is M5's.**
+`dike_pressure_on_flat_ground`, level one under an age-one surge:
+
+    drainage        peak stress   broke at
+    none (before)         12751       2741
+    every 24               7736      never
+    every 48              12751       2789
+    every 96              12751       2109
+
+At forty-eight the peak is *identical* to the world with no drainage at all and
+the break moves by forty-eight ticks. Ninety-six is stranger than either — the
+wall breaks **sooner**, because the apron of shallow water around the pool
+drains away and stops feeding it, so the pool deepens against the wall instead
+of spreading. That is a real behaviour, and it is why this was measured across
+a range rather than turned up until the tests passed.
+
+**Measured either side.** `how_far_the_water_reaches` is within a few
+sixteenths at every distance — the far edge loses a little, which is the
+shallow apron being drunk, and nothing else moves. Survivors across all seeds:
+`idle` 0→0, `grow` 9→8, `dike` 7→6, `flee` 12→12, `both` 8→8. Two of those
+moved by one city on one seed and the flood is what killed them; the strategy
+table is intact.
+
+**The costs, both real.** A byte a cell of saturation: the snapshot goes
+102 479 → **118 867 bytes** against design §8's 150 KB, so 47 KB of headroom
+becomes 31. That is the largest single thing the wire has ever been asked to
+carry and it should be the last field measured in kilobytes. A flooding tick is
+0.34 ms against a 20 ms budget, because the soak is folded into the sweep
+`step` already makes.
+
+**And what it does not do.** Water above `WADE_DEPTH` does not drain at all
+until the automaton has spread it thinner. A deep pool with nowhere to run to
+stays a deep pool, which is the price of keeping a dike worth building.
+
+**The soak phase lives on `Water`, not on `World::tick`.** `step_water` is
+public so a test can drive the flood without a whole world turning over, and
+half the dike tests do exactly that — they pour, they step, and `world.tick`
+never moves. Phased on the world's clock the ground drank every tick instead of
+every forty-eighth, and five dike tests failed with *"the surge did not lean on
+the wall at all"*. One byte, and the automaton cannot be driven wrongly.
+
+## 2026-08-31 — The high-water mark is a colour water is not
+
+It was a faint blue tint drawn *under* live water, which is invisible against
+live water — so the one readout designed to let a player site a wall between
+floods could not be read in the window it exists for. City 0: *"the one readout
+specifically designed to let me site the wall was unreadable in the window
+where I needed it."*
+
+The same mistake M11.8 fixed for a player's own city, which was a light blue
+and vanished into the flood. A silt ochre now: what a flood leaves behind
+rather than what it is made of.
+
+Both halves were needed and neither would have worked alone. A mark in a new
+colour under a map that stays blue for two ages is still a mark nobody can
+read.
