@@ -59,26 +59,44 @@ binding one is that a household is "the lowest two ids currently homed here"
 and the sim houses people by itself. And `COMING_OF_AGE` is twelve days of an
 eighteen-day run, which decides it: the amber line stops asking.
 
+### M12.11 — the run, played
+
+**Referee: CLEAN.** 17 days in 18.2 minutes on both peers, zero samples with
+no tick, zero red. City 1 finished three of eight and all three ages; city 0
+finished none, at two. `PLAYTEST-M12.md` is the account; `HANDOFF-M12.md` is
+what to do about it.
+
+It found five faults introduced by M12 itself, all fixed, and the worst is
+worth carrying: **neither player saw a single death.** Thirteen between them,
+both watching for the line, both had read the brief. The line *was* drawn —
+`driver.py panel` crops from sixty pixels above the foot and M12 put the new
+slots at ninety-six and a hundred and forty. The message was fixed and moved
+up the screen, and the crop that is an agent's eyes was never moved to match.
+
+And it re-opened the question three milestones have been about: **nobody has
+ever finished a wall.** City 0 put 440 stone into fifteen dike segments across
+two ages and not one reached `level 1 of 4`; city 1 put in ~300 and read
+`being built` a full age later. M10 said the wall was unreadable and M11 made
+it legible — what both players were reading was a construction site nobody was
+working on.
+
 ### Not done
 
-- [ ] **M12.11, the third run.** Two agents, the deployed build, and the one
-      question no harness can ask itself: two games back to back out of the
-      first one's lobby.
+- [ ] **Why 440 stone of delivered sites never got built.** An unassigned
+      citizen builds when there is nothing to haul, and both players had idle
+      hands and full sites for two ages.
+- [ ] **A finished wall meeting a flood.** Nobody has seen one, in four runs.
 - [ ] The author playing two games in a row, laptop to desktop. The `cargo`
       and browser checks say the lobby fault is fixed; nobody has confirmed it
       on two machines.
-- [ ] City 1's *"a line is the wrong shape, you would need a ring"*. It
-      arrived bundled with the flat-ground claim and does not fall with it —
-      on ground with real relief a wall across a saddle is a different
-      purchase, and nobody has played a run that could see the saddle.
+- [ ] City 1's *"a line is the wrong shape, you would need a ring"*, which
+      arrived bundled with the flat-ground claim and does not fall with it.
 
 ### Next action
 
-**Run M12.11.** `table.py` seats two browsers, `driver.py <port> <verb>` is
-one agent's hands, `referee.py <seconds> <dir>` watches both. `AGENT-BRIEF.md`
-is current for everything M12 changed that a player can see, which is a lot:
-two new buildings, a new tab, a new good, an overlay, three message slots and
-an amber line that no longer asks for children.
+**Read `HANDOFF-M12.md`**, then find out why the sites never got built. It is
+the reason four playtests have asked whether a wall is worth building without
+anybody ever owning one.
 
 ---
 
