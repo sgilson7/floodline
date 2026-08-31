@@ -300,3 +300,133 @@ over anyone working on the map.
    a work gang may want to add. Left as it is, deliberately, and named here.
 
 ---
+
+## M12.4–M12.6 — the panel stops lying and stops going quiet
+
+**The change.** A right-click with nobody chosen says so; `room_for` and
+`beds_for` carry the reason a building said no; `job == None` reads *hauling*;
+the amber line puts the water first.
+
+**Follows from.**
+
+1. **`sim` was innocent, and that was the finding.**
+   `a_building_is_where_it_was_clicked` places every kind at every facing and
+   finds it under the click every time. The forester at (75,97) was exactly
+   where it was put. The plan named a footprint-offset suspect and it was
+   wrong; the fault was a silent early return.
+2. **`will_take` and `will_house` are now thin wrappers** over `room_for` and
+   `beds_for`. Anything that wants the count still gets it; anything that wants
+   the reason can have it. Callers that ignore the reason are unchanged.
+3. **`RuleError::Full` is now only ever a real capacity problem.** Before, the
+   panel said "no room" for four different states, so "no room" carried no
+   information. It does now — which means any *new* code that answers `Full`
+   for something that is not full has become a lie where before it was only
+   noise.
+4. **The amber line's ordering is now "what kills you soonest" for real**, and
+   the water is above the bootstrap. A city with no granary and a flood on the
+   map is told to get uphill. That is deliberate and it is arguable: it means a
+   brand-new player on the impact day is never told what a granary is.
+5. **Held citizens are counted apart from haulers** in the roster. That is a
+   third category where there were two, and the households tab is the only
+   place that shows it.
+
+---
+
+## M12.7 — three slots where there was one
+
+**The change.** `notice` (a reply), `report` (news), `toll` (the dead,
+accumulating). Plus `RuleError::StillRising`.
+
+**Follows from.**
+
+1. **All three are drawn over the map, not in the panel**, so none of it comes
+   out of the 81 px of panel budget. That was the reason for putting them
+   there and it is worth knowing before somebody moves them.
+2. **Two faults from the M11.9 account closed with one change**, and one of
+   them — the wall that vanished with no announcement — was never reproduced
+   independently. If it recurs, the notice slot is no longer the explanation
+   and something else is wrong.
+3. **`StillRising` needs `level >= 2`**, because a dike *site* starts at level
+   one. Anything that changes what level a fresh site has silently turns this
+   message back into the wrong one.
+
+---
+
+## M12.8 — ground that drinks
+
+**The change.** Per-cell saturation, material-dependent soak rates, an aquifer
+that deletes water, `DAMP`, and a high-water mark in silt ochre.
+
+**Follows from, and this is the one to read before touching the water.**
+
+1. **The snapshot is 118 867 bytes against a 150 KB budget.** 47 KB of headroom
+   became 31. This is the largest single thing the wire has ever been asked to
+   carry and **it should be the last field measured in kilobytes.** Anything
+   else per-cell has to be a bit, or it does not fit.
+2. **`DAMP` is used in three places** — the soak floor, what the map draws, and
+   what `wetness` names — and they must stay the same number. Split them and
+   you get either a film the map paints and the ground will not take, or one
+   the ground took and the map still paints.
+3. **The dike balance is intact and it was nearly not.** Three of the four
+   constants exist to protect it. `SOAK_CEILING` is the important one: without
+   it, no wall broke at any level under any surge.
+4. **`Water::step` takes ground *types* now, not just heights.** Every caller
+   passes the real map except the automaton tests, which pass rock on purpose
+   so they go on measuring the automaton.
+5. **The soak phase is on `Water`, not `World::tick`**, because `step_water` is
+   public and half the dike tests drive it without the world turning over.
+6. **`accounted()` includes `held_by_ground()`** now. Any conservation check
+   written against the old two-term version will fail, correctly.
+7. **Water above `WADE_DEPTH` does not drain.** A deep pool with nowhere to run
+   to stays a deep pool. That is the price of keeping a dike worth building and
+   it is a real limitation, not an oversight.
+
+---
+
+## M12.9 — the high ground was always there
+
+**The change.** A probe, and an `h` overlay. **No change to `map::terrain`.**
+
+**Follows from.**
+
+1. **The handover's finding was wrong and the plan inherited it.** "Every cell
+   reads 16 to 25" was a claim from two runs. Ten seeds say the median climb
+   within walking distance of a hearth is eleven terrain units against a surge
+   twelve deep. **Two accounts agreeing is not a measurement**, and this is the
+   second time in M12 that a confident finding from the run turned out to be
+   the wrong diagnosis of a real complaint.
+2. **`SITE_HEADROOM`, `NOISE_AMPLITUDE` and `SLOPE_SPAN` are untouched**, so
+   M5's dike balance is not re-opened — which matters because M12.8 already
+   leaned on it in the same session.
+3. **The overlay is relative to your own hearth.** On a map with two cities at
+   different heights the two players see different overlays for the same cell,
+   which is correct and will look like a bug to anybody comparing screenshots.
+4. **City 1's "you would need a ring" is still open.** It arrived bundled with
+   the flat-ground claim and does not fall with it. On ground with real relief
+   a wall across a saddle is a different purchase, and nobody has played a run
+   that could see the saddle.
+
+---
+
+## M12.10 — growth, and three fixes that were reverted
+
+**The change.** A probe, a `grow` script that actually grows, and the amber
+line no longer asking for children. **No change to the growth mechanism.**
+
+**Follows from.**
+
+1. **The `grow` column of the strategy table has never measured growth**, in
+   any milestone, and the numbers in every previous document that cite it are
+   citing "a city with two spare cottages". They are not wrong about what they
+   measured; they are wrong about what it was called.
+2. **Four gates, and M12.A fixed one.** The binding one is that a household is
+   *"the lowest two ids currently homed in this cottage"* — the sim houses
+   people by itself, so a third resident silently orphans the pair.
+3. **Three fixes were written and reverted** and are recorded in `DECISIONS.md`
+   with the reason: each looked right and each produced byte-identical
+   measurements. **A rule change that fixes nothing observable does not ship.**
+4. **The nursery and the cottage still work.** Only the tutorial changed. A
+   player who wants to try can; they are simply no longer told to.
+5. **`tutorial::next_thing` is now shorter by two rungs**, so the ladder falls
+   through to the dike sooner. That is a second, unmeasured effect of a change
+   made for a different reason, and the next run is what will show it.
