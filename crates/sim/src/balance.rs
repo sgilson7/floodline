@@ -107,6 +107,77 @@ pub const SLOPE_SPAN: i32 = 40;
 /// changing this or the octave weights.
 pub const NOISE_AMPLITUDE: i32 = 16;
 
+// ---- the river -------------------------------------------------------------
+
+/// How many cells either side of the centreline are channel floor. Two makes
+/// the river five cells across, which is wide enough to read as water with
+/// banks and narrow enough that a bridge is a short thing to build.
+pub const RIVER_HALF_WIDTH: i32 = 2;
+
+/// How many further cells the bank is tapered over, so the channel has sides
+/// rather than a cliff. The taper matters to the flood as much as to the eye:
+/// a vertical wall of terrain reflects a surge, and design §5 wants it to
+/// spill over the low bank and take the low country.
+pub const RIVER_BANK: i32 = 3;
+
+/// How far the channel floor is cut below the land it runs through.
+///
+/// Relative to the terrain rather than an absolute profile, because the map is
+/// a ramp from a high corner to a low one and a river on a ramp is a river all
+/// the way down: an absolute bed would be a canyon at the top and a puddle at
+/// the bottom. Six against a relief of `SLOPE_SPAN` = 40 is a channel with
+/// banks you can see and a floor a surge overtops well before it reaches the
+/// low country, which is design §5's spill.
+///
+/// The cut is taken as a running minimum from source to mouth, so the bed only
+/// ever descends. A reach that went uphill would pond, and a river that ponds
+/// does not carry a wave.
+pub const RIVER_DEPTH: i32 = 6;
+
+/// How many cells either side of a point the channel's own height is averaged
+/// over before the bed is cut from it.
+///
+/// A running minimum on the raw terrain is a trap, and it took the arrival
+/// probe to find it. The land along a meander is noisy — `NOISE_AMPLITUDE` is
+/// sixteen against a relief of forty — so one hollow drags the bed down and,
+/// because a minimum never comes back up, every reach below it is cut to that
+/// depth. On seed 31 the channel crossed a hollow early and spent the rest of
+/// its length as a canyon at height zero beside a city standing at thirty. The
+/// surge filled the canyon and the city never got its feet wet, which is not a
+/// flood, it is a moat.
+///
+/// Averaging over seventeen cells leaves the ramp and takes out the noise, so
+/// the bed follows the land down instead of remembering the lowest place it
+/// has been.
+pub const RIVER_SMOOTH: i32 = 8;
+
+/// How many cells of the centreline the ford covers. Four, plus the width of
+/// the channel, is a crossing wide enough to find on a map drawn at eight
+/// pixels a cell and narrow enough that finding it is a thing you do.
+pub const FORD_LENGTH: i32 = 4;
+
+/// How much the channel floor is raised across the ford, out of `RIVER_DEPTH`.
+/// A bar rather than a dam: half the channel's depth is a riffle you can
+/// wade, and the water still runs over it.
+pub const FORD_RISE: i32 = 3;
+
+/// How far each of the meander's control points may be pushed sideways off
+/// the straight line between the two mouths.
+///
+/// A river that is a straight line reads as a canal, and — the part that
+/// matters for the game — a straight line between two edges divides the map
+/// into two halves of predictable shape. A meander makes one bank roomier than
+/// the other in a place the seed chooses.
+pub const RIVER_MEANDER: i32 = 18;
+
+/// How many control points the meander is bent at, either side of this range.
+/// Three to five, as the plan asks.
+pub const RIVER_BENDS: (i32, i32) = (3, 5);
+
+/// How far from a corner a mouth may sit, so the channel never runs along an
+/// edge or clips the corner itself.
+pub const RIVER_MOUTH_MARGIN: i32 = 12;
+
 /// How much of the map is each ground type, in percent of its cells.
 ///
 /// Fractions rather than fixed heights on the 0..=255 scale, because fixed
@@ -120,86 +191,115 @@ pub const SHALLOWS_PERCENT: i32 = 12;
 pub const SAND_PERCENT: i32 = 6;
 pub const ROCK_PERCENT: i32 = 8;
 
-/// Hearth sites sit on a line at a fixed distance from the corner the water
-/// comes out of, spread along it. The "shore parallel".
+/// How far from the river bank a hearth site sits.
 ///
-/// **This replaced a ring around the map centre, and the reason is measured.**
-/// `tests/playtest.rs::how_far_the_water_reaches` pours each age's surge onto
-/// generated maps and reports the deepest water at each Manhattan distance
-/// from the corner it came from:
+/// **This used to mean "from the low corner", and the change is the whole
+/// point of M4.** The flood came out of a corner and the sites went on the
+/// line `x + y = 96` measured from it, because 70 to 105 was the band where an
+/// age-one surge reached a city without drowning it. That table — the deepest
+/// water at each distance from a corner — is still in `git log` and is now
+/// about a flood that no longer exists.
 ///
-/// | from the corner | age 1-2 (height 12) | age 3 (height 18) |
-/// |---|---|---|
-/// | 40  | median 108 - swimming   | median 162 - swimming |
-/// | 55  | median 63, deepest 245  | median 100 - swimming |
-/// | 70  | median 63, deepest 213  | median 72, deepest 308 |
-/// | 85  | median 41, deepest 150  | median 69, deepest 245 |
-/// | 100 | median 18, deepest 66   | median 33, deepest 152 |
-/// | 115 | median 3                | deepest 50 |
-/// | 130 | dry                     | deepest 32 |
-///
-/// Wading starts at 32, swimming at 96, and a citizen drowns after fifty ticks
-/// out of its depth. So a city at 40 cells is dead on the first flood before
-/// it has finished a second building, a city past 115 never sees water in a
-/// whole three-age run, and the game is a game between about 70 and 105.
-///
-/// A ring of radius 54 around the map centre put its sites anywhere from about
-/// 40 to about 150 cells out, because the centre of a 128-cell map is 128
-/// Manhattan cells from its corner. Three full runs of four strategies showed
-/// what that cost: on one seed the age-one flood took five of eight citizens
-/// before the city had a granary, on another no water reached the city in any
-/// of the three ages, and between those two nothing a player *did* — a dike,
-/// running for high ground — moved the outcome as much as which spot the
-/// rotation happened to hand them. The ring cannot be fixed by moving it: a
-/// circle about a point is not equidistant from a corner, and one of radius 54
-/// already spans 108 of the map's 128 cells.
-///
-/// So the sites go on the line `x + y = SHORE_DISTANCE` measured from the low
-/// corner, spread evenly along it. Ninety-six puts an age-one flood in the
-/// streets — wading, with pockets deep enough to drown somebody standing in
-/// the wrong place — and makes an age-three flood properly dangerous.
-pub const SHORE_DISTANCE: i32 = 96;
+/// The flood comes down a channel and spills over its banks, so what decides a
+/// city's fate is its distance from the *bank*. Sites go on both banks, spread
+/// along the channel, at this distance measured perpendicular to it.
+/// `probe::how_far_the_spill_reaches` is the measurement that sets it, and the
+/// table lives there rather than here because it is about the river.
+pub const SHORE_DISTANCE: i32 = 14;
 
-/// How close to the ends of the shore line a site may sit. The line runs from
-/// one map edge to the other; without this the outermost cities are jammed
-/// into the corners beside the low one — at four, a hearth landed three cells
-/// from the map's west edge with nowhere to put a farm on that side. Eight is
-/// the compromise: it costs the closest pair at six players two cells and buys
-/// the end cities somewhere to build.
-pub const SHORE_MARGIN: i32 = 8;
+/// How much of the channel, at each end, no city is put beside.
+///
+/// A site opposite a mouth is a site in the corner of the map with nowhere to
+/// build on three sides, and — worse — a site at the upstream mouth is a site
+/// the surge arrives at before it has spread at all. Measured in cells of
+/// centreline, not of map.
+pub const SHORE_MARGIN: i32 = 16;
+
+/// How high above the river bed a hearth site may stand, and how far below it.
+///
+/// The flood fills the channel to roughly `Disaster::height` above the bed and
+/// spills from there, so this is the number that decides whether the water
+/// reaches a city at all — the same job `SHORE_DISTANCE` used to do on its own
+/// when the flood came out of a corner and distance was the only thing that
+/// mattered. `map::probe::where_the_cities_sit` found sites standing anywhere
+/// from fourteen below the bed to seventeen above it, and
+/// `playtest::when_the_water_arrives` found what that costs: one city in six
+/// never got its feet wet in three ages, which is the failure the shore
+/// parallel was written to stop.
+///
+/// Minus four to plus twelve, against an age-one surge of twelve: everybody
+/// is inside the reach of the first flood, and nobody is more than four below
+/// the bed. Below the bed is a hollow and drowns you; too far above it and you
+/// are not playing. Swept against `SITE_JITTER_BAND`, because the two together
+/// are what decide how many cells are left to choose a city from — at minus
+/// two to plus eight the closest pair at six players fell from eighteen cells
+/// to seven.
+pub const SITE_HEADROOM: (i32, i32) = (-4, 12);
+
+/// How much open ground a city needs around it, as a percentage of the square
+/// of side `2 * SITE_ELBOW + 1` centred on the site.
+///
+/// Being *in* the map's main region is not enough. A site jammed against a
+/// rock face is in the main region and is sealed off the moment its own
+/// hearth, farm, granary and cottage go down — which is how
+/// `two_cities_found_a_road_and_trade_for_three_days` ended up unable to lay a
+/// road between two cities that were both, technically, reachable.
+pub const SITE_ELBOW: i32 = 6;
+pub const SITE_ELBOW_PERCENT: i32 = 70;
+
+/// How far from a hearth site the nearest rock may be.
+///
+/// A quarry has to be cut out of something and a quarry is the only source of
+/// stone, which is what a dike costs — so a city with no rock within reach is
+/// a city that cannot defend itself, decided by the map before anybody has
+/// played a turn. That is the mistake `SHORE_DISTANCE` was written to stop
+/// making, and moving the cities to the river bank made it again: rock is the
+/// top eight percent of the height field and a river bank is low country, so
+/// `probe::where_the_cities_sit` found 46% of two-player sites with no rock
+/// inside forty cells and the worst a hundred away.
+///
+/// So the candidate band asks for rock as well as for water, and thirty cells
+/// is the answer: a hauler's walk, not a day's march.
+pub const QUARRY_REACH: i32 = 30;
 
 pub const SITE_JITTER: i32 = 1;
 pub const SITE_SNAP: i32 = 2;
 
+/// How far off `SHORE_DISTANCE` a site may sit, either way.
+///
+/// This is the "comparable (not identical)" of design §6, and it is also what
+/// makes the candidate band wide enough to choose from: a band one cell thick
+/// on a meandering river is a few hundred cells and the spacing that can be
+/// got out of it is poor. Three either way is about a fifth of the map's dry
+/// area and costs nobody more than three cells of shoreline.
+pub const SITE_JITTER_BAND: i32 = 4;
+
 /// The plan asks for forty cells between cities. This is what the map gives.
 ///
-/// Measured over two hundred seeds at each player count, by
-/// `sites_are_far_enough_apart`, which prints the table with `--nocapture`:
+/// Measured over two hundred seeds at each player count by
+/// `map::probe::where_the_cities_sit`, with sites chosen farthest-point from
+/// the band of cells `SHORE_DISTANCE` from the river — and used as the floor
+/// that choice aims at, so the two cannot drift apart.
 ///
-/// | players | closest two cities |
-/// |---|---|
-/// | 2 | 108 |
-/// | 3 | 51 |
-/// | 4 | 31 |
-/// | 5 | 22 |
-/// | 6 | 17 |
+/// | players | shore parallel | river band |
+/// |---|---|---|
+/// | 2 | 108 | 36 |
+/// | 3 | 51 | 18 |
+/// | 4 | 31 | 18 |
+/// | 5 | 22 | 18 |
+/// | 6 | 17 | 18 |
 ///
-/// Two and three clear the plan's forty; four is short and five and six are
-/// well short, and none of that can be fixed where it looks like it should be.
-/// The usable shore is `SHORE_DISTANCE - 2 * SHORE_MARGIN` cells of x, which
-/// is about a hundred and thirteen cells of line. Six cities forty apart need
-/// two hundred. The shore cannot be lengthened without moving it out of the
-/// flood, and moving it out of the flood is what the ring did and what this
-/// whole change exists to undo.
+/// Eighteen at every count above two, which is what a floor looks like when
+/// the choice is aiming at it: the ranking stops buying distance once it has
+/// enough and spends the rest on getting the city within reach of rock.
 ///
-/// So: a guarantee of seventeen, and design section 11's "map size vs. citizen
-/// count" gets a second reason to be an open question. Seventeen cells between
-/// two three-by-three hearths leaves fourteen of clear ground, which is
-/// cramped and playable; five or six players want a bigger map, not a
-/// different rule. Given the choice between neighbours who can see each other
-/// and whole cities standing outside the flood for a three-age run, the flood
-/// wins: it is the game.
-pub const MIN_SITE_SPACING: i32 = 17;
+/// A two-player map lost most of a distance it had no use for, and a
+/// six-player map gained a cell. The band is what costs the big numbers: a
+/// line across the map has room to spread five cities along it, and a band
+/// hugging a river does not. What the band buys is that every city is the same
+/// distance from the water — see `SHORE_DISTANCE` — which is the thing that
+/// decides whether a player is in the game at all.
+pub const MIN_SITE_SPACING: i32 = 18;
 
 /// The Hearth's footprint, and so the size of the flat pad the generator
 /// levels under each site.
@@ -546,6 +646,35 @@ pub fn dike_stress_limit(level: u8) -> u32 {
     let i = (level.max(1) as usize - 1).min(DIKE_STRESS_LIMIT.len() - 1);
     DIKE_STRESS_LIMIT[i]
 }
+
+/// How many cells of the channel, from its upstream mouth, the source holds.
+///
+/// **This used to be `SURGE_SIZE`, the side of the 8 x 8 block at a corner.**
+/// A river has no corner to fill, so the source is a reach: the first
+/// `SURGE_REACH` cells of the centreline and the whole width of its cut held
+/// at the age's height, and the next `SURGE_REACH` held at half of it. That
+/// second reach is the pump — it is what makes a front rather than a puddle,
+/// and it is the same trick the corner version used one block inland.
+///
+/// Forty, measured by `playtest::when_the_water_arrives`, which reports what
+/// the water does at each city's hearth:
+///
+/// | reach | age 1 peak | age 3 peak | wades at | dry again |
+/// |---|---|---|---|---|
+/// | 20 | 25-43 | 35-71 | 115-800, sometimes never | 465-2530 |
+/// | 40 | 72-82 | 105-115 | 71-137 | 1380-3079 |
+/// | 80 | 79-125 | 125-171 | 55-135 | 1622-3835 |
+///
+/// Wading starts at 32 and swimming at 96. At twenty the flood is a damp
+/// patch and two cities in six never got their feet wet; at eighty an age-one
+/// flood is already over your head, which leaves the escalation nowhere to go.
+/// Forty is the one where age one wets you and age three drowns you, which is
+/// design §4's table read back out of the water.
+///
+/// Eighty cells of a hundred-and-thirty-cell channel are held in all, so the
+/// flood comes down the upper two thirds of the river and the lower third is
+/// what it runs off through.
+pub const SURGE_REACH: i32 = 40;
 
 /// The source corner is an 8 x 8 block (design §5).
 pub const SURGE_SIZE: i32 = 8;

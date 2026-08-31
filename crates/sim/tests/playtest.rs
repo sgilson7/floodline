@@ -294,52 +294,57 @@ fn assign_to_farms(w: &mut World) {
     }
 }
 
-/// A wall along the shore, between the city and the water — *ordered*, not
-/// conjured.
+/// A wall between the city and the river — *ordered*, not conjured.
 ///
-/// Parallel to the line the water arrives on rather than an L around the
-/// hearth: the flood comes off one corner and spreads along the low ground, so
-/// what stops it is a bank across its path, and what a player would build is a
-/// bank across its path. An L of fourteen cells was the first attempt and the
-/// water simply went round it, which is a fact about that wall and not about
-/// dikes.
+/// **This used to wall a diagonal against a corner**, because the flood used
+/// to come out of one. It does not any more: the water comes down the channel
+/// and spills over its banks, so what stops it is a bank across the ground
+/// between the river and the city, running the same way the river does.
 ///
-/// Every segment goes down as a `DikeLine` and is hauled and built by the same
-/// eight people who are farming, out of the same stone the city started with.
-/// The first version of this built the wall by fiat, which was the right way
-/// to find out whether a wall in the right place changes the outcome and no
-/// way at all to find out whether anybody could have one.
-///
-/// A wall is drawn straight now, so a barrier across a diagonal is a flight of
-/// short runs — a tread across the water's path and a riser back down it —
-/// rather than a diagonal line of single cells. That is what the drag tool
-/// draws, and unlike a diagonal of cells it does not leak at the corners.
+/// One straight `DikeLine`, which is what the drag tool draws and what a
+/// player would draw looking at the map. Every segment is hauled and built by
+/// the same eight people who are farming, out of the same stone the city
+/// started with. The first version of this built the wall by fiat, which was
+/// the right way to find out whether a wall in the right place changes the
+/// outcome and no way at all to find out whether anybody could have one.
 fn order_a_wall(w: &mut World, hx: i32, hy: i32) -> usize {
     let dikes = |w: &World| {
         w.buildings.iter().filter(|b| b.owner == ME && b.kind == Kind::Dike).count()
     };
     let before = dikes(w);
 
-    let (cx, cy) = w.map.low_corner.cell();
-    let (sx, sy) = ((MAP_W / 2 - cx).signum(), (MAP_H / 2 - cy).signum());
-    let out = (hx - cx).abs() + (hy - cy).abs() - 10;
-    let mid = (hx - cx).abs();
-    let at = |along: i32| (cx + sx * along, cy + sy * (out - along));
-    let on_map = |(x, y): (i32, i32)| (0..MAP_W).contains(&x) && (0..MAP_H).contains(&y);
+    let river: Vec<(i32, i32)> =
+        w.map.river.iter().map(|&(x, y)| (x as i32, y as i32)).collect();
+    let at = river
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, &(x, y))| (hx - x).abs().max((hy - y).abs()))
+        .map(|(i, _)| i as i32)
+        .expect("every map has a river");
+    let (rx, ry) = river[at as usize];
 
-    let mut along = (mid - 24).max(0);
-    let top = (mid + 24).min(out);
-    while along < top {
-        let run = DIKE_LENGTH.min(top - along);
-        let (ax, ay) = at(along);
-        let (bx, by) = at(along + run - 1);
-        if on_map((ax, ay)) && on_map((bx, by)) {
-            let corner = (bx as u8, ay as u8);
-            let _ = w.apply(ME, &Command::DikeLine { from: (ax as u8, ay as u8), to: corner });
-            let _ = w.apply(ME, &Command::DikeLine { from: corner, to: (bx as u8, by as u8) });
-        }
-        along += run;
-    }
+    // Along the channel here, and out from it toward the city.
+    let a = river[(at - 4).clamp(0, river.len() as i32 - 1) as usize];
+    let b = river[(at + 4).clamp(0, river.len() as i32 - 1) as usize];
+    let (tx, ty) = ((b.0 - a.0).signum(), (b.1 - a.1).signum());
+    let (ox, oy) = ((hx - rx).signum(), (hy - ry).signum());
+
+    // A third of the way from the bank to the city: close enough to be the
+    // bank rather than a fence round the houses, far enough not to be in the
+    // water.
+    let out = ((hx - rx).abs().max((hy - ry).abs()) / 3).max(3);
+    let (cx, cy) = (rx + ox * out, ry + oy * out);
+    let half = 20;
+    let from = (
+        (cx - tx * half).clamp(0, MAP_W - 1) as u8,
+        (cy - ty * half).clamp(0, MAP_H - 1) as u8,
+    );
+    let to = (
+        (cx + tx * half).clamp(0, MAP_W - 1) as u8,
+        (cy + ty * half).clamp(0, MAP_H - 1) as u8,
+    );
+    let _ = w.apply(ME, &Command::DikeLine { from, to });
+
     dikes(w) - before
 }
 
@@ -432,16 +437,75 @@ fn three_full_runs_of_each_strategy() {
 /// it might not — and "where" is a distance, which nobody had measured.
 ///
 ///     cargo test -p sim --release --test playtest reach -- --ignored --nocapture
+/// When the wave reaches each city and when it has gone again.
+///
+/// The other half of what M4 replaced: the old table said how *deep* the water
+/// got at a distance from the corner it came out of, and said nothing about
+/// when. A river delivers its flood along its whole length rather than from one
+/// point, so the interesting question stopped being "how far" and became "how
+/// long have I got, and how long does it last".
+#[test]
+#[ignore]
+fn when_the_water_arrives() {
+    println!();
+    println!("  seed        city   at the hearth: wades at   peak (tick)   dry again");
+    for seed in [31u64, 1_000_003, 4_043_362_590] {
+        for height in [12u16, 18] {
+            let mut w = World::new(seed, 2);
+            w.disaster.height = height;
+            w.tick = (World::IMPACT_DAY - 1) * TICKS_PER_DAY;
+
+            let cities: Vec<(i32, i32)> = w.map.hearth_sites.clone();
+            let mut wades = vec![None; cities.len()];
+            let mut peak = vec![(0u16, 0u32); cities.len()];
+            let mut dry = vec![None; cities.len()];
+
+            for t in 0..(SURGE_TICKS + 3 * TICKS_PER_DAY) {
+                w.step_water();
+                w.tick += 1;
+                for (i, &(x, y)) in cities.iter().enumerate() {
+                    let d = w.water.depth_at(x, y);
+                    if d >= WADE_DEPTH {
+                        if wades[i].is_none() {
+                            wades[i] = Some(t);
+                        }
+                        dry[i] = None;
+                    } else if wades[i].is_some() && dry[i].is_none() {
+                        dry[i] = Some(t);
+                    }
+                    if d > peak[i].0 {
+                        peak[i] = (d, t);
+                    }
+                }
+            }
+
+            for i in 0..cities.len() {
+                println!(
+                    "  {seed:>10}   h{height:<3} {i}   {:>12}   {:>4} ({:>4})   {:>9}",
+                    wades[i].map(|t| t.to_string()).unwrap_or_else(|| "never".into()),
+                    peak[i].0,
+                    peak[i].1,
+                    dry[i].map(|t| t.to_string()).unwrap_or_else(|| "still wet".into()),
+                );
+            }
+        }
+        println!();
+    }
+    println!("  wading starts at {WADE_DEPTH}, swimming at {SWIM_DEPTH}.");
+}
+
 #[test]
 #[ignore = "a measurement, not an assertion: run it with --nocapture"]
 fn how_far_the_water_reaches() {
     const SEEDS: [u64; 2] = [31, 1_000_003];
-    const BANDS: [i32; 9] = [40, 55, 70, 85, 100, 115, 130, 145, 160];
+    // Cells from the river bank, not from a corner. `SHORE_DISTANCE` is set
+    // from this table and the cities sit in whichever band it names.
+    const BANDS: [i32; 9] = [2, 6, 10, 14, 18, 24, 30, 40, 55];
 
     for height in [12u16, 18] {
         println!();
         println!("  a surge of {height} (age {})", if height == 12 { "1-2" } else { "3" });
-        println!("  distance from the corner   deepest   median deep   wade  swim");
+        println!("  distance from the bank   deepest   median deep   wade  swim");
         let mut rows: Vec<(i32, Vec<u16>, Vec<u16>)> =
             BANDS.iter().map(|&d| (d, Vec::new(), Vec::new())).collect();
 
@@ -468,13 +532,13 @@ fn how_far_the_water_reaches() {
                 }
             }
 
-            let (cx, cy) = w.map.low_corner.cell();
+            let from_water = w.map.distance_to_water();
             for (band, worst, sampled) in rows.iter_mut() {
                 let mut here: Vec<u16> = Vec::new();
                 for y in 0..MAP_H {
                     for x in 0..MAP_W {
-                        let d = (x - cx).abs() + (y - cy).abs();
-                        if (d - *band).abs() <= 7 {
+                        let d = from_water[Map::idx(x, y)];
+                        if (d - *band).abs() <= 2 {
                             here.push(deepest[Map::idx(x, y)]);
                         }
                     }

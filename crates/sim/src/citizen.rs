@@ -244,10 +244,18 @@ impl Citizen {
     /// (design §3.2). Multiplication before division, so a tired citizen on a
     /// road walks at exactly the base rate rather than at whatever an integer
     /// division of an integer division would leave.
-    pub fn speed(&self, on_road: bool) -> Fx {
+    /// How fast this citizen moves, given what it is standing on.
+    ///
+    /// One function and not two, because "a road doubles it", "wading halves
+    /// it" and "being tired halves it" are the same kind of rule and a second
+    /// place that multiplied a speed is a second place to forget one. A road
+    /// over a ford is a bridge, so the two footings cannot both apply.
+    pub fn speed(&self, on_road: bool, wading: bool) -> Fx {
         let mut v = WALK_SPEED;
         if on_road {
             v *= 2;
+        } else if wading {
+            v /= 2;
         }
         if self.tired() {
             v /= 2;

@@ -11,7 +11,7 @@
 
 use crate::balance::*;
 use crate::citizen::PlayerId;
-use crate::map::{Corner, Map};
+use crate::map::Map;
 use crate::rng::Rng;
 use crate::world::World;
 use serde::{Deserialize, Serialize};
@@ -26,9 +26,14 @@ pub enum DisasterKind {
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Disaster {
     pub kind: DisasterKind,
-    /// Where the water comes from, and how many ticks into the impact day it
-    /// starts there. Age 3 has two, half a day apart (design §4).
-    pub sources: Vec<(Corner, u32)>,
+    /// How many ticks into the impact day each pulse of the surge starts.
+    ///
+    /// **These used to be corners.** The flood came out of the low corner of
+    /// the map and age three came out of two of them; there is a river now and
+    /// it has one upstream mouth, so what varies between ages is how many
+    /// pulses come down it and when — not where they come from. Age three has
+    /// two, about half a day apart (design §4).
+    pub sources: Vec<u32>,
     /// Surge height, in the same units as terrain.
     pub height: u16,
 }
@@ -37,15 +42,17 @@ impl Disaster {
     /// The age's row of design §4's table.
     ///
     /// | age | disaster | intensity |
-    /// | 1 | flood from the low corner | height 12 |
+    /// | 1 | flood down the river | height 12 |
     /// | 2 | flood | height 18 |
-    /// | 3 | flood, two corners | 18 each, offset half a day |
-    /// | 4 | flood, random corner (can be the high one) | height 24 |
+    /// | 3 | flood, two pulses | 18 each, about half a day apart |
+    /// | 4 | as three | height 24 |
     /// | 5+ | height +6 per age | |
     ///
-    /// Ages 1–3 always come out of the lowest corner, so the first floods are
-    /// learnable — that is design §5's first sentence and the reason the low
-    /// corner is a thing the map generator guarantees.
+    /// **Design §4's second and third columns said "corner".** Every flood
+    /// comes down the same channel now, so what escalates is height and how
+    /// many pulses there are. That keeps the first floods learnable, which is
+    /// design §5's first sentence and the reason the map guarantees a river
+    /// that runs from the high side to the low one.
     pub fn draw(age: u32, map: &Map, rng: &mut Rng) -> Disaster {
         let height = match age {
             0 | 1 => 12,
@@ -53,17 +60,13 @@ impl Disaster {
             n => 24 + 6 * (n.saturating_sub(4)) as u16,
         };
 
+        let _ = map;
         let sources = match age {
-            0 | 1 | 2 => vec![(map.low_corner, 0)],
-            3 => {
-                // A second corner, drawn from the other three, half a day
-                // behind the first.
-                let others: Vec<Corner> =
-                    Corner::ALL.into_iter().filter(|&c| c != map.low_corner).collect();
-                let second = others[rng.below(others.len() as u32) as usize];
-                vec![(map.low_corner, 0), (second, TICKS_PER_DAY / 2)]
-            }
-            _ => vec![(Corner::ALL[rng.below(4) as usize], 0)],
+            0 | 1 | 2 => vec![0],
+            // A second pulse down the same river, about half a day behind the
+            // first — a little early or late, so the day cannot be memorised
+            // to the tick the way a fixed offset can.
+            _ => vec![0, (TICKS_PER_DAY as i32 / 2 + rng.range(-60, 60)).max(1) as u32],
         };
 
         Disaster { kind: DisasterKind::Flood, sources, height }
@@ -156,19 +159,21 @@ impl World {
     ///
     /// Phase 2 injects the surge; this is the timing. A source is live from
     /// its offset into the impact day until `SURGE_TICKS` after it.
-    pub fn surging_from(&self) -> Vec<Corner> {
+    /// How many pulses of the surge are pouring right now.
+    ///
+    /// A count rather than a list of places: they all come out of the same
+    /// mouth, and two pulses overlapping is a bigger flood rather than a
+    /// second one somewhere else.
+    pub fn surging(&self) -> usize {
         if self.omen() != Omen::Impact {
-            return Vec::new();
+            return 0;
         }
         let into_day = (self.tick - self.age_start_tick) % TICKS_PER_DAY;
         self.disaster
             .sources
             .iter()
-            .filter(|&&(_, offset)| {
-                into_day >= offset && into_day < offset + SURGE_TICKS
-            })
-            .map(|&(c, _)| c)
-            .collect()
+            .filter(|&&offset| into_day >= offset && into_day < offset + SURGE_TICKS)
+            .count()
     }
 
     /// Whether the run is over, and when it ended.

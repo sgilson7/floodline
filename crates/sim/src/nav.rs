@@ -53,6 +53,9 @@ const DIAGONAL: u32 = 14;
 /// quicker along them by accident.
 const COST_ROAD: u32 = 10;
 const COST_GROUND: u32 = 20;
+/// Six times open ground. Wading is slow and unpleasant and the pathing has to
+/// agree with the walking, which halves a citizen's speed on a ford.
+const COST_FORD: u32 = 120;
 
 /// Unreachable.
 pub const FAR: u32 = u32::MAX;
@@ -153,8 +156,17 @@ impl FlowField {
 /// Whether a citizen can stand on a cell.
 ///
 /// Shallows are impassable unless something has been built across them, which
-/// is what a Bridge is for. A construction site is not blocking — builders
-/// have to stand in it.
+/// is what a Bridge is for. A ford is the exception: it is water you can wade,
+/// and every map has at least one so the far bank of the river is reachable
+/// before anybody has built anything. A construction site is not blocking —
+/// builders have to stand in it.
+///
+/// **A ford closes when the water comes.** A surge running down the channel
+/// makes the crossing you have been relying on as deep as the rest of it, and
+/// the tutorial says so once. This is the only place passability asks about
+/// the water, and it asks at the same depth a citizen starts wading at, so
+/// "you cannot path across it" and "you would be swept off it" arrive
+/// together rather than a few ticks apart.
 pub fn passable(world: &World, x: i32, y: i32) -> bool {
     if !Map::contains(x, y) {
         return false;
@@ -169,15 +181,26 @@ pub fn passable(world: &World, x: i32, y: i32) -> bool {
     }
     match world.map.ground_at(x, y) {
         Ground::Rock | Ground::Shallows => false,
+        Ground::Ford => world.water.depth_at(x, y) < WADE_DEPTH,
         Ground::Grass | Ground::Sand => true,
     }
 }
 
 /// The cost of stepping onto a cell.
+///
+/// A ford costs several times open ground, which is the whole relationship the
+/// river is for: crossable without a bridge, and worth the long way round to
+/// one the moment somebody builds it. A bridge is a road and costs a road.
 fn enter_cost(world: &World, x: i32, y: i32) -> u32 {
-    match world.building_at(x, y) {
-        Some(b) if b.carries_traffic() => COST_ROAD,
-        _ => COST_GROUND,
+    if let Some(b) = world.building_at(x, y) {
+        if b.carries_traffic() {
+            return COST_ROAD;
+        }
+    }
+    if world.map.ground_at(x, y) == Ground::Ford {
+        COST_FORD
+    } else {
+        COST_GROUND
     }
 }
 
@@ -388,7 +411,8 @@ mod tests {
                     Ground::Rock | Ground::Shallows => {
                         assert!(!passable(&w, x, y), "({x},{y}) was walkable")
                     }
-                    Ground::Grass | Ground::Sand => {
+                    // A dry ford is the one piece of water you may wade.
+                    Ground::Ford | Ground::Grass | Ground::Sand => {
                         assert!(passable(&w, x, y), "({x},{y}) was not walkable")
                     }
                 }

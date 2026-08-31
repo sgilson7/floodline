@@ -19,16 +19,30 @@ pub const CELLS: usize = (MAP_W * MAP_H) as usize;
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum Ground {
     Shallows,
+    /// A reach of the river shallow enough to wade: water you can cross on
+    /// foot, slowly, and cannot build on except with a bridge.
+    ///
+    /// The river cuts the map in two and every generated map guarantees at
+    /// least one of these, so the far bank is reachable without a bridge and
+    /// better with one. It sits next to `Shallows` in the ordering because
+    /// that is what it is — the same water, less of it.
+    Ford,
     Sand,
     Grass,
     Rock,
 }
 
 impl Ground {
-    /// Whether a building may stand here. Shallows need a bridge and rock
-    /// cannot be dug, so both are out.
+    /// Whether a building may stand here. Shallows and a ford need a bridge
+    /// and rock cannot be dug, so all three are out.
     pub fn buildable(self) -> bool {
         matches!(self, Ground::Grass | Ground::Sand)
+    }
+
+    /// Whether this is river or sea rather than land. A bridge goes over
+    /// either.
+    pub fn watery(self) -> bool {
+        matches!(self, Ground::Shallows | Ground::Ford)
     }
 }
 
@@ -78,6 +92,11 @@ pub struct Map {
     /// Where the flood comes from in ages 1–3 (design §5).
     pub low_corner: Corner,
     pub high_corner: Corner,
+    /// The channel's centreline, in order from its source — the mouth on the
+    /// high side, where the surge comes out — to its mouth on the low side,
+    /// where the water runs off the map. Every cell of it is on the map and
+    /// each is a king's step from the last.
+    pub river: Vec<(u8, u8)>,
     /// One per player, in player order.
     pub hearth_sites: Vec<(i32, i32)>,
 }
@@ -123,7 +142,16 @@ impl Map {
 
         let low_corner = Corner::ALL[rng.below(4) as usize];
         let high_corner = low_corner.opposite();
-        let height = terrain(rng, low_corner, NOISE_AMPLITUDE, SLOPE_SPAN);
+        let mut height = terrain(rng, low_corner, NOISE_AMPLITUDE, SLOPE_SPAN);
+
+        // Carved before the bands are worked out, so the channel counts as the
+        // shallows it is rather than being painted as an exception afterwards.
+        // Shallows are already impassable and unbuildable, so the river
+        // divides the map for free and every rule that already knew about
+        // water knows about the river.
+        let river = river_path(rng, low_corner, high_corner);
+        let channel = carve_river(&mut height, &river);
+        let ford = place_ford(rng, &mut height, &river);
 
         let (shallows_max, sand_max, rock_min) = band_heights(&height);
         let ground: Vec<Ground> = height
@@ -149,105 +177,346 @@ impl Map {
             rock_min,
             low_corner,
             high_corner,
+            river: river.iter().map(|&(x, y)| (x as u8, y as u8)).collect(),
             hearth_sites: Vec::new(),
         };
+        // The channel is water whatever the bands made of it. See
+        // `carve_river` for why this cannot be left to the height.
+        for (x, y) in channel {
+            map.ground[Map::idx(x, y)] = Ground::Shallows;
+        }
+        // And one reach of it is water you can wade. Painted after the
+        // channel so the ford wins where they overlap, and only over water:
+        // the ford's reach covers the banks as well as the floor, and a bank
+        // the bands left as grass is already something you can walk on.
+        for (x, y) in ford {
+            let i = Map::idx(x, y);
+            if map.ground[i].watery() {
+                map.ground[i] = Ground::Ford;
+            }
+        }
         map.place_hearth_sites(rng, players);
         map
     }
 
-    /// One site per player, on a ring around the centre.
+    /// How far every cell is from the nearest water, in king's steps.
     ///
-    /// One site per player, on the shore parallel: the line of cells at a
-    /// fixed distance from the corner the water comes out of, spread evenly
-    /// along it.
-    ///
-    /// **This replaced a ring around the map centre**, and `SHORE_DISTANCE`
-    /// carries the measurement that says why: the centre of a 128-cell map is
-    /// 128 cells from its corner and an age-one flood stops at about 115, so
-    /// the ring put whole cities outside the game while putting others in the
-    /// shallows. On the shore parallel every city is the same distance from
-    /// the water and what differs between players is what they built.
-    ///
-    /// A line rather than rejection sampling for the same reason the ring was
-    /// one: the plan wants a hard spacing guarantee and rejection sampling can
-    /// only offer one in practice. Even spacing along a line gives it by
-    /// construction, and `MIN_SITE_SPACING` records what the line's length
-    /// actually allows for each player count.
-    ///
-    /// Design section 6 asks for "comparable (not identical)" ground, and the
-    /// jitter is what "not identical" means here: two cells each way plus up
-    /// to five cells nearer or further from the water, so no two sites face
-    /// quite the same flood without any of them facing a different game.
-    fn place_hearth_sites(&mut self, rng: &mut Rng, players: u32) {
-        let (cx, cy) = self.low_corner.cell();
-        // Into the map, whichever corner the water is at.
-        let (sx, sy) = ((MAP_W / 2 - cx).signum(), (MAP_H / 2 - cy).signum());
-        let span = SHORE_DISTANCE - 2 * SHORE_MARGIN;
-
-        let mut sites = Vec::with_capacity(players as usize);
-        for i in 0..players {
-            // Evenly along the line, ends left clear. Integer arithmetic, like
-            // everything in `sim`: one player sits in the middle of the shore.
-            let along = if players < 2 {
-                SHORE_MARGIN + span / 2
-            } else {
-                SHORE_MARGIN + (span * i as i32) / (players as i32 - 1)
-            };
-            // How far out this one is. Small, and deliberately not
-            // alternating: moving one step along the shore already moves a
-            // site on both axes, so two neighbours are further apart than the
-            // step itself, and swinging them in opposite directions eats that
-            // back. An alternating swing of up to six cells was tried and took
-            // the closest pair at six players from twenty-two cells to
-            // fourteen. This is the "not identical" of design section 6 and
-            // nothing more is wanted from it.
-            let out = SHORE_DISTANCE + rng.range(-2, 2);
-            let x = cx + sx * along + rng.range(-SITE_JITTER, SITE_JITTER);
-            let y = cy + sy * (out - along) + rng.range(-SITE_JITTER, SITE_JITTER);
-
-            // Room for the hearth's footprint and for the pad levelled under
-            // it, after snapping as well as before: `snap_to_buildable` may
-            // move a site by `SITE_SNAP`, and a site two cells from the edge
-            // that snaps outward takes its pad off the map with it.
-            let edge = HEARTH_SIZE / 2 + SITE_SNAP;
-            let (x, y) = self.snap_to_buildable(
-                x.clamp(edge, MAP_W - 1 - edge),
-                y.clamp(edge, MAP_H - 1 - edge),
-            );
-            let half = HEARTH_SIZE / 2;
-            sites.push((x.clamp(half, MAP_W - 1 - half), y.clamp(half, MAP_H - 1 - half)));
-        }
-
-        // Level a pad under each site last, so that snapping saw the terrain
-        // as generated and every site ends up placeable regardless.
-        for &(x, y) in &sites {
-            self.level_pad(x, y, HEARTH_SIZE);
-        }
-        self.hearth_sites = sites;
+    /// A field rather than a distance to a line, because the channel meanders:
+    /// a site fourteen cells out along the perpendicular from one reach can be
+    /// one cell from the next bend, and measuring against the line it was
+    /// placed from would never notice. Multi-source and eight-connected, which
+    /// is the same neighbourhood a citizen walks.
+    pub fn distance_to_water(&self) -> Vec<i32> {
+        self.flood_fill(|g| g.watery())
     }
 
-    /// The nearest buildable cell within `SITE_SNAP`, searched in a fixed
-    /// order so the answer does not depend on anything but the map. Falls back
-    /// to the cell asked for, which `level_pad` then makes buildable.
-    fn snap_to_buildable(&self, x: i32, y: i32) -> (i32, i32) {
-        if self.buildable(x, y) {
-            return (x, y);
+    /// Distance to the river's centreline, and which cell of it was nearest.
+    ///
+    /// The second half is what says which bank a cell is on: the channel's
+    /// direction at the reach a cell belongs to, crossed with the way out to
+    /// that cell, is positive on one side and negative on the other.
+    fn distance_to_river(&self) -> (Vec<i32>, Vec<u16>) {
+        let mut d = vec![i32::MAX; CELLS];
+        let mut from = vec![0u16; CELLS];
+        let mut queue = std::collections::VecDeque::new();
+        for (i, &(x, y)) in self.river.iter().enumerate() {
+            let c = Map::idx(x as i32, y as i32);
+            if d[c] != 0 {
+                d[c] = 0;
+                from[c] = i as u16;
+                queue.push_back((x as i32, y as i32));
+            }
         }
-        for ring in 1..=SITE_SNAP {
-            for dy in -ring..=ring {
-                for dx in -ring..=ring {
-                    // Only the cells this ring adds, not the ones inside it.
-                    if dx.abs() != ring && dy.abs() != ring {
+        while let Some((x, y)) = queue.pop_front() {
+            let here = Map::idx(x, y);
+            let (dist, src) = (d[here], from[here]);
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if !Map::contains(nx, ny) {
                         continue;
                     }
-                    let (nx, ny) = (x + dx, y + dy);
-                    if self.buildable(nx, ny) {
-                        return (nx, ny);
+                    let n = Map::idx(nx, ny);
+                    if d[n] > dist + 1 {
+                        d[n] = dist + 1;
+                        from[n] = src;
+                        queue.push_back((nx, ny));
                     }
                 }
             }
         }
-        (x, y)
+        (d, from)
+    }
+
+    /// Which cells a road could reach from each other: everything that is not
+    /// rock, four-connected, as `road::plan` walks it.
+    ///
+    /// Only the largest such region is any use. Rock is eight percent of the
+    /// map in one mass at the high corner, and a river bank that runs past it
+    /// has pockets — `two_cities_found_a_road_and_trade_for_three_days` put a
+    /// city in one, and the road between the two cities could not be laid at
+    /// all. A city nobody can reach cannot trade, which is half of design §6,
+    /// and the map is not allowed to decide that.
+    fn main_region(&self) -> Vec<bool> {
+        let mut seen = vec![false; CELLS];
+        let mut best: Vec<bool> = Vec::new();
+        let mut best_n = 0;
+        for y in 0..MAP_H {
+            for x in 0..MAP_W {
+                if seen[Map::idx(x, y)] || self.ground[Map::idx(x, y)] == Ground::Rock {
+                    continue;
+                }
+                let mut here = vec![false; CELLS];
+                let mut n = 0;
+                let mut queue = std::collections::VecDeque::from([(x, y)]);
+                seen[Map::idx(x, y)] = true;
+                here[Map::idx(x, y)] = true;
+                while let Some((cx, cy)) = queue.pop_front() {
+                    n += 1;
+                    for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+                        let (nx, ny) = (cx + dx, cy + dy);
+                        if !Map::contains(nx, ny) {
+                            continue;
+                        }
+                        let i = Map::idx(nx, ny);
+                        if seen[i] || self.ground[i] == Ground::Rock {
+                            continue;
+                        }
+                        seen[i] = true;
+                        here[i] = true;
+                        queue.push_back((nx, ny));
+                    }
+                }
+                if n > best_n {
+                    best_n = n;
+                    best = here;
+                }
+            }
+        }
+        best
+    }
+
+    /// Eight-connected distance from every cell matching `seed`.
+    fn flood_fill(&self, seed: impl Fn(Ground) -> bool) -> Vec<i32> {
+        let mut d = vec![i32::MAX; CELLS];
+        let mut queue = std::collections::VecDeque::new();
+        for y in 0..MAP_H {
+            for x in 0..MAP_W {
+                let i = Map::idx(x, y);
+                if seed(self.ground[i]) {
+                    d[i] = 0;
+                    queue.push_back((x, y));
+                }
+            }
+        }
+        while let Some((x, y)) = queue.pop_front() {
+            let here = d[Map::idx(x, y)];
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if !Map::contains(nx, ny) {
+                        continue;
+                    }
+                    let n = Map::idx(nx, ny);
+                    if d[n] > here + 1 {
+                        d[n] = here + 1;
+                        queue.push_back((nx, ny));
+                    }
+                }
+            }
+        }
+        d
+    }
+
+    /// One site per player, on the banks of the river, spread along it.
+    ///
+    /// **This replaced the shore parallel, which replaced a ring.** The ring
+    /// was wrong because a circle about the map's centre is not equidistant
+    /// from a corner; the shore parallel was right for a flood that came out
+    /// of a corner, and the flood does not come out of a corner any more. What
+    /// decides a city's fate now is how far it sits from the bank the water
+    /// spills over, so that is the thing held fixed.
+    ///
+    /// **Farthest-point choice from a candidate band, not an offset from a
+    /// line.** Two earlier versions offset a site perpendicular to the channel
+    /// and both were wrong for the same reason — a meander means the line a
+    /// site was placed from is not the nearest water to it. The band is every
+    /// cell whose distance to the river is within `SITE_JITTER_BAND` of
+    /// `SHORE_DISTANCE`; players take turns picking the cell in it that is
+    /// furthest from everybody already placed. That gives the spacing
+    /// guarantee by construction rather than by hope, and it is the only
+    /// version of this that has ever measured well at six players.
+    ///
+    /// Banks alternate, so the river runs *between* the players. That is the
+    /// first time in this game that a bridge, a road and a trade have had a
+    /// reason to exist, and it is what M6's mules will have to get across.
+    fn place_hearth_sites(&mut self, rng: &mut Rng, players: u32) {
+        let (river_d, river_from) = self.distance_to_river();
+        // A city has to be able to quarry, and to be reachable at all.
+        let rock_d = self.flood_fill(|g| g == Ground::Rock);
+        let reachable = self.main_region();
+        let path: Vec<(i32, i32)> =
+            self.river.iter().map(|&(x, y)| (x as i32, y as i32)).collect();
+        let n = path.len() as i32;
+        let edge = HEARTH_SIZE / 2 + SITE_SNAP;
+        let lo = SHORE_MARGIN.min(n / 3);
+        let hi = (n - 1 - SHORE_MARGIN).max(lo);
+
+        // The band, split by bank. Built in map order, so it depends on
+        // nothing but the map.
+        let mut banks: [Vec<((i32, i32), bool)>; 2] = [Vec::new(), Vec::new()];
+        for y in edge..MAP_H - edge {
+            for x in edge..MAP_W - edge {
+                let i = Map::idx(x, y);
+                if !self.ground[i].buildable() || !reachable[i] {
+                    continue;
+                }
+                // Room to build, and room for a road to get out again.
+                let mut open = 0;
+                for jy in -SITE_ELBOW..=SITE_ELBOW {
+                    for jx in -SITE_ELBOW..=SITE_ELBOW {
+                        if Map::contains(x + jx, y + jy)
+                            && reachable[Map::idx(x + jx, y + jy)]
+                        {
+                            open += 1;
+                        }
+                    }
+                }
+                let side = 2 * SITE_ELBOW + 1;
+                if open * 100 < side * side * SITE_ELBOW_PERCENT {
+                    continue;
+                }
+                let d = river_d[i];
+                if (d - SHORE_DISTANCE).abs() > SITE_JITTER_BAND {
+                    continue;
+                }
+                // Not beside a mouth: a city there is jammed into a corner,
+                // and the one at the upstream mouth meets the surge before it
+                // has spread at all.
+                let at = river_from[i] as i32;
+                if at < lo || at > hi {
+                    continue;
+                }
+                // And within reach of the water. See `SITE_HEADROOM`.
+                let (rx, ry) = path[at as usize];
+                let head = self.height[i] as i32 - self.height[Map::idx(rx, ry)] as i32;
+                if head < SITE_HEADROOM.0 || head > SITE_HEADROOM.1 {
+                    continue;
+                }
+                let a = path[(at - 4).clamp(0, n - 1) as usize];
+                let b = path[(at + 4).clamp(0, n - 1) as usize];
+                let cross = (x - rx) * (b.1 - a.1) - (y - ry) * (b.0 - a.0);
+                banks[usize::from(cross < 0)].push(((x, y), rock_d[i] <= QUARRY_REACH));
+            }
+        }
+
+        let far_from = |sites: &[(i32, i32)], (x, y): (i32, i32)| -> i64 {
+            sites
+                .iter()
+                .map(|&(sx, sy)| ((x - sx).pow(2) + (y - sy).pow(2)) as i64)
+                .min()
+                .unwrap_or(i64::MAX)
+        };
+
+        let mut sites: Vec<(i32, i32)> = Vec::with_capacity(players as usize);
+        for i in 0..players {
+            // Alternating, and falling back to the other bank only if this one
+            // has nowhere at all.
+            let side = (i % 2) as usize;
+            let here = if banks[side].is_empty() { 1 - side } else { side };
+            let pool = &banks[here];
+            if pool.is_empty() {
+                sites.push((MAP_W / 2, MAP_H / 2));
+                continue;
+            }
+            let pick = if sites.is_empty() {
+                // The seed decides where the first city goes; everything after
+                // it is decided by the geometry.
+                pool[rng.below(pool.len() as u32) as usize].0
+            } else {
+                // Spacing until it is enough, then rock, then more spacing.
+                //
+                // A plain filter on "has rock within reach" was tried and it
+                // cost far too much: the rock-reachable part of a bank is
+                // small, and farthest-point choice inside it put two cities
+                // one cell apart at six players. Ranking rather than filtering
+                // buys the quarry only out of the spacing nobody was using.
+                let floor = (MIN_SITE_SPACING as i64).pow(2);
+                pool.iter()
+                    .max_by_key(|&&(c, rock)| {
+                        let apart = far_from(&sites, c);
+                        (apart.min(floor), rock, apart)
+                    })
+                    .expect("the pool is not empty")
+                    .0
+            };
+            sites.push(pick);
+        }
+
+        // Level a pad under each site last, so that the choice saw the terrain
+        // as generated and every site ends up placeable regardless.
+        for &(x, y) in &sites {
+            self.level_pad(x, y, HEARTH_SIZE);
+        }
+        // And make sure every one of them can quarry. Ranking got the median
+        // city to within thirty cells of rock, but a tenth were still sixty or
+        // more away and the worst was a hundred — which is a city that cannot
+        // build a dike, decided by the generator before anybody has played.
+        for i in 0..sites.len() {
+            self.ensure_rock_near(&sites, i);
+        }
+        self.hearth_sites = sites;
+    }
+
+    /// Put an outcrop within reach of a city that has none.
+    ///
+    /// The same kind of move as `level_pad`, and for the same reason: a seed
+    /// that cannot be played is not a difficulty, it is a bug you shipped. The
+    /// outcrop is small, is placed at the first spot a fixed search finds that
+    /// is clear of every city and of the river, and is only ever added — no
+    /// city loses rock it already had.
+    fn ensure_rock_near(&mut self, sites: &[(i32, i32)], which: usize) {
+        let (sx, sy) = sites[which];
+        let rock = self.flood_fill(|g| g == Ground::Rock);
+        if rock[Map::idx(sx, sy)] <= QUARRY_REACH {
+            return;
+        }
+        let clear_of_cities = |x: i32, y: i32| {
+            sites.iter().all(|&(cx, cy)| (x - cx).abs().max((y - cy).abs()) > HEARTH_SIZE + 3)
+        };
+
+        for ring in 8..=QUARRY_REACH {
+            for dy in -ring..=ring {
+                for dx in -ring..=ring {
+                    if dx.abs() != ring && dy.abs() != ring {
+                        continue;
+                    }
+                    let (x, y) = (sx + dx, sy + dy);
+                    if x < 2 || y < 2 || x >= MAP_W - 2 || y >= MAP_H - 2 {
+                        continue;
+                    }
+                    if !clear_of_cities(x, y) {
+                        continue;
+                    }
+                    // A 3 x 3 of ordinary ground, so the outcrop neither
+                    // dams the river nor swallows somebody's shoreline.
+                    let room = (-1..=1).all(|jy| {
+                        (-1..=1).all(|jx| self.ground[Map::idx(x + jx, y + jy)].buildable())
+                    });
+                    if !room {
+                        continue;
+                    }
+                    for jy in -1..=1 {
+                        for jx in -1..=1 {
+                            let i = Map::idx(x + jx, y + jy);
+                            self.ground[i] = Ground::Rock;
+                            self.height[i] = self.height[i].max(self.rock_min);
+                        }
+                    }
+                    return;
+                }
+            }
+        }
     }
 
     /// Flatten a square to the centre cell's height and make it grass, so a
@@ -266,6 +535,204 @@ impl Map {
             }
         }
     }
+}
+
+/// The channel's centreline, from its source on the high side to its mouth on
+/// the low side.
+///
+/// Both mouths are on the map's edge and the two edges are opposite, so the
+/// river cuts the map in two whatever the seed does with it. Which pair of
+/// edges is a coin from the seed; where on each edge is drawn from the half
+/// nearer the corner that end belongs to, so the channel always runs *down*
+/// the ramp rather than along a contour. That is what keeps design §5's "high
+/// ground is safe" true with a river on the map: the water comes out of the
+/// high end and goes to the low one.
+pub fn river_path(rng: &mut Rng, low: Corner, high: Corner) -> Vec<(i32, i32)> {
+    let (lx, ly) = low.cell();
+    let (hx, hy) = high.cell();
+    let m = RIVER_MOUTH_MARGIN;
+
+    // Somewhere in the half of an edge nearer a given end, `m` clear of the
+    // corner so the channel never runs along an edge.
+    fn half_near(near: i32, span: i32, m: i32, rng: &mut Rng) -> i32 {
+        if near == 0 {
+            rng.range(m, span / 2)
+        } else {
+            rng.range(span / 2, span - 1 - m)
+        }
+    }
+
+    let (source, mouth) = if rng.chance(2) {
+        // North to south, or south to north: the mouths are on the top and
+        // bottom edges and the channel crosses every row.
+        ((half_near(hx, MAP_W, m, rng), hy), (half_near(lx, MAP_W, m, rng), ly))
+    } else {
+        ((hx, half_near(hy, MAP_H, m, rng)), (lx, half_near(ly, MAP_H, m, rng)))
+    };
+
+    // Three to five bends, each pushed off the straight line by a seeded
+    // amount perpendicular to it.
+    let bends = rng.range(RIVER_BENDS.0, RIVER_BENDS.1);
+    let (dx, dy) = (mouth.0 - source.0, mouth.1 - source.1);
+    // The perpendicular, as a unit-ish direction. Integer: the run is long
+    // enough that a taxicab perpendicular is indistinguishable from a real one
+    // once the offsets are this large.
+    let (px, py) = if dx.abs() >= dy.abs() { (0, 1) } else { (1, 0) };
+
+    let mut points = vec![source];
+    for i in 1..=bends {
+        let t = i;
+        let n = bends + 1;
+        let off = rng.range(-RIVER_MEANDER, RIVER_MEANDER);
+        points.push((
+            (source.0 + dx * t / n + px * off).clamp(1, MAP_W - 2),
+            (source.1 + dy * t / n + py * off).clamp(1, MAP_H - 2),
+        ));
+    }
+    points.push(mouth);
+
+    let mut path = Vec::new();
+    for pair in points.windows(2) {
+        let mut leg = walk(pair[0], pair[1]);
+        if !path.is_empty() {
+            leg.remove(0); // the joint belongs to one leg, not both
+        }
+        path.append(&mut leg);
+    }
+    path
+}
+
+/// Every cell on the straight line from `a` to `b`, `a` and `b` included.
+///
+/// A king's walk rather than Bresenham: it takes a diagonal step whenever both
+/// axes still have ground to cover, which gives a line with no cell touching
+/// only at a corner. That matters here because a channel with a corner-only
+/// join is a channel a four-neighbour flood cannot get through.
+fn walk(a: (i32, i32), b: (i32, i32)) -> Vec<(i32, i32)> {
+    let (mut x, mut y) = a;
+    let mut out = vec![(x, y)];
+    while (x, y) != b {
+        if x != b.0 {
+            x += (b.0 - x).signum();
+        }
+        if y != b.1 {
+            y += (b.1 - y).signum();
+        }
+        out.push((x, y));
+    }
+    out
+}
+
+/// Cut the channel into the height field, and say which cells are its floor.
+///
+/// The bed is `RIVER_DEPTH` below the land, taken as a **running minimum** from
+/// source to mouth so it only ever descends: a reach that went back uphill
+/// would pond, and a river that ponds does not carry a wave. Outside the floor
+/// the cut tapers back up over `RIVER_BANK` cells, and every write is a `min` —
+/// a river never raises the ground it runs through.
+///
+/// Returns the floor cells, because `generate` has to paint them water and
+/// cannot work that out from the height afterwards. **A river is water because
+/// it is a river, not because it is low.** The ground bands are percentiles of
+/// the height field, and a channel running down a ramp is above the waterline
+/// for most of its length however deep it is cut — measured, in
+/// `probe::what_the_river_costs`: three seeds in eight had two fifths of their
+/// channel reading as dry land. So the floor is painted `Shallows` outright,
+/// which is the one place in the generator besides `level_pad` where ground is
+/// not a function of height, and it is deliberate in both.
+pub fn carve_river(height: &mut [u8], path: &[(i32, i32)]) -> Vec<(i32, i32)> {
+    let reach = RIVER_HALF_WIDTH + RIVER_BANK;
+    let rise = (RIVER_DEPTH / RIVER_BANK).max(1);
+    let mut floor = Vec::with_capacity(path.len() * 9);
+    // The bed, worked out for the whole channel before anything is cut, in
+    // three passes: the land under it, that smoothed, and that made to
+    // descend. Doing it cell by cell was the first version and it produced a
+    // canyon — see `RIVER_SMOOTH`.
+    let raw: Vec<i32> = path
+        .iter()
+        .map(|&(x, y)| {
+            if Map::contains(x, y) { height[Map::idx(x, y)] as i32 } else { 0 }
+        })
+        .collect();
+    let n_path = raw.len() as i32;
+    let mut bedline: Vec<i32> = (0..n_path)
+        .map(|i| {
+            let lo = (i - RIVER_SMOOTH).max(0) as usize;
+            let hi = (i + RIVER_SMOOTH).min(n_path - 1) as usize;
+            let window = &raw[lo..=hi];
+            let mean = window.iter().sum::<i32>() / window.len() as i32;
+            (mean - RIVER_DEPTH).max(0)
+        })
+        .collect();
+    // Down, never up: a reach that went back uphill would pond, and a river
+    // that ponds does not carry a wave.
+    for i in 1..bedline.len() {
+        bedline[i] = bedline[i].min(bedline[i - 1]);
+    }
+
+    for (i, &(cx, cy)) in path.iter().enumerate() {
+        if !Map::contains(cx, cy) {
+            continue;
+        }
+        let bed = bedline[i];
+        for dy in -reach..=reach {
+            for dx in -reach..=reach {
+                let (x, y) = (cx + dx, cy + dy);
+                if !Map::contains(x, y) {
+                    continue;
+                }
+                let d = dx.abs().max(dy.abs());
+                let want = if d <= RIVER_HALF_WIDTH {
+                    floor.push((x, y));
+                    bed
+                } else {
+                    bed + (d - RIVER_HALF_WIDTH) * rise
+                };
+                let i = Map::idx(x, y);
+                height[i] = height[i].min(want.clamp(0, 255) as u8);
+            }
+        }
+    }
+    floor
+}
+
+/// Raise a bar across one reach of the channel and return its cells.
+///
+/// Every map has exactly one, somewhere in the middle third of the river so it
+/// is neither at a mouth nor always in the same place. It is the answer to the
+/// obvious objection to putting a river through the middle of a game about
+/// walking: the far bank is reachable on foot from the first day, slowly, and
+/// a bridge is worth building the moment somebody can afford one.
+/// It reaches the full width of the cut and not only the channel floor.
+/// The bank taper is cut low too, and on a low-lying reach the bands make
+/// those cells shallows as well — so a ford the width of the floor is a
+/// crossing that stops two cells short of dry land on each side, which is to
+/// say not a crossing at all. That was worth ten minutes and a flow field
+/// that reached a third of the map.
+pub fn place_ford(rng: &mut Rng, height: &mut [u8], path: &[(i32, i32)]) -> Vec<(i32, i32)> {
+    if path.len() < 3 {
+        return Vec::new();
+    }
+    let n = path.len() as i32;
+    let reach = RIVER_HALF_WIDTH + RIVER_BANK;
+    let start = rng.range(n / 3, (2 * n / 3 - FORD_LENGTH).max(n / 3));
+    let mut cells = Vec::new();
+
+    for i in start..(start + FORD_LENGTH).min(n) {
+        let (cx, cy) = path[i as usize];
+        for dy in -reach..=reach {
+            for dx in -reach..=reach {
+                let (x, y) = (cx + dx, cy + dy);
+                if !Map::contains(x, y) {
+                    continue;
+                }
+                let i = Map::idx(x, y);
+                height[i] = height[i].saturating_add(FORD_RISE as u8);
+                cells.push((x, y));
+            }
+        }
+    }
+    cells
 }
 
 /// The height field: a corner-to-corner ramp with signed value noise on top.
@@ -497,19 +964,165 @@ mod tests {
     }
 
     #[test]
+    fn every_map_has_a_river_that_cuts_it_in_two() {
+        // M4's map guarantees, all in one place because they are one claim:
+        // the river is a river, it divides the map, it is crossable, and it
+        // did not eat the game.
+        for players in 2..=6u32 {
+            for seed in 0..80u64 {
+                let m = gen(seed, players);
+                let river: Vec<(i32, i32)> =
+                    m.river.iter().map(|&(x, y)| (x as i32, y as i32)).collect();
+                assert!(river.len() > MAP_W as usize / 2, "seed {seed}: a stub of a river");
+
+                // Both ends on an edge, and on opposite edges, so it cannot be
+                // walked round.
+                let on_edge = |&(x, y): &(i32, i32)| {
+                    x == 0 || y == 0 || x == MAP_W - 1 || y == MAP_H - 1
+                };
+                let (a, b) = (river[0], river[river.len() - 1]);
+                assert!(on_edge(&a) && on_edge(&b), "seed {seed}: {a:?} to {b:?} is not a river");
+                let same_edge = (a.0 == b.0 && (a.0 == 0 || a.0 == MAP_W - 1))
+                    || (a.1 == b.1 && (a.1 == 0 || a.1 == MAP_H - 1));
+                assert!(!same_edge, "seed {seed}: both mouths on the same edge");
+
+                // Every step is a king's step, so a four-neighbour flood can
+                // run down it without falling out at a corner.
+                for pair in river.windows(2) {
+                    let (dx, dy) = (pair[1].0 - pair[0].0, pair[1].1 - pair[0].1);
+                    assert!(
+                        dx.abs() <= 1 && dy.abs() <= 1 && (dx, dy) != (0, 0),
+                        "seed {seed}: the channel jumps from {:?} to {:?}",
+                        pair[0],
+                        pair[1]
+                    );
+                }
+
+                // It is water, all the way along.
+                for &(x, y) in &river {
+                    assert!(
+                        m.ground_at(x, y).watery(),
+                        "seed {seed}: the channel is dry at ({x},{y})"
+                    );
+                }
+
+                // And there is somewhere you can wade it.
+                let fords = m.ground.iter().filter(|&&g| g == Ground::Ford).count();
+                assert!(fords > 0, "seed {seed}: no ford, so half the map is unreachable");
+
+                // Nobody starts in it, and the high ground is still dry.
+                for &(x, y) in &m.hearth_sites {
+                    assert!(!m.ground_at(x, y).watery(), "seed {seed}: a hearth is in the river");
+                }
+                let (hx, hy) = m.high_corner.cell();
+                assert!(
+                    !m.ground_at(hx, hy).watery(),
+                    "seed {seed}: the high corner is under water"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_ford_joins_the_two_banks() {
+        // The one thing the ford is for. Without it the river is a wall and
+        // half the map is somewhere nobody can walk to, which is a different
+        // game from the one design section 6 describes.
+        use crate::nav::passable;
+        for seed in 0..30u64 {
+            let w = crate::world::World::new(seed, 2);
+            let start = w.map.hearth_sites[0];
+            let mut seen = vec![false; CELLS];
+            let mut queue = std::collections::VecDeque::new();
+
+            // Out of the hearth first: a citizen starts inside a building.
+            for dy in -3..=3i32 {
+                for dx in -3..=3i32 {
+                    let (x, y) = (start.0 + dx, start.1 + dy);
+                    if Map::contains(x, y) && passable(&w, x, y) && !seen[Map::idx(x, y)] {
+                        seen[Map::idx(x, y)] = true;
+                        queue.push_back((x, y));
+                    }
+                }
+            }
+            while let Some((x, y)) = queue.pop_front() {
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        let (nx, ny) = (x + dx, y + dy);
+                        if !Map::contains(nx, ny) || seen[Map::idx(nx, ny)] {
+                            continue;
+                        }
+                        if passable(&w, nx, ny) {
+                            seen[Map::idx(nx, ny)] = true;
+                            queue.push_back((nx, ny));
+                        }
+                    }
+                }
+            }
+
+            // The other city is on the far bank, and can be walked to.
+            let far = w.map.hearth_sites[1];
+            let reachable = (-3..=3i32).any(|dy| {
+                (-3..=3i32).any(|dx| {
+                    let (x, y) = (far.0 + dx, far.1 + dy);
+                    Map::contains(x, y) && seen[Map::idx(x, y)]
+                })
+            });
+            assert!(reachable, "seed {seed}: no way to walk from one city to the other");
+        }
+    }
+
+    #[test]
+    fn a_ford_under_water_is_not_a_ford() {
+        // Design's own point, and the tutorial says it once: the crossing you
+        // have been relying on goes under on the impact day.
+        use crate::nav::passable;
+        let mut w = crate::world::World::new(31, 2);
+        let ford = (0..MAP_H)
+            .flat_map(|y| (0..MAP_W).map(move |x| (x, y)))
+            .find(|&(x, y)| w.map.ground_at(x, y) == Ground::Ford)
+            .expect("every map has a ford");
+
+        assert!(passable(&w, ford.0, ford.1), "a dry ford cannot be waded");
+        w.water.raise_to(ford.0, ford.1, WADE_DEPTH);
+        assert!(!passable(&w, ford.0, ford.1), "a flooded ford is still a crossing");
+    }
+
+    #[test]
     fn the_wet_ground_is_at_the_low_end() {
         // Quantile bands cut by height, so this is close to a tautology — but
         // it is the tautology the flood depends on, and if the ramp ever
         // stopped deciding which end is low it would stop being one.
+        //
+        // The river is excluded, and has to be: it is water all the way from
+        // the high end to the low one by construction, so counting it would
+        // measure the channel rather than the coast. What is under test is
+        // that the *land* is still wetter at the low end, which is what makes
+        // high ground safe.
         for seed in 0..20u64 {
             let m = gen(seed, 2);
+            let river: std::collections::BTreeSet<(i32, i32)> = {
+                let mut set = std::collections::BTreeSet::new();
+                let reach = RIVER_HALF_WIDTH + RIVER_BANK;
+                for &(rx, ry) in &m.river {
+                    for dy in -reach..=reach {
+                        for dx in -reach..=reach {
+                            set.insert((rx as i32 + dx, ry as i32 + dy));
+                        }
+                    }
+                }
+                set
+            };
             let (lx, ly) = m.low_corner.cell();
             let (hx, hy) = m.high_corner.cell();
-            let near = |cx: i32, cy: i32, g: Ground| {
+            let near = |cx: i32, cy: i32| {
                 let mut n = 0;
                 for y in 0..MAP_H {
                     for x in 0..MAP_W {
-                        if (x - cx).abs() + (y - cy).abs() < 40 && m.ground_at(x, y) == g {
+                        if (x - cx).abs() + (y - cy).abs() < 40
+                            && m.ground_at(x, y).watery()
+                            && !river.contains(&(x, y))
+                        {
                             n += 1;
                         }
                     }
@@ -517,7 +1130,7 @@ mod tests {
                 n
             };
             assert!(
-                near(lx, ly, Ground::Shallows) > near(hx, hy, Ground::Shallows),
+                near(lx, ly) > near(hx, hy),
                 "seed {seed}: the low corner is not the wet one"
             );
         }
@@ -600,50 +1213,58 @@ mod tests {
     }
 
     #[test]
-    fn the_low_corner_is_comparably_near_to_every_city() {
+    fn the_river_is_comparably_near_to_every_city() {
         let mut spreads = std::collections::BTreeSet::new();
         // Design §6: "comparable (not identical)" ground.
         //
-        // This assertion used to read the other way round — that the spread
-        // between the nearest city to the water and the furthest was *more*
-        // than forty cells — and it passed, and that was the problem. On a
-        // ring around the map centre the spread was routinely a hundred, which
-        // is not "not identical", it is one player drowned in age one and
-        // another who never sees water in three ages. See `SHORE_DISTANCE` for
-        // the measurement that says where the flood actually is.
+        // **This used to measure the distance to the low corner**, because the
+        // flood used to come out of one. It read the other way round before
+        // that — asserting the spread was *more* than forty cells — and it
+        // passed, and that was the problem: a ring around the map centre gave
+        // a spread of a hundred, which is not "not identical", it is one
+        // player drowned in age one and another who never sees water.
         //
-        // So: nobody is the same distance out as anybody else, and nobody is
-        // in a different game.
+        // The water comes down a channel now, so the distance that decides a
+        // city's game is its distance to the bank. Nobody is the same distance
+        // out as anybody else, and nobody is in a different game.
         for players in 2..=6u32 {
             for seed in 0..60u64 {
                 let m = gen(seed, players);
-                let (lx, ly) = m.low_corner.cell();
                 let mut d: Vec<i32> = m
                     .hearth_sites
                     .iter()
-                    .map(|&(x, y)| (x - lx).abs() + (y - ly).abs())
+                    .map(|&(x, y)| {
+                        m.river
+                            .iter()
+                            .map(|&(rx, ry)| {
+                                (x - rx as i32).abs().max((y - ry as i32).abs())
+                            })
+                            .min()
+                            .expect("every map has a river")
+                    })
                     .collect();
                 d.sort_unstable();
                 let spread = d[d.len() - 1] - d[0];
                 spreads.insert(spread);
                 assert!(
-                    spread <= 30,
+                    spread <= 2 * SITE_JITTER_BAND,
                     "{players}p seed {seed}: one city is in a different game: {d:?}"
                 );
-                // And all of them are where the water goes: past about 115
-                // cells an age-one flood never arrives at all.
                 assert!(
-                    d[d.len() - 1] < 115 && d[0] > 55,
-                    "{players}p seed {seed}: a city is outside the flood: {d:?}"
+                    d[0] >= SHORE_DISTANCE - SITE_JITTER_BAND
+                        && d[d.len() - 1] <= SHORE_DISTANCE + SITE_JITTER_BAND,
+                    "{players}p seed {seed}: a city is off the band: {d:?}"
                 );
+                // Nobody starts in the water, and nobody starts unable to
+                // reach it — the flood is the game.
+                for &(x, y) in &m.hearth_sites {
+                    assert!(!m.ground_at(x, y).watery(), "a hearth is in the river");
+                }
             }
         }
-        // And "not identical" across the run of seeds: the swing and the
-        // jitter do move cities relative to the water. Asserted over the set
-        // rather than per map, because two cities landing at the same distance
-        // on one seed is a coincidence and not a fault.
+        // And "not identical" across the run of seeds: the band and the
+        // farthest-point choice do move cities relative to the water.
         assert!(spreads.len() > 3, "every map is laid out the same: {spreads:?}");
-        assert!(spreads.contains(&0) || *spreads.iter().next().unwrap() < 6);
     }
 
     #[test]
@@ -697,6 +1318,145 @@ mod tests {
 #[cfg(test)]
 mod probe {
     use super::*;
+
+    /// Where the cities end up relative to the channel, and how far apart.
+    #[test]
+    #[ignore]
+    fn where_the_cities_sit() {
+        println!();
+        println!("  players   closest pair   nearest bank   furthest bank   in the river   worst rock   no quarry   med p90   maybe-planted   headroom lo/med/hi");
+        for players in 2..=6u32 {
+            let mut closest = i32::MAX;
+            let (mut near, mut far) = (i32::MAX, 0);
+            let mut in_river = 0;
+            // How far a city has to walk to the nearest rock, which is the
+            // only thing a quarry may be built beside — and a quarry is the
+            // only source of the stone a dike costs.
+            let mut worst_rock = 0;
+            let mut no_rock = 0;
+            let mut rocks: Vec<i32> = Vec::new();
+            let mut heads: Vec<i32> = Vec::new();
+            let mut nudged = 0;
+            for seed in 0..200u64 {
+                let m = Map::generate(&mut Rng::new(seed), players);
+                for (i, &(ax, ay)) in m.hearth_sites.iter().enumerate() {
+                    for &(bx, by) in &m.hearth_sites[i + 1..] {
+                        let d2 = ((ax - bx).pow(2) + (ay - by).pow(2)) as i64;
+                        closest = closest.min(crate::fx::isqrt(d2) as i32);
+                    }
+                    // Chebyshev to the nearest centreline cell, which is how
+                    // far the site is from the water.
+                    let d = m
+                        .river
+                        .iter()
+                        .map(|&(rx, ry)| {
+                            (ax - rx as i32).abs().max((ay - ry as i32).abs())
+                        })
+                        .min()
+                        .unwrap_or(0);
+                    near = near.min(d);
+                    far = far.max(d);
+                    if m.ground_at(ax, ay).watery() {
+                        in_river += 1;
+                    }
+                    let rock = (0..MAP_H)
+                        .flat_map(|y| (0..MAP_W).map(move |x| (x, y)))
+                        .filter(|&(x, y)| m.ground_at(x, y) == Ground::Rock)
+                        .map(|(x, y)| (ax - x).abs().max((ay - y).abs()))
+                        .min()
+                        .unwrap_or(999);
+                    if rock > 40 {
+                        no_rock += 1;
+                    }
+                    worst_rock = worst_rock.max(rock);
+                    rocks.push(rock);
+                    // How far the site stands above the river bed it is
+                    // nearest to: the flood has to climb this to reach it.
+                    let (rx, ry) = m
+                        .river
+                        .iter()
+                        .map(|&(a, b)| (a as i32, b as i32))
+                        .min_by_key(|&(a, b)| (ax - a).abs().max((ay - b).abs()))
+                        .unwrap();
+                    heads.push(m.height_at(ax, ay) as i32 - m.height_at(rx, ry) as i32);
+                    // The outcrop is planted at ring 8 or just outside it, so
+                    // a city with rock closer than that had its own.
+                    if rock >= 8 && rock <= QUARRY_REACH {
+                        nudged += 1;
+                    }
+                }
+            }
+            rocks.sort_unstable();
+            heads.sort_unstable();
+            println!(
+                "  {players:>7}   {closest:>12}   {near:>12}   {far:>13}   {in_river:>12}   {worst_rock:>10}   {no_rock:>8}   {:>6}   {:>3}   {nudged:>6}   {:>3} {:>3} {:>3}",
+                rocks[rocks.len() / 2],
+                rocks[rocks.len() * 9 / 10],
+                heads[0],
+                heads[heads.len() / 2],
+                heads[heads.len() - 1],
+            );
+        }
+    }
+
+    /// What the channel does to the map it is cut into: how much of the map
+    /// it is, how much of it the ground bands would have made water on their
+    /// own, and how much coast is left once it has taken its share.
+    #[test]
+    #[ignore]
+    fn what_the_river_costs() {
+        println!();
+        println!("  seed   len   cells   %map   shallows_max   in band   coast %   dry high corner");
+        let mut worst_in_band = 100;
+        for seed in [3u64, 31, 97, 1000003, 4043362590, 7, 12345, 88888] {
+            let m = Map::generate(&mut Rng::new(seed), 4);
+            let river: Vec<(i32, i32)> =
+                m.river.iter().map(|&(x, y)| (x as i32, y as i32)).collect();
+
+            // Every cell the channel floor covers, not just the centreline.
+            let mut floor = std::collections::BTreeSet::new();
+            for &(cx, cy) in &river {
+                for dy in -RIVER_HALF_WIDTH..=RIVER_HALF_WIDTH {
+                    for dx in -RIVER_HALF_WIDTH..=RIVER_HALF_WIDTH {
+                        if Map::contains(cx + dx, cy + dy) {
+                            floor.insert((cx + dx, cy + dy));
+                        }
+                    }
+                }
+            }
+            // What the ground bands alone would have made of the channel —
+            // the number that says why the floor is painted rather than left
+            // to the percentile. Every floor cell is water either way.
+            let wet = floor
+                .iter()
+                .filter(|&&(x, y)| m.height_at(x, y) <= m.shallows_max)
+                .count();
+            let in_band = wet * 100 / floor.len();
+            if let Some(&(bx, by)) = floor.iter().find(|&&(x, y)| !m.ground_at(x, y).watery()) {
+                panic!(
+                    "seed {seed}: the channel is {:?} at ({bx},{by}); sites {:?}",
+                    m.ground_at(bx, by),
+                    m.hearth_sites
+                );
+            }
+            worst_in_band = worst_in_band.min(in_band);
+
+            let all_shallows =
+                m.ground.iter().filter(|&&g| g == Ground::Shallows).count();
+            let coast = (all_shallows - wet) * 100 / CELLS;
+            let (hx, hy) = m.high_corner.cell();
+            println!(
+                "  {seed:>10}   {:>3}   {:>5}   {:>4}   {:>12}   {in_band:>6}%   {coast:>6}%   {}",
+                river.len(),
+                floor.len(),
+                floor.len() * 100 / CELLS,
+                m.shallows_max,
+                m.ground_at(hx, hy) != Ground::Shallows,
+            );
+        }
+        println!();
+        println!("  at worst {worst_in_band}% of a channel floor would have been water by height alone");
+    }
 
     /// Not a test — a measurement, run by hand with
     /// `cargo test -p sim probe -- --ignored --nocapture` when the terrain

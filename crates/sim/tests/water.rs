@@ -7,7 +7,7 @@
 use sim::balance::*;
 use sim::building::{Facing, Good, Kind};
 use sim::citizen::PlayerId;
-use sim::map::{Corner, Ground, Map, CELLS, MAP_H, MAP_W};
+use sim::map::{Ground, Map, CELLS, MAP_H, MAP_W};
 use sim::nav::Nav;
 use sim::water::Water;
 use sim::world::World;
@@ -20,6 +20,23 @@ fn flat(height: u8) -> World {
         w.map.ground[i] = Ground::Grass;
     }
     w
+}
+
+/// A column of `DIKE_LENGTH` cells, east of the source, with nothing standing
+/// in it.
+///
+/// Picked rather than written down: the hearths move with the map, and once
+/// the cities went on the river bank a wall at a fixed x ran straight through
+/// one of them. The tests below only need the wall to be somewhere the water
+/// has to get past.
+fn clear_column(w: &World, from: i32) -> i32 {
+    (from..MAP_W - DIKE_LENGTH)
+        .find(|&x| {
+            (0..MAP_H).all(|y| {
+                (0..DIKE_LENGTH).all(|d| w.building_at(x + d, y).is_none())
+            })
+        })
+        .expect("nowhere to put a wall")
 }
 
 /// Ground heights for a flat world, as `Water::step` wants them.
@@ -174,7 +191,7 @@ fn water_behind_a_level_two_dike_stays_behind_it_for_a_height_twelve_surge() {
     // wall that is DIKE_LENGTH cells thick and MAP_H rows tall. Thickness is
     // not what is under test — height is — but "behind the wall" has to mean
     // past the far side of it and not on top of it.
-    let wall_x = 40;
+    let wall_x = clear_column(&w, 40);
     let wall_back = wall_x + DIKE_LENGTH;
     let mut wall = Vec::new();
     for y in 0..MAP_H {
@@ -226,7 +243,7 @@ fn water_behind_a_level_two_dike_stays_behind_it_for_a_height_twelve_surge() {
 fn water_spills_over_a_dike_it_is_deeper_than() {
     // The other half of the lesson: a dike is not a wall, it is a height.
     let mut w = flat(40);
-    let wall_x = 20;
+    let wall_x = clear_column(&w, 20);
     let wall_back = wall_x + DIKE_LENGTH;
     for y in 0..MAP_H {
         let id = w.place(PlayerId(0), Kind::Dike, Facing::EastWest, wall_x, y).unwrap();
@@ -346,7 +363,7 @@ fn the_high_corner_stays_dry() {
 fn the_surge_pours_only_on_the_impact_day_and_only_for_its_time() {
     let mut w = flat(40);
     let mut nav = Nav::new();
-    w.disaster.sources = vec![(Corner::NorthWest, 0)];
+    w.disaster.sources = vec![0];
     w.disaster.height = 12;
 
     for _ in 0..TICKS_PER_DAY {
@@ -369,7 +386,7 @@ fn the_surge_pours_only_on_the_impact_day_and_only_for_its_time() {
     }
     let at_peak = w.water.volume();
     assert!(at_peak > 0, "the surge poured nothing");
-    assert!(w.surging_from().is_empty(), "the surge is still pouring after its time");
+    assert_eq!(w.surging(), 0, "the surge is still pouring after its time");
 
     // Design §5 step 6: once the source stops, the water drains away over the
     // rest of the day. The sea falls back with it, which is what lets the
@@ -392,7 +409,7 @@ fn the_flood_is_the_same_flood_on_two_peers() {
     let build = |seed: u64| {
         let mut w = flat(40);
         w.seed = seed;
-        w.disaster.sources = vec![(Corner::NorthWest, 0)];
+        w.disaster.sources = vec![0];
         w.disaster.height = depth(18);
         w
     };

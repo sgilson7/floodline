@@ -1798,3 +1798,134 @@ and one for `both`, the same as before the pressure model — while the stone
 left standing at the flood drops from 420 to 210–330, which is segments being
 lost. A model that changes what a wall costs without changing whether a wall
 works is the right thing to have at this point in the plan.
+
+---
+
+## 2026-08-30 — A river through the middle of it
+
+M4, and the largest change since the MVP. The terrain is still a corner-to-
+corner ramp with noise on it — that is what keeps "high ground is safe" true —
+and a channel is now cut down it from the high side to the low, entering and
+leaving on opposite edges of the map. Cities go on its banks. The flood comes
+down it.
+
+**A river is water because it is a river, not because it is low.** The plan
+said to carve the channel before the ground bands are computed so it "counts as
+the shallows it is", and measuring that says it does not: the bands are
+percentiles of the height field and a channel running down a ramp is above the
+waterline for most of its length however deep it is cut. `what_the_river_costs`
+found three seeds in eight with two fifths of their channel reading as dry
+land. So the floor is painted `Shallows` outright — the one place besides
+`level_pad` where ground is not a function of height, and deliberate in both.
+
+**The bed is cut from a smoothed profile, and that took the arrival probe to
+find.** A running minimum on the raw terrain is a trap: the land along a
+meander is noisy (`NOISE_AMPLITUDE` is 16 against a relief of 40), so one
+hollow drags the bed down and — because a minimum never comes back up — every
+reach below it is cut to that depth. Seed 31's channel crossed a hollow early
+and spent the rest of its length as a canyon at height zero beside a city
+standing at thirty. The surge filled the canyon and the city never got its feet
+wet. That is not a flood, it is a moat. The bed is now cut from the terrain
+averaged over `RIVER_SMOOTH` cells and then made monotone.
+
+**`Ground::Ford`, and `nav::passable` learns its fourth rule.** Every map
+guarantees one reach shallow enough to wade: passable, half speed, six times
+the pathing cost of open ground, unbuildable except by a bridge — crossable
+without one, better with one, exactly the relationship that was asked for. And
+it closes when the water comes: `passable` asks the water's depth at a ford and
+nowhere else, at the same depth a citizen starts wading at, so "you cannot path
+across it" and "you would be swept off it" arrive together.
+
+The ford covers the whole width of the cut and not only the channel floor. The
+bank taper is cut low too and on a low-lying reach the bands make those cells
+shallows as well, so a ford the width of the floor stops two cells short of dry
+land on each side — which is to say it is not a crossing. That was worth ten
+minutes and a flow field that reached a third of the map.
+
+**Sites are chosen farthest-point from a band, not offset from a line.** Two
+earlier versions offset a site perpendicular to the channel and both were wrong
+for the same reason: a meander means the line a site was placed from is not the
+nearest water to it, and a site fourteen cells out along one reach was one cell
+from the next bend. The band is every cell within `SITE_JITTER_BAND` of
+`SHORE_DISTANCE` from the river; players take turns picking the cell in it
+furthest from everybody already placed, on alternating banks. Spacing by
+construction rather than by hope.
+
+**Three things the band has to know about, each found by a test failing:**
+
+* **Rock.** Rock is the top eight percent of the height field, in one mass at
+  the high corner, and a river bank is low country — so 46% of two-player
+  sites had no rock within forty cells and the worst was a hundred away. A
+  quarry has to be cut out of rock and a quarry is the only source of the stone
+  a dike costs, so that is a city that cannot defend itself, decided by the
+  generator. Filtering on rock cost far too much spacing (two cities one cell
+  apart at six players), so the choice *ranks* — spacing until it is enough,
+  then rock, then more spacing — and the generator plants a small outcrop
+  within reach of any city that still has none. That fires for roughly half the
+  cities, which is a lot; the better fix is low-country outcrops in the terrain
+  model itself, and it is written down here rather than done.
+* **Being walled in.** A city can sit in a pocket of the map that its own
+  hearth, farm, granary and cottage then seal off, and
+  `two_cities_found_a_road_and_trade_for_three_days` found one: no road could
+  be laid between two cities that were both, technically, reachable. Candidates
+  must now be in the map's largest non-rock region *and* have
+  `SITE_ELBOW_PERCENT` of the ground around them open.
+* **Headroom.** The flood fills the channel to about `Disaster::height` above
+  the bed and spills from there, so how high a city stands above its own reach
+  of river is what decides whether the water reaches it at all — the job
+  `SHORE_DISTANCE` used to do alone when distance was the only thing that
+  mattered. Sites ranged from fourteen below the bed to seventeen above, and
+  `when_the_water_arrives` found one city in six that never got its feet wet in
+  three ages. Bounded to −4..+12 against an age-one surge of 12, swept together
+  with `SITE_JITTER_BAND` because the two of them decide how much there is to
+  choose from.
+
+**The surge comes out of the channel's upstream mouth, and the sea is at the
+other end.** `Disaster::sources` stopped being corners: there is one mouth, so
+what varies between ages is how many pulses come down it and when. The first
+`SURGE_REACH` cells of the cut are held at the age's height and the next
+`SURGE_REACH` at half — the same volume-and-shove the corner version used, with
+a channel to go down.
+
+`sea_surface` is measured at the river's *outfall* and not at its source, and
+getting that wrong was instructive: with the sea taken from the high end
+nothing could drain anywhere, and the flood sheeted out over fifteen thousand
+cells of sixteen thousand at eleven sixteenths a cell. A damp map, not a flood.
+
+`SURGE_REACH` is forty, measured:
+
+| reach | age 1 peak | age 3 peak | wades at | dry again |
+|---|---|---|---|---|
+| 20 | 25–43 | 35–71 | 115–800, sometimes never | 465–2530 |
+| 40 | 72–82 | 105–115 | 71–137 | 1380–3079 |
+| 80 | 79–125 | 125–171 | 55–135 | 1622–3835 |
+
+Wading starts at 32 and swimming at 96. At twenty the flood is a damp patch; at
+eighty an age-one flood is already over your head and the escalation has
+nowhere to go. Forty is where age one wets you and age three drowns you, which
+is design §4's table read back out of the water.
+
+### What this leaves for M5, said plainly
+
+**The river flood is too gentle, and the numbers say so.** The five-strategy
+playtest went from one survivor to sixteen for `grow`: two seeds in three now
+survive to age three doing nothing defensive at all. `dike` scores thirteen —
+*worse* than doing nothing — because a wall costs 450 builder-ticks a segment
+and the tallest anybody finished before the age-one flood was one segment. A
+game where the wall is not worth building is the thing M5 exists to fix, and it
+now has three probes to fix it with: `when_the_water_arrives`,
+`how_far_the_water_reaches` (re-pointed at the bank rather than a corner) and
+`dike_pressure_on_flat_ground`.
+
+One city in twelve still never wades. Everything else about the placement is
+guaranteed; that one is a tuning number.
+
+### Tests that were about an old world
+
+Seven, and each says so in its own comment: the wet ground is at the low end
+*excluding the channel*, the cities are comparably near *the river*, the flood
+comes *down the river*, the building in the front of the surge stands *beside
+the river mouth*, the crowd test *bunches its own citizens* rather than leaning
+on where a founding party happens to land, the water tests put their walls in a
+*clear column*, and the road tests *search for* a pair of ends a road can
+actually join instead of aiming two cells east of a hearth.

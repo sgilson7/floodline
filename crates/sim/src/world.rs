@@ -12,7 +12,7 @@ use crate::citizen::{Citizen, CitizenId, Errand, Job, PlayerId, State};
 use crate::command::Command;
 use crate::fx::V2;
 use crate::fx::Fx;
-use crate::map::{Ground, Map, MAP_H, MAP_W};
+use crate::map::{Ground, Map};
 use crate::names::NAMES;
 use crate::nav::{self, Dest, FlowField, Nav};
 use crate::road::{self, Road, RoadId, Trade, TradeId};
@@ -972,33 +972,71 @@ impl World {
     ///
     /// Zero except during a surge, when it is the surge's own height above the
     /// ground it is pouring onto — because a storm surge is the sea being
-    /// high, and a sea that stays at zero while a corner is held at eighteen
-    /// simply drains the flood back out beside where it came in.
+    /// high, and a sea that stays at zero while the river mouth is held at
+    /// eighteen simply drains the flood back out beside where it came in.
     fn sea_surface(&self) -> i32 {
-        let sources = self.surging_from();
-        if sources.is_empty() {
+        if self.surging() == 0 {
             return 0;
         }
+        // Measured at the river's *outfall*, not at its source.
+        //
+        // The sea is at the low end of the map, and this is the level water
+        // has to climb to before it can leave — so taking it from the high end
+        // was a flood that could not drain anywhere at all. Measured: the
+        // whole map went wet (fifteen thousand cells of sixteen) at eleven
+        // sixteenths a cell, which is a damp map rather than a flood. A storm
+        // surge is the sea being high while it happens, and the sea is down
+        // there.
         let rise = depth(self.disaster.height) as i32;
-        sources
-            .iter()
-            .map(|c| {
-                let (cx, cy) = c.cell();
-                self.map.height_at(cx, cy) as i32 * DEPTH_SCALE as i32 + rise
-            })
-            .max()
-            .unwrap_or(0)
+        let (ex, ey) = self.river_outfall();
+        self.map.height_at(ex, ey) as i32 * DEPTH_SCALE as i32 + rise
     }
 
-    /// The surge: for `SURGE_TICKS`, hold the source corner at the age's
-    /// height and point it at the middle of the map (design §5).
+    /// The downstream end of the channel: where the water leaves.
+    pub fn river_outfall(&self) -> (i32, i32) {
+        match self.map.river.last() {
+            Some(&(x, y)) => (x as i32, y as i32),
+            None => self.map.low_corner.cell(),
+        }
+    }
+
+    /// The upstream end of the channel: where the water comes from.
+    ///
+    /// The centreline is stored from source to mouth, so this is its first
+    /// cell. A map with no river at all — which the generator does not make —
+    /// falls back to the low corner, so nothing downstream of here has to
+    /// carry an `Option` for a case that cannot happen.
+    pub fn river_mouth(&self) -> (i32, i32) {
+        match self.map.river.first() {
+            Some(&(x, y)) => (x as i32, y as i32),
+            None => self.map.low_corner.cell(),
+        }
+    }
+
+    /// The surge: for `SURGE_TICKS`, hold the top of the channel at the age's
+    /// height and the reach below it at half, and let the river carry it
+    /// (design §5).
     ///
     /// Not a scripted wave — a source strong enough that the automaton makes a
     /// front out of it, which is the difference between water that behaves and
     /// water that has been animated.
+    ///
+    /// **This used to fill an 8 x 8 block at a corner and a second block one
+    /// step inland.** The shape is the same and so is the reason for it: the
+    /// first reach is the volume, the second is the shove, and without the
+    /// second an injected source stops the moment its neighbours are as deep
+    /// as it is. What changed is that the shove now has a channel to go down,
+    /// so it spills over the banks where the banks are low instead of spreading
+    /// evenly in every direction.
+    ///
+    /// Held *to* a depth, not topped up by one. Adding was the first version
+    /// and it accumulated without limit: three hundred ticks of pumping piled
+    /// water three hundred and seventy units deep beside a surge whose stated
+    /// height was twelve. §5 says the source "sets depth = H", and a set is a
+    /// cap.
     fn inject_surge(&mut self) {
-        let sources = self.surging_from();
-        if sources.is_empty() {
+        let pulses = self.surging();
+        if pulses == 0 {
             return;
         }
         // `Disaster::height` is design §5's surge height, in terrain units —
@@ -1006,47 +1044,24 @@ impl World {
         // Water is kept in sixteenths of one, so the two have to be converted
         // rather than compared. Left unscaled, an age-one flood poured water
         // three quarters of a unit deep and the map barely got wet.
-        let height = depth(self.disaster.height);
-        let push = surge_push(self.disaster.height);
-        let centre = (MAP_W / 2, MAP_H / 2);
+        //
+        // Two pulses at once is more water, not two floods: the deeper of the
+        // two wins, which is what "sets depth = H" means when they overlap.
+        let height = depth(self.disaster.height) * pulses.min(2) as u16;
+        let push = surge_push(self.disaster.height) * pulses.min(2) as u16;
 
-        for corner in sources {
-            let (cx, cy) = corner.cell();
-            // The 8 x 8 block at that corner, stepping inward.
-            let sx = if cx == 0 { 0 } else { MAP_W - SURGE_SIZE };
-            let sy = if cy == 0 { 0 } else { MAP_H - SURGE_SIZE };
-            let (tx, ty) = ((centre.0 - cx).signum(), (centre.1 - cy).signum());
-            for y in sy..sy + SURGE_SIZE {
-                for x in sx..sx + SURGE_SIZE {
-                    self.water.raise_to(x, y, height);
+        let river: Vec<(i32, i32)> =
+            self.map.river.iter().map(|&(x, y)| (x as i32, y as i32)).collect();
+        // The whole cut, banks included, not just the floor: a source that
+        // fills only the five cells of the channel is a source the banks
+        // contain, and design §5 wants a wave that tops them.
+        let wide = RIVER_HALF_WIDTH + RIVER_BANK;
 
-                    // And a shove inland, which is the whole difference
-                    // between a flood and a puddle.
-                    //
-                    // Design §5 says the source "gives them flow pointing
-                    // toward the map centre". Writing that into `flow` alone
-                    // achieves nothing — the automaton recomputes flow from
-                    // the height field every tick, so an injected direction is
-                    // overwritten before anything reads it. Held at a depth
-                    // and left to diffuse, an age-one surge covered five per
-                    // cent of the map and stopped: once its neighbours are as
-                    // deep as it is there is no gradient left to drive it.
-                    //
-                    // So the source is a pump: a second block, one block
-                    // inland, held at half the height. That is both the volume
-                    // and the direction the design asks for, and the automaton
-                    // then does what it is good at — turning a strong source
-                    // into a front, pooling it in low ground and stacking it
-                    // against dikes.
-                    //
-                    // Held *to* a depth, not topped up by one. Adding was the
-                    // first version and it accumulated without limit: three
-                    // hundred ticks of pumping piled water three hundred and
-                    // seventy units deep on flat ground beside a surge whose
-                    // stated height was twelve. §5 says the source "sets depth
-                    // = H", and a set is a cap.
-                    self.water.raise_to(x + tx * SURGE_SIZE, y, push);
-                    self.water.raise_to(x, y + ty * SURGE_SIZE, push);
+        for (i, &(cx, cy)) in river.iter().enumerate().take(2 * SURGE_REACH as usize) {
+            let to = if (i as i32) < SURGE_REACH { height } else { push };
+            for dy in -wide..=wide {
+                for dx in -wide..=wide {
+                    self.water.raise_to(cx + dx, cy + dy, to);
                 }
             }
         }
@@ -1272,7 +1287,8 @@ impl World {
     fn nudge(&mut self, i: usize, (dx, dy): (i32, i32)) {
         let (cx, cy) = self.citizens[i].pos.cell();
         let on_road = self.building_at(cx, cy).map(|b| b.carries_traffic()).unwrap_or(false);
-        let speed = self.citizens[i].speed(on_road);
+        let wading = self.map.ground_at(cx, cy) == Ground::Ford;
+        let speed = self.citizens[i].speed(on_road, wading);
 
         // The step is one of the eight neighbours, so its length is 1 or
         // sqrt(2); `with_len` scales it to the distance walked this tick and
@@ -1996,16 +2012,27 @@ mod tests {
     #[test]
     fn tired_citizens_walk_at_half_speed() {
         let c = &World::new(1, 2).citizens[0];
-        assert_eq!(c.speed(false), Fx(WALK_SPEED));
-        assert_eq!(c.speed(true), Fx(WALK_SPEED * 2), "a road doubles it");
+        assert_eq!(c.speed(false, false), Fx(WALK_SPEED));
+        assert_eq!(c.speed(true, false), Fx(WALK_SPEED * 2), "a road doubles it");
+        assert_eq!(c.speed(false, true), Fx(WALK_SPEED / 2), "wading halves it");
+        assert_eq!(
+            c.speed(true, true),
+            Fx(WALK_SPEED * 2),
+            "a road over a ford is a bridge, and a bridge is a road"
+        );
 
         let mut tired = c.clone();
         tired.rest = TIRED - 1;
-        assert_eq!(tired.speed(false), Fx(WALK_SPEED / 2));
+        assert_eq!(tired.speed(false, false), Fx(WALK_SPEED / 2));
         assert_eq!(
-            tired.speed(true),
+            tired.speed(true, false),
             Fx(WALK_SPEED),
             "tired on a road is the plain rate, not a quarter of it"
+        );
+        assert_eq!(
+            tired.speed(false, true),
+            Fx(WALK_SPEED / 4),
+            "tired and wading is as slow as it gets"
         );
     }
 

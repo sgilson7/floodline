@@ -25,6 +25,11 @@ pub fn ground(kind: sim::Ground, height: u8, relief: i32) -> Color {
     let t = (height as f32 / relief.max(1) as f32).clamp(0.0, 1.0);
     match kind {
         sim::Ground::Shallows => Color::new(0.16, 0.28, 0.36, 1.0),
+        // Paler than the deep channel and visibly not land: the one place the
+        // far bank is reachable on foot has to be findable at a glance, or
+        // the river reads as a wall rather than a crossing you have to look
+        // for.
+        sim::Ground::Ford => Color::new(0.33, 0.50, 0.55, 1.0),
         sim::Ground::Sand => Color::new(0.52, 0.47, 0.35, 1.0),
         sim::Ground::Rock => {
             let g = 0.34 + 0.22 * t;

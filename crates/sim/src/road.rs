@@ -100,7 +100,10 @@ fn lay_cost(world: &World, x: i32, y: i32) -> Option<u32> {
     }
     match world.map.ground_at(x, y) {
         Ground::Grass | Ground::Sand => Some(ROAD_COST_GROUND),
-        Ground::Shallows => Some(ROAD_COST_WATER),
+        // A ford is the cheap crossing and it is still water: a road over it
+        // is a bridge like any other, and bridging the ford is exactly the
+        // improvement the ford exists to make worth paying for.
+        Ground::Shallows | Ground::Ford => Some(ROAD_COST_WATER),
         Ground::Rock => None,
     }
 }

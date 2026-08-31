@@ -97,27 +97,47 @@ fn two_cities() -> (World, Nav) {
     (w, Nav::new())
 }
 
-/// Lay a road from city `a` to city `b` and have `b` accept it.
-fn join_the_cities(w: &mut World, a: u8, b: u8) -> RoadId {
+/// Two cells, one beside each city, that a road can actually be laid between.
+///
+/// A hearth is a building and a road does not go through one, so an end has to
+/// be beside it — and beside it is not always somewhere a road can get to.
+/// With the river on the map a city can sit with its back to a rock face, and
+/// the cell two steps east of its hearth ends up in a pocket its own farm and
+/// granary sealed off. A player clicking there gets "no way through" and
+/// clicks somewhere else; so does this.
+fn road_ends(w: &World, a: u8, b: u8) -> ((i32, i32), (i32, i32)) {
+    let beside = |cx: i32, cy: i32| -> Vec<(i32, i32)> {
+        (0..8)
+            .flat_map(|r| {
+                [(r, 0), (-r, 0), (0, r), (0, -r), (r, r), (-r, -r)].into_iter()
+            })
+            .map(|(dx, dy)| (cx + dx, cy + dy))
+            .filter(|&(x, y)| w.building_at(x, y).is_none() && w.map.buildable(x, y))
+            .collect()
+    };
     let (ax, ay) = w.map.hearth_sites[a as usize];
     let (bx, by) = w.map.hearth_sites[b as usize];
+    for &start in &beside(ax, ay) {
+        for &target in &beside(bx, by) {
+            if sim::road::plan(w, start, target).is_some() {
+                return (start, target);
+            }
+        }
+    }
+    panic!("no pair of ends between city {a} and city {b} that a road can join");
+}
 
-    // Aim beside the far hearth rather than at it: the hearth itself is a
-    // building, and a road does not go through one.
-    let target = (0..8)
-        .flat_map(|r| {
-            [(r, 0), (-r, 0), (0, r), (0, -r), (r, r), (-r, -r)].into_iter()
-        })
-        .map(|(dx, dy)| (bx + dx, by + dy))
-        .find(|&(x, y)| w.building_at(x, y).is_none() && w.map.buildable(x, y))
-        .expect("nowhere beside the far hearth to aim at");
-
-    let start = (0..8)
-        .flat_map(|r| [(r, 0), (-r, 0), (0, r), (0, -r)].into_iter())
-        .map(|(dx, dy)| (ax + dx, ay + dy))
-        .find(|&(x, y)| w.building_at(x, y).is_none() && w.map.buildable(x, y))
-        .expect("nowhere beside the near hearth to start from");
-
+/// Lay a road from city `a` to city `b` and have `b` accept it.
+///
+/// Both ends are *searched for* rather than picked. A hearth is a building and
+/// a road does not go through one, so the aim point has to be beside it — and
+/// beside it is not always somewhere a road can get to. With the river on the
+/// map a city can sit with its back to a rock face, and the cell two steps
+/// east of its hearth ends up in a pocket its own farm and granary sealed off.
+/// A player clicking there gets "no way through" and clicks somewhere else;
+/// so does this.
+fn join_the_cities(w: &mut World, a: u8, b: u8) -> RoadId {
+    let (start, target) = road_ends(w, a, b);
     w.apply(
         PlayerId(a),
         &Command::Road {
@@ -248,10 +268,7 @@ fn a_trade_over_a_road_nobody_joined_moves_nothing() {
     let (mut w, mut nav) = two_cities();
 
     // Lay the road and build it, but never accept it.
-    let (ax, ay) = w.map.hearth_sites[0];
-    let (bx, by) = w.map.hearth_sites[1];
-    let start = (ax + 2, ay);
-    let target = (bx + 2, by);
+    let (start, target) = road_ends(&w, 0, 1);
     w.apply(
         PlayerId(0),
         &Command::Road {
@@ -293,11 +310,15 @@ fn breaking_one_cell_of_the_road_stops_the_trade() {
     let road = join_the_cities(&mut w, 0, 1);
     assert!(w.linked(PlayerId(0), PlayerId(1)));
 
-    // One cell somewhere in the middle, as a surge would take it.
+    // One cell somewhere in the middle, as a surge would take it. Damaged by
+    // its own integrity rather than by a road's: with a river on the map the
+    // middle of the road is often a bridge, and a bridge is not a road cell's
+    // worth of planks.
     let cells = w.roads[road.0 as usize].cells.clone();
     let (bx, by) = cells[cells.len() / 2];
     let broken = w.building_at(bx as i32, by as i32).unwrap().id;
-    w.damage_building(broken, Kind::Road.integrity());
+    let toughness = w.buildings[broken.0 as usize].kind.integrity();
+    w.damage_building(broken, toughness);
 
     assert!(
         !w.linked(PlayerId(0), PlayerId(1)),
@@ -311,21 +332,40 @@ fn breaking_one_cell_of_the_road_stops_the_trade() {
 
     // Rebuild that cell and the link is back, without anybody having to agree
     // to anything again.
+    // A bridge where the water is, a road where the ground is — the same
+    // choice `lay_road` makes, and the reason it is a choice at all.
+    let again = if w.map.ground_at(bx as i32, by as i32).watery() {
+        Kind::Bridge
+    } else {
+        Kind::Road
+    };
     w.apply(PlayerId(0), &Command::Demolish { building: broken }).unwrap();
-    w.apply(PlayerId(0), &Command::Place { kind: Kind::Road, facing: Facing::EastWest, x: bx, y: by }).unwrap();
+    w.apply(
+        PlayerId(0),
+        &Command::Place { kind: again, facing: Facing::EastWest, x: bx, y: by },
+    )
+    .unwrap();
     let fresh = w.buildings.last().unwrap().id;
-    w.build_at(fresh, Kind::Road.build_ticks());
+    for g in Good::ALL {
+        let want = w.buildings[fresh.0 as usize].outstanding().get(g);
+        if want > 0 {
+            w.deliver_to(fresh, g, want);
+        }
+    }
+    w.build_at(fresh, again.build_ticks());
     assert!(w.linked(PlayerId(0), PlayerId(1)), "rebuilding did not restore the link");
 }
 
 #[test]
 fn a_road_only_the_other_city_may_join() {
     let (mut w, _nav) = two_cities();
-    let (ax, ay) = w.map.hearth_sites[0];
-    let (bx, by) = w.map.hearth_sites[1];
+    let (start, target) = road_ends(&w, 0, 1);
     w.apply(
         PlayerId(0),
-        &Command::Road { from: ((ax + 2) as u8, ay as u8), to: ((bx + 2) as u8, by as u8) },
+        &Command::Road {
+            from: (start.0 as u8, start.1 as u8),
+            to: (target.0 as u8, target.1 as u8),
+        },
     )
     .unwrap();
     let road = w.roads.last().unwrap().id;
@@ -376,14 +416,14 @@ fn a_road_finds_its_way_round_the_rock_and_over_the_water() {
 /// mostly on how far it happens to sit from the low corner — which is the
 /// game, and exactly the wrong variable for a test about dikes.
 fn a_city_in_the_path(with_a_dike: bool) -> u32 {
-    use sim::map::{Corner, Ground, CELLS};
+    use sim::map::{Ground, CELLS};
 
     let mut w = World::new(SEED, 2);
     for i in 0..CELLS {
         w.map.height[i] = 40;
         w.map.ground[i] = Ground::Grass;
     }
-    w.disaster.sources = vec![(Corner::NorthWest, 0)];
+    w.disaster.sources = vec![0];
     w.disaster.height = 12;
 
     // Everybody of player 0 stands together on the lowland, twenty cells in

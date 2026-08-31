@@ -72,16 +72,30 @@ fn a_run_starts_in_age_one_on_day_one() {
 }
 
 #[test]
-fn age_ones_flood_comes_out_of_the_low_corner() {
-    // Design §5: ages 1–3 always come out of the lowest corner, so the first
-    // floods are learnable.
+fn age_ones_flood_comes_down_the_river() {
+    // Design §5's first sentence, after M4: every flood comes down the same
+    // channel, so the first ones are learnable. This used to assert that they
+    // came out of the low *corner*, which is where they came from before the
+    // map had a river in it.
     for seed in 0..40u64 {
         let w = World::new(seed, 2);
         assert_eq!(w.disaster.kind, DisasterKind::Flood);
         assert_eq!(w.disaster.height, 12, "age one is height 12");
-        assert_eq!(w.disaster.sources.len(), 1);
-        assert_eq!(w.disaster.sources[0].0, w.map.low_corner, "seed {seed}");
-        assert_eq!(w.disaster.sources[0].1, 0, "and it starts at once");
+        assert_eq!(w.disaster.sources.len(), 1, "one pulse");
+        assert_eq!(w.disaster.sources[0], 0, "and it starts at once");
+
+        // And the source is the upstream end of the channel, which is the
+        // high side of the ramp — not the low one.
+        let (mx, my) = w.river_mouth();
+        let (ex, ey) = {
+            let &(x, y) = w.map.river.last().unwrap();
+            (x as i32, y as i32)
+        };
+        let (hx, hy) = w.map.high_corner.cell();
+        assert!(
+            (mx - hx).abs() + (my - hy).abs() < (ex - hx).abs() + (ey - hy).abs(),
+            "seed {seed}: the river runs uphill"
+        );
     }
 }
 
@@ -93,25 +107,26 @@ fn the_table_escalates_the_way_design_four_says() {
         .collect();
     assert_eq!(heights, vec![12, 18, 18, 24, 30, 36]);
 
-    // Ages one and two, one corner, the low one.
+    // Ages one and two: one pulse, at once.
     for age in 1..=2 {
         let d = Disaster::draw(age, &w.map, &mut w.rng.clone());
         assert_eq!(d.sources.len(), 1);
-        assert_eq!(d.sources[0].0, w.map.low_corner);
+        assert_eq!(d.sources[0], 0);
     }
 
-    // Age three: two corners, offset by half a day.
+    // Age three: two pulses, about half a day apart.
     let d = Disaster::draw(3, &w.map, &mut w.rng.clone());
-    assert_eq!(d.sources.len(), 2, "age three floods from two corners");
-    assert_eq!(d.sources[0].0, w.map.low_corner);
-    assert_ne!(d.sources[1].0, w.map.low_corner, "and the second is somewhere else");
-    assert_eq!(d.sources[1].1, TICKS_PER_DAY / 2, "half a day behind");
+    assert_eq!(d.sources.len(), 2, "age three floods twice");
+    assert_eq!(d.sources[0], 0);
+    let gap = d.sources[1] as i32 - TICKS_PER_DAY as i32 / 2;
+    assert!(gap.abs() <= 60, "the second pulse is {gap} off half a day");
 
-    // Age four and beyond can come from anywhere, the high corner included.
-    let corners: std::collections::BTreeSet<_> = (0..40u64)
-        .map(|s| Disaster::draw(4, &w.map, &mut sim::Rng::new(s)).sources[0].0)
+    // And when the second one comes is not the same on every seed, so the day
+    // cannot be memorised to the tick.
+    let offsets: std::collections::BTreeSet<_> = (0..40u64)
+        .map(|s| Disaster::draw(3, &w.map, &mut sim::Rng::new(s)).sources[1])
         .collect();
-    assert!(corners.len() > 1, "age four always picked the same corner");
+    assert!(offsets.len() > 1, "age three always pulses at the same tick");
 }
 
 #[test]
@@ -124,9 +139,9 @@ fn the_disaster_is_a_function_of_the_seed() {
     // And two seeds do not have to agree.
     let mut seen = std::collections::BTreeSet::new();
     for seed in 0..40u64 {
-        seen.insert(World::new(seed, 2).disaster.sources[0].0);
+        seen.insert(World::new(seed, 2).river_mouth());
     }
-    assert!(seen.len() > 1, "every seed floods from the same corner");
+    assert!(seen.len() > 1, "every seed floods from the same place");
 }
 
 #[test]
@@ -158,20 +173,19 @@ fn the_village_gets_one_days_notice_and_no_more() {
 #[test]
 fn the_water_runs_on_the_impact_day_and_not_before() {
     let mut w = immortal(31);
-    assert!(w.surging_from().is_empty(), "the flood started on day one");
+    assert_eq!(w.surging(), 0, "the flood started on day one");
 
     // To the first tick of the impact day.
     run_fed(&mut w, TICKS_PER_DAY * (World::IMPACT_DAY - 1));
     assert_eq!(w.day_of_age(), World::IMPACT_DAY);
 
-    let sources = w.surging_from();
-    assert_eq!(sources, vec![w.map.low_corner], "the surge did not start");
+    assert_eq!(w.surging(), 1, "the surge did not start");
 
     // It runs for a while and then stops, whether because the surge is over or
     // because the age is.
     let mut ran = 0;
     let mut nav = Nav::new();
-    while !w.surging_from().is_empty() && w.finished().is_none() {
+    while w.surging() > 0 && w.finished().is_none() {
         feed(&mut w);
         w.tick(&mut nav, &[]);
         ran += 1;

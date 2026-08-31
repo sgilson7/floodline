@@ -8,7 +8,7 @@ use sim::balance::*;
 use sim::building::{Facing, Good, Kind};
 use sim::citizen::PlayerId;
 use sim::fx::V2;
-use sim::map::{Corner, Ground, CELLS, MAP_H, MAP_W};
+use sim::map::{Ground, CELLS, MAP_H, MAP_W};
 use sim::nav::Nav;
 use sim::world::World;
 
@@ -19,7 +19,7 @@ fn at_the_impact_day(height: u16) -> (World, Nav) {
         w.map.height[i] = 40;
         w.map.ground[i] = Ground::Grass;
     }
-    w.disaster.sources = vec![(Corner::NorthWest, 0)];
+    w.disaster.sources = vec![0];
     w.disaster.height = height;
     let mut nav = Nav::new();
     while w.day_of_age() < World::IMPACT_DAY {
@@ -160,9 +160,19 @@ fn a_rooftop_is_only_a_rooftop_while_the_building_stands() {
 /// much of it the water took, and whether it took all of it.
 fn battered_by_the_front(kind: Kind) -> (u16, bool) {
     let (mut w, mut nav) = at_the_impact_day(18);
-    // Right in the mouth of it. Sixteen cells out is already too far: the
-    // front has spread and slowed by there.
-    let id = w.place(PlayerId(0), kind, Facing::EastWest, 9, 9).unwrap();
+    // Right in the mouth of it, on the bank a few cells down from where the
+    // surge comes out. Sixteen cells further and the front has spread and
+    // slowed. **This used to be the fixed cell (9, 9)**, which was in the
+    // mouth of a corner flood; the flood comes down a channel now and the
+    // channel is somewhere different on every seed.
+    let (mx, my) = w.river_mouth();
+    let id = (1..12i32)
+        .flat_map(|r| {
+            [(r, 0), (-r, 0), (0, r), (0, -r), (r, r), (-r, -r), (r, -r), (-r, r)].into_iter()
+        })
+        .map(|(dx, dy)| (mx + dx, my + dy))
+        .find_map(|(x, y)| w.place(PlayerId(0), kind, Facing::EastWest, x, y).ok())
+        .unwrap_or_else(|| panic!("nowhere beside the river mouth for a {kind:?}"));
     for g in Good::ALL {
         let want = kind.cost().get(g);
         if want > 0 {

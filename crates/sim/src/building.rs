@@ -475,7 +475,10 @@ impl Kind {
     /// must be on ground that is not shallows and not rock.
     pub fn accepts(self, ground: Ground) -> bool {
         match self {
-            Kind::Bridge => ground == Ground::Shallows,
+            // A bridge goes over water, and a ford is water. Bridging a ford
+            // is the whole point of a ford: the crossing that was slow and
+            // closed on the impact day becomes a road that is neither.
+            Kind::Bridge => ground.watery(),
             _ => ground.buildable(),
         }
     }

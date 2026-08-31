@@ -12,7 +12,7 @@
 //! arrives with `Command` in item 7.
 
 use sim::balance::{FOUNDING_CITIZENS, NEED_FULL, TICKS_PER_DAY};
-use sim::building::{Facing, Good, Kind};
+use sim::building::{BuildState, Facing, Good, Kind};
 use sim::citizen::{Job, PlayerId};
 use sim::citizen::CitizenId;
 use sim::command::Command;
@@ -441,6 +441,16 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
         (1, PlayerId(0), format!("place granary {} {} ew", layout[1].1, layout[1].2)),
         (2, PlayerId(0), format!("place cottage {} {} ew", layout[2].1, layout[2].2)),
         (2, PlayerId(0), format!("place dike {} {} ew", layout[3].1, layout[3].2)),
+        // And a drawn wall, so the one command that lays several buildings at
+        // once is in the replay too.
+        (
+            2,
+            PlayerId(0),
+            format!(
+                "dikeline {} {} {} {}",
+                layout[3].1, layout[3].2 + 6, layout[3].1 + 8, layout[3].2 + 6
+            ),
+        ),
         // Builders on the dike, so it is standing by the time the script
         // tries to raise it. A construction site only makes progress when
         // somebody is assigned to it — hauling brings the stone, building
@@ -485,8 +495,8 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
         // item 10 asking for "every variant" rather than "a good spread".
         assert_eq!(
             verbs.len(),
-            14,
-            "the script covers {} of the fourteen command variants: {verbs:?}",
+            15,
+            "the script covers {} of the fifteen command variants: {verbs:?}",
             verbs.len()
         );
     }
@@ -531,7 +541,7 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
     // be made while there is one.
     let mut w = World::new(31, 2);
     let mut nav = Nav::new();
-    let (mut early, mut mid) = (None, None);
+    let (mut early, mut assigned, mut mid) = (None, None, None);
     for t in 0..1500u32 {
         let now: Vec<(PlayerId, Command)> = script
             .iter()
@@ -541,6 +551,14 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
         w.tick(&mut nav, &now);
         if t == 20 {
             early = Some(w.clone());
+        }
+        // The tick after the assignment at 300, and a hundred ticks later.
+        // Two snapshots, because "assigning to a standing farm makes a
+        // farmer" is a rule and "they are still farming a hundred ticks
+        // later" is a fact about one map's food supply — the granary is
+        // demolished at 200 and hungry people put their tools down.
+        if t == 301 {
+            assigned = Some(w.clone());
         }
         if t == 400 {
             mid = Some(w.clone());
@@ -564,8 +582,17 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
     // picks up a shovel, the farm is finished long before tick 300, and
     // assigning to a standing farm makes farmers. The rule is unchanged; the
     // world it is being applied to finally has a farm in it.
-    assert_eq!(mid.citizens[6].workplace, Some(farm), "the assignment did not take");
-    assert_eq!(mid.citizens[6].job, Some(Job::Farmer));
+    let assigned = assigned.unwrap();
+    assert_eq!(assigned.citizens[6].workplace, Some(farm), "the assignment did not take");
+    // What job that is depends on whether the farm is finished, and *that*
+    // depends on the map. With a river between the cities the road is long,
+    // and a city's idle hands are the same hands that lay it — so the farm may
+    // still be a site three hundred ticks after it was placed. Which of the
+    // two it is is a fact about one seed; that a site wants a builder and a
+    // farm wants a farmer is the rule, and the rule is what is asserted.
+    let state = assigned.buildings[farm.0 as usize].state;
+    let want = if state == BuildState::Standing { Job::Farmer } else { Job::Builder };
+    assert_eq!(assigned.citizens[6].job, Some(want), "a {state:?} farm asked for the wrong job");
     assert_eq!(mid.citizens[7].job, None, "#7 was unassigned again");
     assert_eq!(mid.citizens[2].job, None, "#2 was unassigned");
     assert!(mid.pings.is_empty(), "pings from tick 6 were never pruned");
