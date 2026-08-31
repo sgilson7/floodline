@@ -24,7 +24,7 @@ This document is also an artifact, if a link is easier to hand on than a file:
 | M10.5 | A rehearsal: one age | **done** — and it answered M5's parked question |
 | M10.6 | The run | **done** — "The map stood", three ages, no desync |
 | M10.7 | The account | **done** — `PLAYTEST-M10.md` |
-| M10.8 | What the run demands | ← **all that is left**; seven findings waiting, none of them a balance change |
+| M10.8 | What the run demands | **closed** — the run demanded more than a milestone, and it is `PLAN-M11.md` |
 
 Setting the table found three things, which is what the ordering was for. Two
 are fixed (`peers at` said nothing in a browser; the panel's variable row still

@@ -487,13 +487,21 @@ game.
 
 ### Next action
 
-**M10.8 — what the run demands**, and it is the only step left. Seven findings
-are listed at the end of `PLAYTEST-M10.md`; **none of them is a balance
-change**. Every one is the game failing to say something it already knows:
-where the water reached last time, that a wall has broken, who died and of
-what, that a raise worked, that people are standing in the floodplain.
+**M11 — make the world legible**, which is what M10.8 turned out to be. The run
+demanded more than one milestone, so it is seven, in `PLAN-M11.md`, and
+**not one of them changes a balance constant**. Every one is the game failing
+to say something it already knows.
 
-The one to do first, because it hides the instrument M10 depends on: **a
-pending trade offer overdraws `tick`, `peers at` and `build`/`seed`** at the
-foot of the panel. Partly this session's doing — moving the level/move row
-below the offers added up to 48 pixels to a stack that already overflowed.
+Two of them change what a run *is*, and the rest can wait behind them:
+
+* **M11.1 — a panel that tells the truth.** A pending trade offer overdraws
+  `tick`, `peers at` and `build`/`seed`, which are the rows a player is told to
+  read when something is wrong. Partly this session's doing.
+* **M11.2 — ground you can read.** Both players asked for the last flood's
+  high-water line above everything else. `Map::height` already exists, so
+  hovering ground is display only; the mark is a running maximum of
+  `Water::depth`, and one bit a cell costs 2 KB of the `Welcome` snapshot.
+
+The single next action is M11.1's first deliverable: decide how the foot of the
+panel stops being overdrawn, write it down, and get `panel_rows.py` failing on
+today's build with an offer pending and a building selected.
