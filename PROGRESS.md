@@ -184,3 +184,58 @@ so the river counts as the shallows it is. `SHORE_DISTANCE` stops meaning
 fourth passability rule in a system that has had one, and `nav::passable` is
 read by pathing, the crowd, the flood and road-laying — change all four
 together.
+
+---
+
+## Session 5 — 2026-08-30
+
+**M4's mechanism is built: there is a river, it has a ford, the cities are on
+its banks and the flood comes down it.** 252 cargo tests, 14 browser checks,
+no warnings, `make test` in about twenty-four seconds. One commit, on top of
+M3's four.
+
+* **`map::river`** — a meandering channel from the high side of the ramp to the
+  low, both mouths on opposite map edges, carved before the ground bands and
+  then painted water outright. A river is water because it is a river, not
+  because it is low, and measuring the alternative is what said so.
+* **`Ground::Ford`** — `nav::passable`'s fourth rule. Wadeable at half speed
+  and six times the pathing cost, unbuildable except by a bridge, and it closes
+  when the water comes.
+* **Bank-relative sites** — chosen farthest-point from the band of cells
+  `SHORE_DISTANCE` from the river, on alternating banks, with the band knowing
+  about rock, about being walled in, and about how high a city stands above its
+  own reach of river.
+* **A river-mouth surge** — `Disaster::sources` is a list of pulse times rather
+  than corners, the source is the channel's upstream reach, and the sea the
+  water has to climb to leave is measured at the far end.
+
+### What M5 inherits, said plainly
+
+**The river flood is too gentle.** The five-strategy playtest went from one
+survivor to sixteen for `grow`: two seeds in three now reach age three doing
+nothing defensive. `dike` scores thirteen — *worse* than doing nothing —
+because a wall is 450 builder-ticks a segment and the tallest anybody finished
+before the age-one flood was one segment. A game where the wall is not worth
+building is exactly what M5 is for, and it now has three probes to work with:
+`when_the_water_arrives`, `how_far_the_water_reaches` (re-pointed at the bank)
+and `dike_pressure_on_flat_ground`.
+
+One city in twelve still never reaches wading depth. Everything else about the
+placement is guaranteed by construction.
+
+### Blocked
+
+Nothing.
+
+### Next action
+
+**Finish M4, then M5.** M4's remaining item is the one thing above: re-running
+the measurements the river invalidated and deciding what to do about a flood
+nobody needs to defend against. That work is M5's by the plan's own division,
+so the honest next step is to start M5 with the playtest table in hand rather
+than to keep tuning inside M4.
+
+`M6` (gold, the trading hut, mules) and `M7` (levels, moving buildings) are
+independent of the flood work and can be pulled forward if trade is the part
+worth playing with sooner — which the river has just made much more
+interesting, since the cities are now on opposite banks.
