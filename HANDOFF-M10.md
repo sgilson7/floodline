@@ -19,6 +19,9 @@ deployed build agree.
 The plan is an artifact and is still the plan of record:
 **<https://claude.ai/code/artifact/f51d6368-d9a0-48f2-9213-c41f1eba59b1>**
 
+This document is also an artifact, if a link is easier to hand on than a file:
+**<https://claude.ai/code/artifact/44221090-95f3-42cf-a451-efeb3b07e106>**
+
 | | | |
 |---|---|---|
 | M1 | Forester costs stone | **done** |
