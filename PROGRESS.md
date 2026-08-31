@@ -4,6 +4,84 @@ Where the last session ended. Short enough to read in a minute.
 
 ---
 
+## Session 5 — 2026-08-31 (M12)
+
+**Part I, Part I-A and Parts II-IV of `PLAN-M12.md` are done.** 298 cargo
+tests, no warnings. The plan is `PLAN-M12.md`; every change and what it
+dragged with it is `SECOND-ORDER-M12.md`, which is new and is where changes
+are listed rather than approved.
+
+### The lobby, which was the blocker
+
+**A second game could not be joined, and it was not what the handover
+guessed.** The handshake against a finished host is fine — it answers "this
+game is full". The fault was one line up: `greet` was a `bool`, so a joiner
+said `Hello` to the first peer it met and to nobody else, ever. A room is not
+a star, and a non-host does nothing at all with a `Hello`. It is a
+`BTreeSet` now, and `waiting_since` replaces `unanswered` so churn cannot
+stop `mind_the_silence` speaking.
+
+**The gap in the tests was not "a run played to its end" either.** It is that
+no test anywhere had ever put a joiner in a room with more than one peer in
+it. `rejoin.py` has that room now.
+
+### Asked for during the session
+
+* **A farm feeds a city** — `FARM_TICKS_PER_UNIT` 32 → 11. `both` went from
+  nought survivors to eight; the single-verb strategies did not move. What
+  lifted is the ceiling on doing more than one thing.
+* **A builder's hut** — free, a roster rather than a bench. Its builders take
+  a site first and haul second, which is the opposite of an unassigned
+  citizen. A granary finishes in 71 ticks with one against 143 without.
+* **A cookery**, and `Good::Meal` — one food in, one meal out, and a meal is
+  worth two. The snapshot grew 60 bytes and the build hash changed.
+* **A people tab and progress bars** — derived entirely from state that
+  already exists, so no snapshot cost at all.
+* **Ground that drinks** — material soak rates and an aquifer that deletes
+  water. Four constants, every one measured, and three of them exist to keep
+  M5's dike balance where M5 put it.
+
+### What the run's other findings turned out to be
+
+**Twice, a confident finding from M11.9 was the wrong diagnosis of a real
+complaint.** The silent right-click was not a footprint offset — `sim` puts
+every building exactly where it is clicked — it was a right-click with nobody
+chosen returning without a word. And the ground is not flat: measured over
+ten seeds, the climb within walking distance of a hearth is a median of
+eleven terrain units against a surge twelve deep. It is *invisible*, and `h`
+now shades it.
+
+**Growth has never worked, and the `grow` strategy has never grown.** Its
+plan had no nursery and nothing ever paired anybody into a cottage, so every
+strategy table ever printed has had a column called `grow` that measured a
+city with two spare cottages. Four gates, of which M12.A fixed one; the
+binding one is that a household is "the lowest two ids currently homed here"
+and the sim houses people by itself. And `COMING_OF_AGE` is twelve days of an
+eighteen-day run, which decides it: the amber line stops asking.
+
+### Not done
+
+- [ ] **M12.11, the third run.** Two agents, the deployed build, and the one
+      question no harness can ask itself: two games back to back out of the
+      first one's lobby.
+- [ ] The author playing two games in a row, laptop to desktop. The `cargo`
+      and browser checks say the lobby fault is fixed; nobody has confirmed it
+      on two machines.
+- [ ] City 1's *"a line is the wrong shape, you would need a ring"*. It
+      arrived bundled with the flat-ground claim and does not fall with it —
+      on ground with real relief a wall across a saddle is a different
+      purchase, and nobody has played a run that could see the saddle.
+
+### Next action
+
+**Run M12.11.** `table.py` seats two browsers, `driver.py <port> <verb>` is
+one agent's hands, `referee.py <seconds> <dir>` watches both. `AGENT-BRIEF.md`
+is current for everything M12 changed that a player can see, which is a lot:
+two new buildings, a new tab, a new good, an overlay, three message slots and
+an amber line that no longer asks for children.
+
+---
+
 ## Session 2 — 2026-08-30
 
 **Phases 4, 5 and 6 done. The MVP is playable end to end.** 212 tests and

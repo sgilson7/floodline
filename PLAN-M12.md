@@ -613,13 +613,13 @@ run ended with a second game started out of the first one's lobby.
 | M12.B | The builder's hut | asked for; the one job with no building behind it |
 | M12.C | The cookery | asked for; a new good, so the snapshot and the build hash move |
 | M12.D | Your people, one at a time | asked for; the largest visible change in M12 |
-| M12.4 | The silent right-click | the most common gesture in the game, failing without a word |
-| M12.5 | Deaths, and how deep the water is | the two readouts that cost people their lives |
-| M12.6 | Small honesties | cheap, certain, and a lot of the confusion |
-| M12.7 | Reproduce or dismiss | nothing stays a rumour |
-| M12.8 | Water that drains, a mark you can see | first sim change; measured either side |
-| M12.9 | Ground a player can climb | the biggest; may end in a written deferral |
-| M12.10 | Whether growing is worth doing | decide before a run is spent asking |
+| M12.4 | The silent right-click | **done** — `sim` was innocent; a right-click with nobody chosen returned in silence |
+| M12.5 | Deaths, and how deep the water is | **done** — the dead have their own line, and it accumulates |
+| M12.6 | Small honesties | **done** — and the amber line puts the water above the granary |
+| M12.7 | Reproduce or dismiss | **done** — two were one fault, one was not reproduced and is written up |
+| M12.8 | Water that drains, a mark you can see | **done** — four constants, three of them protecting M5's dike table |
+| M12.9 | Ground a player can climb | **done** — the ground was never flat; it was invisible. `h` shades it |
+| M12.10 | Whether growing is worth doing | **done** — it cannot pay in three ages, and the amber line stops asking |
 | M12.11 | The third run | the only thing that can say whether any of it worked |
 
 Roughly seven sessions: Part I (done), Part I-A's three remaining, Part II,
