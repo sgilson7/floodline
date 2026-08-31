@@ -119,22 +119,42 @@ pub struct Lockstep {
     dropping: BTreeSet<PlayerId>,
 
     // ---- joiner only ------------------------------------------------------
-    /// Joiner: a `Hello` is still owed to whichever peer turns up first.
-    greet: bool,
-    /// Joiner: the peer we said `Hello` to and are waiting on.
+    /// Joiner: every peer already greeted, while still unwelcomed.
     ///
-    /// Kept because `peer_left` used to end the game for *any* departure, so a
-    /// joiner that met another joiner and let it go announced "the host left
-    /// the game". In a Trystero room, where everybody meets everybody, that is
-    /// not an edge case.
+    /// A set, not a flag. It was `greet: bool` — one greeting, spent on
+    /// whichever peer turned up first — which is correct in a star and wrong
+    /// in a room. A room name is the typed code plus the build hash, so typing
+    /// the same code again puts you in with every tab that has ever used it: a
+    /// second joiner waiting for the same host, a tab left open on a score
+    /// screen, a connection that has not timed out yet. None of those is a
+    /// host, and a non-host does nothing at all with a `Hello` — the handler
+    /// is guarded `if self.host` and falls through. So the joiner spent its
+    /// one greeting on a peer that was never going to answer, and then sat
+    /// through the real host arriving without a word to it. That is the fault
+    /// that made the game unplayable a second time.
+    ///
+    /// Greeting everybody costs one message per peer in the room and ends it.
+    greeted: BTreeSet<PeerId>,
+    /// Joiner: the peer that actually welcomed us.
+    ///
+    /// Set by `Welcome` and by nothing else, so `peer_left` can tell "the host
+    /// left the game" from "another tab in the room closed". Those are not the
+    /// same event and used to be.
     host_peer: Option<PeerId>,
-    /// Frames since the `Hello` went out with no answer.
+    /// Joiner: frames since the first `Hello` went out, and **never reset**.
+    ///
+    /// It was `unanswered`, and `peer_left` set it to nought on every
+    /// departure of the peer it had greeted. In a room with any churn —
+    /// a ghost joining and leaving, a stale tab reconnecting — the count never
+    /// reached `SILENCE_FRAMES`, so `mind_the_silence` never spoke and the
+    /// player was told nothing at all: greet, wait, reset, greet again. A loop
+    /// with no message, which is exactly what was reported.
     ///
     /// Frames, not seconds: nothing in the lobby ticks, and until the frame
     /// loop has a clock of its own there is no better unit. It only has to be
     /// long enough not to fire on a slow `Welcome`, which carries the whole
     /// world and can be a hundred kilobytes.
-    unanswered: u32,
+    waiting_since: u32,
     /// Everyone the host says is actually connected, host included.
     roster: Vec<PlayerId>,
 
@@ -173,9 +193,9 @@ impl Lockstep {
             waited: BTreeMap::new(),
             dropping: BTreeSet::new(),
             active_from: BTreeMap::new(),
-            greet: false,
+            greeted: BTreeSet::new(),
             host_peer: None,
-            unanswered: 0,
+            waiting_since: 0,
             roster: vec![PlayerId(0)],
             trouble: None,
             world,
@@ -195,7 +215,6 @@ impl Lockstep {
         ls.host = false;
         ls.me = PlayerId(u8::MAX); // not ours until the host says so
         ls.status = Status::Lobby;
-        ls.greet = true;
         ls
     }
 
@@ -238,14 +257,14 @@ impl Lockstep {
         self.host || self.me != PlayerId(u8::MAX)
     }
 
-    /// Joiner: say `Hello` to the host now that there is a host to say it to.
+    /// Joiner: say `Hello` to a peer we have just met.
+    ///
+    /// To *every* peer, once each, until somebody welcomes us — see `greeted`.
+    /// A host ignores this; it has nothing to say `Hello` to.
     fn greet(&mut self, to: PeerId, peer: &mut impl Peer) {
-        if !self.greet {
+        if self.host || self.welcomed() || !self.greeted.insert(to) {
             return;
         }
-        self.greet = false;
-        self.host_peer = Some(to);
-        self.unanswered = 0;
         let hello = encode(&Message::Hello {
             proto_version: PROTO_VERSION,
             build_hash: self.build_hash.clone(),
@@ -361,15 +380,20 @@ impl Lockstep {
     /// connected, said `Hello`, and waited on a game that was not there. The
     /// screen said the same thing it says while looking for a room that does
     /// not exist.
+    /// Counted off `greeted` rather than off `host_peer`, and off a clock that
+    /// nothing resets. A joiner that met somebody and lost them is the case
+    /// that was reported, and under the old rule it was the one case that
+    /// could never be reported *back*.
     fn mind_the_silence(&mut self) {
-        if self.host || self.welcomed() || self.host_peer.is_none() {
+        if self.host || self.welcomed() || self.greeted.is_empty() {
             return;
         }
-        self.unanswered += 1;
-        if self.unanswered == SILENCE_FRAMES {
+        self.waiting_since += 1;
+        if self.waiting_since == SILENCE_FRAMES {
             self.trouble = Some(Trouble {
-                text: "connected to the host, but it is not answering. It may have left \
-                       its lobby - ask for a fresh room code, or swap to a pasted code."
+                text: "connected to this room, but nobody in it is answering. Whoever \
+                       was hosting may have left - ask for a fresh room code, or swap \
+                       to a pasted code."
                     .to_owned(),
                 try_a_code: true,
             });
@@ -457,6 +481,9 @@ impl Lockstep {
             }
 
             Message::Welcome { player, seed, tick, players, snapshot } if !self.host => {
+                // Whoever answered is the host, and is the one peer whose
+                // departure ends the run.
+                self.host_peer = Some(from);
                 self.me = player;
                 self.world = match snapshot {
                     Some(w) => *w,
@@ -674,22 +701,21 @@ impl Lockstep {
 
     fn peer_left(&mut self, who: PeerId, peer: &mut impl Peer) {
         if !self.host {
-            // Only the peer we were actually talking to. In a Trystero room
-            // everybody meets everybody, so a joiner sees other joiners come
-            // and go, and announcing "the host left the game" for any of them
-            // ends a game that is perfectly alive.
-            if self.host_peer != Some(who) {
-                return;
-            }
-            self.host_peer = None;
-            if self.welcomed() {
+            // A room is not a star: a joiner sees other tabs come and go, and
+            // announcing "the host left the game" for any of them ends a game
+            // that is perfectly alive. Only the peer that actually welcomed us
+            // is the host.
+            //
+            // Forgotten rather than remembered, so that a peer which drops and
+            // reconnects is greeted again — it may be the host on a new
+            // connection. `waiting_since` is deliberately *not* touched here:
+            // resetting it on churn is what kept the player from ever being
+            // told anything.
+            self.greeted.remove(&who);
+            if self.welcomed() && self.host_peer == Some(who) {
                 // The star has one edge, and it was that one.
+                self.host_peer = None;
                 self.status = Status::Ended("the host left the game".into());
-            } else {
-                // They never answered. Whoever turns up next gets the `Hello`
-                // instead of us waiting on somebody who has gone.
-                self.greet = true;
-                self.unanswered = 0;
             }
             return;
         }

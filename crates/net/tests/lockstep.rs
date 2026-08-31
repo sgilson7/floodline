@@ -655,12 +655,27 @@ fn a_joiner_says_hello_when_the_host_appears_and_not_before() {
         other => panic!("the first thing a joiner says should be Hello, not {other:?}"),
     }
 
-    // And exactly once, however many more peers the transport reports.
+    // Once *per peer*, and once only. This assertion used to read "once,
+    // however many more peers the transport reports", and that rule is the
+    // fault M12.1 reproduced: a joiner with one greeting to spend gives it to
+    // whoever turns up first, and in a reused room that is very often a tab
+    // that is not hosting anything. See
+    // `a_joiner_that_greeted_a_ghost_still_greets_the_host_when_it_arrives`.
     wire.inbox.push_back(net::Event::Peer(PeerId(9)));
     for _ in 0..10 {
         joiner.advance(&mut wire);
     }
-    assert_eq!(wire.sent.len(), 1, "Hello was said more than once");
+    assert_eq!(wire.sent.len(), 2, "the second peer in the room was never greeted");
+    assert_eq!(wire.sent[1].0, PeerId(9));
+
+    // But the same peer twice is still one greeting. A transport that reports
+    // a connection it has already reported must not cost a message.
+    wire.inbox.push_back(net::Event::Peer(HOST));
+    wire.inbox.push_back(net::Event::Peer(PeerId(9)));
+    for _ in 0..10 {
+        joiner.advance(&mut wire);
+    }
+    assert_eq!(wire.sent.len(), 2, "a peer already greeted was greeted again");
 }
 
 #[test]
@@ -793,11 +808,14 @@ fn another_joiner_leaving_is_not_the_host_leaving() {
     joiner.advance(&mut wire);
     assert_eq!(wire.sent.len(), 1, "the host was never greeted");
 
-    // Somebody else comes and goes.
+    // Somebody else comes and goes. They are greeted on the way past — a
+    // joiner cannot tell a host from a bystander until one of them answers,
+    // and asking is one message — but their departure ends nothing.
     wire.inbox.push_back(net::Event::Peer(PeerId(7)));
     wire.inbox.push_back(net::Event::Left(PeerId(7)));
     joiner.advance(&mut wire);
     assert!(joiner.in_lobby(), "a stranger's departure ended the game: {:?}", joiner.status);
+    assert_eq!(wire.sent.len(), 2, "the stranger was never asked");
 
     // The host going is a different matter — but this joiner was never
     // welcomed, so it has lost a candidate rather than a game. It waits, and
@@ -807,12 +825,19 @@ fn another_joiner_leaving_is_not_the_host_leaving() {
     wire.inbox.push_back(net::Event::Left(HOST));
     joiner.advance(&mut wire);
     assert!(joiner.in_lobby(), "gave up on a game it had never been let into");
-    assert_eq!(wire.sent.len(), 1, "it greeted somebody who had already gone");
+    assert_eq!(wire.sent.len(), 2, "it greeted somebody who had already gone");
 
     wire.inbox.push_back(net::Event::Peer(PeerId(3)));
     joiner.advance(&mut wire);
-    assert_eq!(wire.sent.len(), 2, "the next peer was never greeted");
-    assert_eq!(wire.sent[1].0, PeerId(3));
+    assert_eq!(wire.sent.len(), 3, "the next peer was never greeted");
+    assert_eq!(wire.sent[2].0, PeerId(3));
+
+    // And a peer that drops and comes back is greeted again: it may be the
+    // host on a fresh connection, which is what a reconnect looks like from
+    // here.
+    wire.inbox.push_back(net::Event::Peer(PeerId(7)));
+    joiner.advance(&mut wire);
+    assert_eq!(wire.sent.len(), 4, "a peer that reconnected was never greeted again");
 }
 
 #[test]
@@ -835,7 +860,11 @@ fn a_host_that_connects_and_says_nothing_is_reported_rather_than_waited_on_for_e
         joiner.advance(&mut wire);
     }
     let said = joiner.trouble.clone().expect("never said anything about the silence");
-    assert!(said.text.contains("not answering"), "{}", said.text);
+    // The wording widened in M12.2: the same silence is now reported whether
+    // the peer that went quiet was a host that left its lobby or another
+    // joiner that was never a host at all, because from here they are
+    // indistinguishable and the advice is the same either way.
+    assert!(said.text.contains("answering"), "{}", said.text);
     assert!(said.try_a_code, "a code is exactly what gets round an abandoned lobby");
     assert!(joiner.in_lobby(), "it is a warning, not the end");
 }
@@ -869,4 +898,187 @@ fn a_joiner_is_told_who_else_is_in_the_lobby() {
     }
     assert_eq!(host.roster(), &[PlayerId(0), PlayerId(1)]);
     assert_eq!(a.roster(), host.roster(), "the roster did not shrink");
+}
+
+// ---- M12.1: a second game cannot be joined ---------------------------------
+
+/// Put a world two ticks from the end of its last age.
+///
+/// **What this arranges**, which is the rule the M11 run paid for: only *where
+/// the world starts*. The ending itself is reached through `World::tick` and
+/// `age.rs`'s own roll-over, so `finished` and `ending` are set by the game
+/// rather than by the test. Simulating eighteen days of two worlds in a debug
+/// build takes over ten minutes and would tell us nothing the handshake cares
+/// about.
+fn nearly_over(w: &mut sim::World) {
+    use sim::balance::{DAYS_PER_AGE, MAX_AGE, TICKS_PER_DAY};
+    let age_start = 100_000;
+    w.age = MAX_AGE;
+    w.age_start_tick = age_start;
+    w.tick = age_start + DAYS_PER_AGE * TICKS_PER_DAY - 2;
+}
+
+/// The fault that made the game unplayable a second time.
+///
+/// Reported first-hand, laptop to desktop: one game was played to the end, and
+/// since then no attempt to get two machines into a lobby has worked. The
+/// joiner sits for ever on *"found the host, asking for a city..."* — which
+/// `lobby.rs::joining_screen` shows when a joiner has a live peer and a roster,
+/// has sent its `Hello`, and has never been answered.
+///
+/// Nothing anywhere tested this. `rejoin.py` covers a seat given back, an
+/// abandoned lobby and hosting a second game, and all of it is lobby-only: no
+/// check in `cargo` or in a browser has ever played a run to its end and then
+/// put two peers into a lobby again.
+///
+/// The assertion is deliberately weak, and that is the point. It does not say
+/// the joiner must get in — a host sitting on a score screen has no city to
+/// give and refusing is defensible. It says the joiner must be **told
+/// something**. Sitting silent is the failure.
+#[test]
+fn a_host_that_finished_a_game_tells_a_new_joiner_something() {
+    let net = Loopback::new(3, Conditions::default());
+    let mut peers: Vec<LoopbackPeer> = (0..3).map(|i| net.peer(PeerId(i))).collect();
+    let mut host = Lockstep::host(31, 2, BUILD);
+    let mut first = Lockstep::join(BUILD);
+
+    // A game: two people in a lobby.
+    for _ in 0..20 {
+        host.advance(&mut peers[0]);
+        first.advance(&mut peers[1]);
+        net.step();
+    }
+    assert_eq!(first.me, PlayerId(1), "the first game never got going");
+
+    // Both worlds put in the same place, so this is a finished game and not a
+    // desync. The joiner's world is the host's clone; they stay clones.
+    nearly_over(&mut host.world);
+    nearly_over(&mut first.world);
+
+    host.start();
+    for _ in 0..40 {
+        host.advance(&mut peers[0]);
+        first.advance(&mut peers[1]);
+        net.step();
+    }
+    assert!(host.world.finished().is_some(), "the first game never ended: {:?}", host.status);
+    assert!(!host.status.is_stopped(), "the host's own run stopped: {:?}", host.status);
+
+    // The score screen is up on both machines. Somebody now tries to get into
+    // a lobby with this host again — the same room, the same build, which is
+    // exactly what a person playing against themselves does.
+    let mut second = Lockstep::join(BUILD);
+    for _ in 0..200 {
+        host.advance(&mut peers[0]);
+        first.advance(&mut peers[1]);
+        second.advance(&mut peers[2]);
+        net.step();
+    }
+
+    // Today it answers "this game is full", because the first game's seats are
+    // still held by peers that are still connected. That is defensible and it
+    // is *an answer*. The handshake, on this wire, is not where the silence
+    // comes from — see the two tests below, which is where it does come from.
+    let told_something = second.welcomed()
+        || matches!(second.status, Status::Ended(_))
+        || second.trouble.is_some();
+    assert!(
+        told_something,
+        "the joiner met a peer and was never answered: welcomed {}, status {:?}, trouble {:?}",
+        second.welcomed(),
+        second.status,
+        second.trouble,
+    );
+}
+
+/// The silence, found: a joiner has exactly one greeting and spends it on
+/// whoever it meets first.
+///
+/// `greet` is a `bool`. `Lockstep::join` sets it true, `greet()` sets it false
+/// on the first `Event::Peer`, and only `peer_left` — for *that* peer, and only
+/// while unwelcomed — ever sets it back. So the first peer a joiner meets is
+/// the only peer it will ever say `Hello` to.
+///
+/// In a star that is right, because the only peer a joiner has is the host. A
+/// Trystero room is not a star: everybody meets everybody, and the room name is
+/// the typed code plus the build hash, so **typing the same code again puts you
+/// in the same room as every tab that has ever used it** — a second joiner
+/// waiting for the same host, a tab left open on a score screen, a stale
+/// connection that has not timed out. None of them is a host, and a non-host
+/// receiving `Hello` does nothing at all with it: the handler is guarded
+/// `if self.host` and falls through to `_ => {}`. Nothing on the wire says "I
+/// am not the one you want".
+///
+/// The joiner then reads *"found the host, asking for a city..."* for ever,
+/// **and goes on reading it after the real host arrives**, which is what makes
+/// this the reported fault rather than a slow start.
+#[test]
+fn a_joiner_that_greeted_a_ghost_still_greets_the_host_when_it_arrives() {
+    const GHOST: PeerId = PeerId(7);
+    let mut wire = LateHost {
+        inbox: std::collections::VecDeque::new(),
+        sent: Vec::new(),
+        connected: vec![GHOST],
+    };
+    let mut joiner = Lockstep::join(BUILD);
+
+    // Somebody is already in the room, and it is not a host.
+    wire.inbox.push_back(net::Event::Peer(GHOST));
+    for _ in 0..600 {
+        joiner.advance(&mut wire);
+    }
+    assert_eq!(wire.sent.len(), 1, "the ghost should have been greeted exactly once");
+    assert_eq!(wire.sent[0].0, GHOST);
+
+    // The host turns up in the same room, and is never spoken to.
+    wire.connected.push(HOST);
+    wire.inbox.push_back(net::Event::Peer(HOST));
+    for _ in 0..120 {
+        joiner.advance(&mut wire);
+    }
+
+    assert!(
+        wire.sent.iter().any(|(to, _)| *to == HOST),
+        "the joiner never said Hello to the host: it had already spent its one \
+         greeting on a peer that was never going to answer"
+    );
+}
+
+/// And the reason nobody was ever told: every departure restarts the timer.
+///
+/// `mind_the_silence` exists for exactly the hang above and should say
+/// *"connected to the host, but it is not answering"* after `SILENCE_FRAMES`.
+/// The author never saw it. `peer_left` sets `unanswered = 0` whenever the
+/// greeted peer goes away, and `mind_the_silence` only counts while `host_peer`
+/// is set — so in a room with any churn at all the counter never arrives. The
+/// joiner greets, waits, resets, greets again, and is told nothing, for as long
+/// as it is left there.
+///
+/// Two thousand frames here against a `SILENCE_FRAMES` of 500.
+#[test]
+fn a_joiner_in_a_room_with_churn_is_still_told_about_the_silence() {
+    let mut wire = LateHost {
+        inbox: std::collections::VecDeque::new(),
+        sent: Vec::new(),
+        connected: Vec::new(),
+    };
+    let mut joiner = Lockstep::join(BUILD);
+
+    for round in 0..20u32 {
+        let ghost = PeerId(100 + round);
+        wire.connected = vec![ghost];
+        wire.inbox.push_back(net::Event::Peer(ghost));
+        // Long enough to be a real wait, short of `SILENCE_FRAMES` on its own.
+        for _ in 0..100 {
+            joiner.advance(&mut wire);
+        }
+        wire.inbox.push_back(net::Event::Left(ghost));
+        joiner.advance(&mut wire);
+    }
+
+    assert!(
+        joiner.trouble.is_some(),
+        "two thousand frames in a room that never answered, and never a word to \
+         the player about it"
+    );
 }
