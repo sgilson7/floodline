@@ -794,3 +794,200 @@ fn a_farm_feeds_a_founding_party_several_times_over() {
          think about"
     );
 }
+
+// ---- M12.B: the builder's hut ---------------------------------------------
+
+/// Put `kind` down somewhere near the hearth it will actually stand, and give
+/// it every material it asks for. Returns the site.
+fn site_near_hearth(w: &mut sim::World, me: sim::PlayerId, kind: sim::building::Kind) -> sim::building::BuildingId {
+    use sim::building::{Facing, Good};
+    use sim::command::Command;
+    let (hx, hy) = w.map.hearth_sites[0];
+    for r in 3..40i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (x, y) = (hx + dx, hy + dy);
+                if w.can_place(me, kind, Facing::EastWest, x, y).is_ok() {
+                    w.apply(
+                        me,
+                        &Command::Place { kind, facing: Facing::EastWest, x: x as u8, y: y as u8 },
+                    )
+                    .unwrap();
+                    let id = w.buildings.last().unwrap().id;
+                    for g in Good::ALL {
+                        let want = w.buildings[id.0 as usize].outstanding().get(g);
+                        if want > 0 {
+                            w.deliver_to(id, g, want);
+                        }
+                    }
+                    return id;
+                }
+            }
+        }
+    }
+    panic!("nowhere for a {kind:?} on this seed");
+}
+
+#[test]
+fn a_hut_names_builders_and_nobody_ever_stands_in_it() {
+    // `Job::Builder` was the one job with no building behind it, so a player
+    // could point four people at *one site* and never say "these are my
+    // builders". The hut says it.
+    //
+    // It is a roster and not a bench, and that is the load-bearing part: a
+    // building whose workers stand in it would be four people doing nothing at
+    // the exact moment the city needs a wall. `Job::Builder` is not
+    // `stationed`, so nobody is ever added to its `workers`, and `find_work`
+    // lets go of the hut the first time it looks.
+    use sim::building::Kind;
+    use sim::citizen::Job;
+    use sim::command::Command;
+    use sim::nav::Nav;
+    use sim::world::World;
+    use sim::PlayerId;
+
+    let me = PlayerId(0);
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+
+    let hut = site_near_hearth(&mut w, me, Kind::BuildersHut);
+    assert!(
+        w.buildings[hut.0 as usize].outstanding().is_empty(),
+        "a hut is free, so it should want no materials at all"
+    );
+    assert!(w.build_at(hut, Kind::BuildersHut.build_ticks()));
+
+    // Six, which is more than BUILDER_SLOTS. A hut caps nothing — naming six
+    // builders is a thing a player is allowed to want, and the cap that means
+    // something is on how many can crowd one site.
+    let all: Vec<sim::CitizenId> =
+        w.citizens.iter().filter(|c| c.owner == me && !c.is_child()).map(|c| c.id).collect();
+    let six: Vec<sim::CitizenId> = all.into_iter().take(6).collect();
+    assert_eq!(
+        w.will_take(me, hut, &six),
+        six.len(),
+        "a hut turned somebody away; it is a roster, it has no room to run out of"
+    );
+    w.apply(me, &Command::Assign { citizens: six.clone(), building: hut }).unwrap();
+    for id in &six {
+        assert_eq!(
+            w.citizens[id.0 as usize].job,
+            Some(Job::Builder),
+            "assigning to a hut did not make a builder"
+        );
+    }
+
+    for _ in 0..300 {
+        w.tick(&mut nav, &[]);
+    }
+
+    assert!(
+        w.buildings[hut.0 as usize].workers.is_empty(),
+        "somebody is on the hut's roster: it is a bench after all"
+    );
+    for id in &six {
+        let c = &w.citizens[id.0 as usize];
+        assert_ne!(c.workplace, Some(hut), "{:?} is standing in the hut", c.id);
+        assert_eq!(c.job, Some(Job::Builder), "a builder stopped being one with nothing to do");
+    }
+}
+
+#[test]
+fn a_hut_builder_builds_before_it_hauls_and_an_unassigned_citizen_does_not() {
+    // The ordering *is* the feature. An unassigned citizen already builds when
+    // there is nothing to carry — `find_haul` first, `take_a_site` second —
+    // which is what keeps an unattended city from dying with the materials on
+    // the ground. What it will not do is put the wall before the sacks, and
+    // that is exactly what M11.9 needed and could only get by unassigning the
+    // whole city.
+    //
+    // **What this arranges**: two sites. One has every material it needs, so
+    // it can be built and cannot be hauled to. The other has none, so it can
+    // be hauled to and cannot be built. A city with both in front of it has to
+    // choose, and the choice is the thing under test.
+    use sim::building::{Facing, Kind};
+    use sim::command::Command;
+    use sim::nav::Nav;
+    use sim::world::World;
+    use sim::PlayerId;
+
+    let me = PlayerId(0);
+
+    let ticks_to_finish = |with_a_hut: bool| -> u32 {
+        let mut w = World::new(31, 2);
+        let mut nav = Nav::new();
+
+        // Buildable: materials complete, so `take_a_site` will have it.
+        let ready = site_near_hearth(&mut w, me, Kind::Granary);
+
+        // Haulable, and enough of it to keep a city busy: four cottages placed
+        // and deliberately left wanting. `site_near_hearth` fills a site, so
+        // these are placed by hand.
+        let (hx, hy) = w.map.hearth_sites[0];
+        let mut hungry = 0;
+        'ring: for r in 6..40i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (x, y) = (hx + dx, hy + dy);
+                    if w.can_place(me, Kind::Cottage, Facing::EastWest, x, y).is_ok() {
+                        w.apply(
+                            me,
+                            &Command::Place {
+                                kind: Kind::Cottage,
+                                facing: Facing::EastWest,
+                                x: x as u8,
+                                y: y as u8,
+                            },
+                        )
+                        .unwrap();
+                        hungry += 1;
+                        if hungry == 4 {
+                            break 'ring;
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(hungry, 4, "nowhere for the cottages that make the hauling");
+
+        if with_a_hut {
+            let hut = site_near_hearth(&mut w, me, Kind::BuildersHut);
+            assert!(w.build_at(hut, Kind::BuildersHut.build_ticks()));
+            let four: Vec<sim::CitizenId> = w
+                .citizens
+                .iter()
+                .filter(|c| c.owner == me && !c.is_child())
+                .map(|c| c.id)
+                .take(4)
+                .collect();
+            w.apply(me, &Command::Assign { citizens: four, building: hut }).unwrap();
+        }
+
+        for t in 0..3000u32 {
+            for c in &mut w.citizens {
+                c.food = sim::balance::NEED_FULL;
+                c.rest = sim::balance::NEED_FULL;
+            }
+            w.tick(&mut nav, &[]);
+            if w.buildings[ready.0 as usize].standing_now() {
+                return t;
+            }
+        }
+        u32::MAX
+    };
+
+    let without = ticks_to_finish(false);
+    let with = ticks_to_finish(true);
+    println!("  ticks to finish the granary: {without} unassigned, {with} with a hut");
+    assert!(
+        with < without,
+        "a hut's builders finished the site no sooner than unassigned citizens did \
+         ({with} against {without}) — the ordering is the whole feature"
+    );
+}

@@ -202,6 +202,17 @@ pub enum Kind {
     /// children** — which is what makes growing a city a thing a player
     /// decides to do rather than a thing that happens to them.
     Nursery,
+    /// A roster rather than a bench. Nobody stands in it: what it does is let
+    /// a player say *these are my builders*, and they then take construction
+    /// sites first and haul when there are none.
+    ///
+    /// `Job::Builder` was the one job in the game with no building behind it —
+    /// `Job::at` answered for a Farm, a Forester, a Quarry and a Trading Post
+    /// and `None` for everything else — so builders picked their work as they
+    /// went and could not be named. M11.9 shows the cost: the only way to get
+    /// a wall up quickly was to unassign the whole city, and then nobody
+    /// farmed.
+    BuildersHut,
     Dike,
     Road,
     Bridge,
@@ -210,7 +221,7 @@ pub enum Kind {
 impl Kind {
     /// Everything the MVP builds. Design §3.3 also lists Fishery, Forester's
     /// hut, Quarry, Guildhall, Tavern and Watchtower; the plan defers all six.
-    pub const ALL: [Kind; 12] = [
+    pub const ALL: [Kind; 13] = [
         Kind::Hearth,
         Kind::Cottage,
         Kind::Farm,
@@ -220,6 +231,7 @@ impl Kind {
         Kind::Stockpile,
         Kind::TradingPost,
         Kind::Nursery,
+        Kind::BuildersHut,
         Kind::Dike,
         Kind::Road,
         Kind::Bridge,
@@ -236,7 +248,8 @@ impl Kind {
             | Kind::Granary
             | Kind::Stockpile
             | Kind::TradingPost
-            | Kind::Nursery => (2, 2),
+            | Kind::Nursery
+            | Kind::BuildersHut => (2, 2),
             Kind::Dike => match facing {
                 Facing::EastWest => (DIKE_LENGTH, 1),
                 Facing::NorthSouth => (1, DIKE_LENGTH),
@@ -287,6 +300,11 @@ impl Kind {
             Kind::Nursery => Goods::wood(40),
             // Free — it is a patch of ground somebody agreed to keep tidy.
             Kind::Stockpile => Goods::NONE,
+            // Free, and free means *no materials* rather than *no work*: it is
+            // still a site somebody has to build. A building that appears on
+            // the click is a different verb from every other building in the
+            // game, and the placement flow assumes a site. See DECISIONS.md.
+            Kind::BuildersHut => Goods::NONE,
             // Ten a level *per cell*, not forty. A wall that changes the
             // outcome of a run is about thirty-four cells long — measured, in
             // `tests/playtest.rs` — and at forty a cell that is 2 720 stone
@@ -320,6 +338,9 @@ impl Kind {
             Kind::TradingPost => 260,
             Kind::Nursery => 200,
             Kind::Stockpile => 60,
+            // Cheap, because the city that most needs one is the city that
+            // cannot spare four people to put it up.
+            Kind::BuildersHut => 100,
             // Fifty a cell, not a hundred and fifty.
             //
             // A hundred and fifty was set when a dike was decoration; M5
@@ -347,6 +368,7 @@ impl Kind {
             | Kind::Stockpile
             | Kind::TradingPost
             | Kind::Nursery
+            | Kind::BuildersHut
             | Kind::Bridge => Material::Wood,
             Kind::Hearth | Kind::Dike | Kind::Road => Material::Stone,
         }
@@ -364,6 +386,9 @@ impl Kind {
             Kind::TradingPost => 220,
             Kind::Nursery => 200,
             Kind::Stockpile => 150,
+            // A shed. It costs nothing to put up and it is meant to be lost
+            // and replaced rather than defended.
+            Kind::BuildersHut => 120,
             Kind::Dike => 400,
             // A road cell is a strip of packed stone and a bridge a few
             // planks: far less building than a cottage, and design §6 wants
@@ -392,6 +417,7 @@ impl Kind {
             Kind::Farm => 3,
             Kind::Forester | Kind::Quarry => 3,
             Kind::Stockpile => 2,
+            Kind::BuildersHut => 2,
             Kind::Bridge => 1,
             // A dike shelters nobody by being a building; it does it by
             // raising the ground, which the automaton already knows about.
@@ -440,6 +466,10 @@ impl Kind {
             Kind::Granary | Kind::Stockpile | Kind::Hearth => 2,
             // One trader is one mule, so this is the trade rate.
             Kind::TradingPost => 2,
+            // What `will_take` reports and the panel shows. The cap that
+            // actually applies is in `slots_for`, which lets a hut take as
+            // many as a player names — see there.
+            Kind::BuildersHut => BUILDER_SLOTS,
             _ => 0,
         }
     }
@@ -528,6 +558,11 @@ impl Kind {
                     0
                 }
             }
+            // A hut is a roster, not a bench, so it caps nothing: naming six
+            // builders is a thing a player is allowed to want. `BUILDER_SLOTS`
+            // still caps how many can crowd one *site*, which is where the
+            // limit means something — see `take_a_site`.
+            Job::Builder if self == Kind::BuildersHut => usize::MAX,
             Job::Builder => BUILDER_SLOTS,
             Job::Hauler => usize::MAX,
             Job::Trader => {

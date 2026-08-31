@@ -38,7 +38,7 @@ the first thing that can kill you.
     panel                     read your side panel - do this most often
     shot                      the whole window, map included
     rows                      the status line and the three rows at the foot
-    key <Name>                Digit1..Digit9, KeyR, KeyP, KeyM, Escape
+    key <Name>                Digit0..Digit9, KeyR, KeyP, KeyM, Escape
     button <name>             a panel button by name
     click-cell <x> <y>        the map, 0..127 both ways
     right-click-cell <x> <y>  give an order, or put the current tool down
@@ -49,7 +49,7 @@ the first thing that can kill you.
     wait <seconds>            let the world run
 
 Button names: `cottage farm granary forester quarry stockpile dike post
-nursery road point choose-all back-to-hauling trade tab-build tab-households`.
+nursery hut road point choose-all back-to-hauling trade tab-build tab-households`.
 
 **Do not zoom or pan.** Every `*-cell` verb assumes the camera is where it
 starts. If something moves it, `frame` puts it back.
@@ -134,6 +134,12 @@ the panel:
 * **8 trading post** — its workers are mules that carry goods to the other city
   and come back with gold. They need a way across.
 * **9 nursery** — no nursery, no children.
+* **0 builders hut** — free, and a roster rather than a workplace: nobody
+  stands in it. Anyone you assign to it becomes a **builder**, and a builder
+  takes a construction site first and carries loads only when there is no site
+  to work on. That is the opposite of an unassigned citizen, who carries first
+  and builds when there is nothing to carry. Assign as many as you like — the
+  hut has no limit, though only four can crowd one site at a time.
 * **r road** — click where it starts, click where it ends.
 * **p point** — a marker, for looking at.
 
@@ -173,6 +179,8 @@ How a city grows, which is all the game will tell you and all you need:
 * **1 cottage** — beds. Two adults sharing a fed cottage become a household.
 * **9 nursery** — a fed household with a nursery place and a spare bed has a
   child. No nursery, no children.
+* **0 builders hut** — free. Assign people to it and they build before they
+  haul, and go on doing so until you say otherwise.
 * A child does not work, and it eats. It comes of age two ages after it is
   born, so one born in the first age is working by the third and one born just
   before the last flood never works at all.

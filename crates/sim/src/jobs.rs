@@ -193,14 +193,24 @@ impl World {
             | Some(Job::Trader)
             | Some(Job::Builder) => {
                 if let Some(b) = self.citizens[i].workplace {
-                    if self.buildings[b.0 as usize].state != BuildState::Rubble {
+                    let there = &self.buildings[b.0 as usize];
+                    if there.kind == Kind::BuildersHut && there.state != BuildState::Rubble {
+                        // A builder's hut is a roster, not a bench. Walking to
+                        // it and standing in it is exactly the thing it must
+                        // not do: the point of the hut is that these people go
+                        // where the work is. The assignment has already set
+                        // the *job*, which is what persists, so let go of the
+                        // hut and fall through to the work below.
+                        self.citizens[i].workplace = None;
+                    } else if there.state != BuildState::Rubble {
                         self.citizens[i].errand = Some(Errand::ToWork(b));
                         self.citizens[i].walk_to(Dest::Building(b));
                         return;
+                    } else {
+                        // Its workplace is gone; it is a hauler again.
+                        self.citizens[i].workplace = None;
+                        self.citizens[i].job = None;
                     }
-                    // Its workplace is gone; it is a hauler again.
-                    self.citizens[i].workplace = None;
-                    self.citizens[i].job = None;
                 }
                 // Design §3.2 says a Builder "walks to construction sites",
                 // plural. One whose site is finished looks for the next before

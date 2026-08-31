@@ -109,6 +109,7 @@ pub fn glyph(kind: sim::Kind) -> &'static str {
         Kind::Stockpile => "s",
         Kind::TradingPost => "$",
         Kind::Nursery => "n",
+        Kind::BuildersHut => "b",
         Kind::Dike => "=",
         Kind::Road => "",
         Kind::Bridge => "",

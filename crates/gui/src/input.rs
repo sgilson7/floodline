@@ -50,7 +50,7 @@ pub enum Tool {
 /// them and the order the number keys pick them. `Hearth` is not among them:
 /// the run starts with the only one a city gets. `Road` and `Bridge` are laid
 /// by the road tool, which routes and bridges by itself (design §6).
-const BUILDABLE: [(Kind, &str, KeyCode); 9] = [
+const BUILDABLE: [(Kind, &str, KeyCode); 10] = [
     (Kind::Cottage, "cottage", KeyCode::Key1),
     (Kind::Farm, "farm", KeyCode::Key2),
     (Kind::Granary, "granary", KeyCode::Key3),
@@ -60,6 +60,7 @@ const BUILDABLE: [(Kind, &str, KeyCode); 9] = [
     (Kind::Dike, "dike", KeyCode::Key7),
     (Kind::TradingPost, "post", KeyCode::Key8),
     (Kind::Nursery, "nursery", KeyCode::Key9),
+    (Kind::BuildersHut, "builders hut", KeyCode::Key0),
 ];
 
 /// A trade being composed. Design §6: a standing daily exchange, proposed by
@@ -879,7 +880,11 @@ impl Input {
             let cost = kind.cost();
             let afford = goods.food >= cost.food && goods.wood >= cost.wood
                 && goods.stone >= cost.stone;
-            let label = format!("{} {}", i + 1, name);
+            // The digit comes off the key that picks it, not off the index,
+            // so the label and the shortcut cannot disagree. They did the
+            // moment there were ten buildings: the tenth is `0`, and an index
+            // would have drawn it `10`.
+            let label = format!("{} {}", digit_of(*key), name);
             if ui.button(r, &label, true) {
                 self.tool = tool_for(*kind);
             }
@@ -1436,6 +1441,25 @@ fn rect_between(a: Vec2, b: Vec2) -> Rect {
     Rect::new(a.x.min(b.x), a.y.min(b.y), (a.x - b.x).abs(), (a.y - b.y).abs())
 }
 
+/// The digit on a build button, read off the key that picks it.
+fn digit_of(key: KeyCode) -> char {
+    match key {
+        KeyCode::Key0 => '0',
+        KeyCode::Key1 => '1',
+        KeyCode::Key2 => '2',
+        KeyCode::Key3 => '3',
+        KeyCode::Key4 => '4',
+        KeyCode::Key5 => '5',
+        KeyCode::Key6 => '6',
+        KeyCode::Key7 => '7',
+        KeyCode::Key8 => '8',
+        KeyCode::Key9 => '9',
+        // Unreachable while `BUILDABLE` only carries digits, and a question
+        // mark on a button is a better failure than a panic in a draw loop.
+        _ => '?',
+    }
+}
+
 fn kind_name(k: Kind) -> &'static str {
     match k {
         Kind::Hearth => "hearth",
@@ -1447,6 +1471,7 @@ fn kind_name(k: Kind) -> &'static str {
         Kind::Stockpile => "stockpile",
         Kind::TradingPost => "trading post",
         Kind::Nursery => "nursery",
+        Kind::BuildersHut => "builders hut",
         Kind::Dike => "dike",
         Kind::Road => "road",
         Kind::Bridge => "bridge",

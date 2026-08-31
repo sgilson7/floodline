@@ -71,6 +71,12 @@ impl Job {
             Kind::Forester => Some(Job::Forester),
             Kind::Quarry => Some(Job::Quarrier),
             Kind::TradingPost => Some(Job::Trader),
+            // The one job that had no building behind it until M12.B. A hut
+            // is a roster and not a bench — `Job::Builder` is not `stationed`,
+            // so nobody is ever added to its `workers` and nobody stands in
+            // it. What assigning to it does is set the *job*, which is what
+            // makes "these four are my builders" a thing a player can say.
+            Kind::BuildersHut => Some(Job::Builder),
             _ => None,
         }
     }

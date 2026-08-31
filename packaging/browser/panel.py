@@ -86,13 +86,16 @@ def body_top(cities=2):
 
 
 # ---- input.rs::tools ----------------------------------------------------
-# BUILDABLE is nine kinds in two columns, so five rows of buttons.
-
-# Eleven buttons in two columns since M11.2, forty pixels of pitch, and no
-# "BUILD" heading above them: the road and the point moved into the slot the
-# nursery left empty. Thirty-eight pixels, bought back for the variable stack.
+# BUILDABLE is ten kinds in two columns, and the road and the point carry on in
+# the same grid: twelve buttons, forty pixels of pitch, no "BUILD" heading.
+#
+# M12.B added the builder's hut and **the panel did not move**. Eleven buttons
+# needed six rows and so do twelve, because eleven left a gap at the end and
+# the hut fills it. That is luck rather than design: the next building added
+# here costs a row, and a row is forty pixels that have to come from somewhere
+# above `input::VARIABLE_FLOOR`. See SECOND-ORDER-M12.md.
 BUILDS = ["cottage", "farm", "granary", "forester", "quarry",
-          "stockpile", "dike", "post", "nursery", "road", "point"]
+          "stockpile", "dike", "post", "nursery", "hut", "road", "point"]
 
 
 def build_button(name, cities=2):
