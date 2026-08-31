@@ -331,8 +331,14 @@ M5's residual is still parked before M10, and none of these four touched it.
 
 ### Next action
 
-**M10 — two agents, one game, played to the end.** It is the last milestone by
-construction, and it is the only one that cannot be done by writing code: it
-needs a second agent driving a second browser, and the balance work parked
-after M5 is meant to be answered by what that run shows. Ask before starting
-it — it is a long, expensive run and it is the user's call.
+**M10 — two agents, one game, played to the end.** `HANDOFF-M10.md` is the
+onboarding document for whoever picks it up: where the game stands, what M5
+left for it to answer, what already exists to build on
+(`packaging/browser/game_two_tabs.py`), the traps, and the one decision to make
+first — a run is thirty-six minutes of wall clock and the clock is fixed at ten
+ticks a second, so either it is played at that speed or a test-only multiplier
+gets written down.
+
+The single next action inside it: two browser *contexts* (not two pages in one)
+into one room on the deployed build, green and committed, before anything
+decides what to build.
