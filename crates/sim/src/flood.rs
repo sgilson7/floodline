@@ -25,6 +25,7 @@ impl World {
     pub fn flood_bodies(&mut self) {
         if self.water.volume() > 0 {
             self.sweep_citizens();
+            self.drown_mules();
             self.batter_buildings();
         }
         // Outside the guard, because the half of `press_dikes` that matters
@@ -64,6 +65,24 @@ impl World {
         match self.building_at(x, y) {
             Some(b) if b.standing_now() => d.saturating_sub(depth(b.kind.shelter())),
             _ => d,
+        }
+    }
+
+    /// A mule caught by the flood loses its cargo.
+    ///
+    /// Design §6 says a hauler that drowns loses the load, and a mule is a
+    /// hauler with four legs. It is not killed — there is nothing in this game
+    /// that counts dead animals — but it turns for home empty, which costs the
+    /// trip and is the risk of sending one out on the impact day.
+    fn drown_mules(&mut self) {
+        for i in 0..self.mules.len() {
+            if !self.mules[i].alive() || !self.mules[i].carrying_any() {
+                continue;
+            }
+            let (x, y) = self.mules[i].pos.cell();
+            if self.depth_over(x, y) >= SWIM_DEPTH {
+                self.mules[i].spill();
+            }
         }
     }
 

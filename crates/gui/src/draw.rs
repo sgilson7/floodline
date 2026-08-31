@@ -19,6 +19,7 @@ pub fn world(w: &World, me: PlayerId, selected: &[sim::CitizenId], view: &MapVie
     water(w, seen);
     buildings(w, seen);
     citizens(w, selected);
+    mules(w);
     pings(w);
     let _ = me;
 }
@@ -126,6 +127,38 @@ fn citizens(w: &World, selected: &[sim::CitizenId]) {
         // Somebody in trouble is worth seeing from across the map.
         if c.swept {
             draw_circle_lines(px, py, 4.0, 1.0, palette::ALARM);
+        }
+    }
+}
+
+/// A cart, and not another circle with two legs.
+///
+/// A mule is the only thing on the map that belongs to a city and is not one
+/// of its people, and it has to read that way at a glance: a box on the road
+/// with a load on it, in its owner's colour. Loaded or empty is the one bit of
+/// its state worth seeing from across the map — an empty cart is on its way
+/// out, a full one is bringing something home.
+fn mules(w: &World) {
+    for m in &w.mules {
+        if !m.alive() {
+            continue;
+        }
+        let px = MAP_X + m.pos.x.raw() as f32 / 256.0 * CELL;
+        let py = MAP_Y + m.pos.y.raw() as f32 / 256.0 * CELL;
+        let colour = palette::player(m.owner);
+
+        draw_rectangle(px - 3.0, py - 2.0, 6.0, 4.0, colour);
+        draw_rectangle_lines(px - 3.0, py - 2.0, 6.0, 4.0, 1.0, palette::BACKDROP);
+        if m.carrying.gold > 0 {
+            draw_rectangle(px - 1.5, py - 3.5, 3.0, 1.5, palette::WARNING);
+        } else if m.carrying_any() {
+            draw_rectangle(px - 2.0, py - 3.5, 4.0, 1.5, palette::BACKDROP);
+        }
+        // Nowhere to take it. Drawn, and said in the panel as well: a cart
+        // standing in the yard for a reason nobody can see is the failure this
+        // whole state exists to avoid.
+        if m.leg == sim::Leg::Stuck {
+            draw_circle_lines(px, py, 5.0, 1.0, palette::ALARM);
         }
     }
 }

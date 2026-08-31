@@ -194,6 +194,10 @@ pub enum Kind {
     Quarry,
     Granary,
     Stockpile,
+    /// Design §3.3's guildhall by another name, and the only thing in the game
+    /// that earns gold. Its traders are mules on the road rather than people
+    /// at a bench.
+    TradingPost,
     Dike,
     Road,
     Bridge,
@@ -202,7 +206,7 @@ pub enum Kind {
 impl Kind {
     /// Everything the MVP builds. Design §3.3 also lists Fishery, Forester's
     /// hut, Quarry, Guildhall, Tavern and Watchtower; the plan defers all six.
-    pub const ALL: [Kind; 10] = [
+    pub const ALL: [Kind; 11] = [
         Kind::Hearth,
         Kind::Cottage,
         Kind::Farm,
@@ -210,6 +214,7 @@ impl Kind {
         Kind::Quarry,
         Kind::Granary,
         Kind::Stockpile,
+        Kind::TradingPost,
         Kind::Dike,
         Kind::Road,
         Kind::Bridge,
@@ -222,7 +227,7 @@ impl Kind {
             Kind::Hearth => (HEARTH_SIZE, HEARTH_SIZE),
             Kind::Farm => (3, 3),
             Kind::Forester | Kind::Quarry => (2, 2),
-            Kind::Cottage | Kind::Granary | Kind::Stockpile => (2, 2),
+            Kind::Cottage | Kind::Granary | Kind::Stockpile | Kind::TradingPost => (2, 2),
             Kind::Dike => match facing {
                 Facing::EastWest => (DIKE_LENGTH, 1),
                 Facing::NorthSouth => (1, DIKE_LENGTH),
@@ -262,6 +267,11 @@ impl Kind {
             Kind::Forester => Goods::stone(40),
             Kind::Quarry => Goods::wood(40),
             Kind::Granary => Goods::wood(50),
+            // Wood and stone both: a post is a yard and a weighbridge, and it
+            // is the one building that wants the city to have got both
+            // producers going first. Priced above a granary because a city
+            // that can afford it is a city that is fed.
+            Kind::TradingPost => Goods::of(0, 60, 30, 0),
             // Free — it is a patch of ground somebody agreed to keep tidy.
             Kind::Stockpile => Goods::NONE,
             // Ten a level *per cell*, not forty. A wall that changes the
@@ -294,6 +304,7 @@ impl Kind {
             Kind::Forester => 180,
             Kind::Quarry => 220,
             Kind::Granary => 250,
+            Kind::TradingPost => 260,
             Kind::Stockpile => 60,
             // Fifty a cell, not a hundred and fifty.
             //
@@ -320,6 +331,7 @@ impl Kind {
             | Kind::Quarry
             | Kind::Granary
             | Kind::Stockpile
+            | Kind::TradingPost
             | Kind::Bridge => Material::Wood,
             Kind::Hearth | Kind::Dike | Kind::Road => Material::Stone,
         }
@@ -334,6 +346,7 @@ impl Kind {
             Kind::Forester => 180,
             Kind::Quarry => 220,
             Kind::Granary => 250,
+            Kind::TradingPost => 220,
             Kind::Stockpile => 150,
             Kind::Dike => 400,
             // A road cell is a strip of packed stone and a bridge a few
@@ -357,6 +370,7 @@ impl Kind {
         match self {
             Kind::Hearth => 6,
             Kind::Granary => 5,
+            Kind::TradingPost => 4,
             Kind::Cottage => 4,
             Kind::Farm => 3,
             Kind::Forester | Kind::Quarry => 3,
@@ -407,6 +421,8 @@ impl Kind {
             // forgets to eat.
             Kind::Forester | Kind::Quarry => 2,
             Kind::Granary | Kind::Stockpile | Kind::Hearth => 2,
+            // One trader is one mule, so this is the trade rate.
+            Kind::TradingPost => 2,
             _ => 0,
         }
     }
@@ -497,6 +513,13 @@ impl Kind {
             }
             Job::Builder => BUILDER_SLOTS,
             Job::Hauler => usize::MAX,
+            Job::Trader => {
+                if self == Kind::TradingPost {
+                    self.job_slots()
+                } else {
+                    0
+                }
+            }
             // Unreachable: every other job produces. Written out rather than
             // left to a wildcard so a new job has to come here and say what it
             // means.
@@ -663,6 +686,23 @@ impl Building {
         let wanted = self.outstanding().get(g);
         let taken = wanted.min(amount);
         self.delivered.add(g, taken);
+        taken
+    }
+
+    /// Put goods into a standing store. Returns what fitted.
+    ///
+    /// The counterpart to `deliver`, which is for construction sites only: a
+    /// mule handing wood over at another city's hearth is not building it
+    /// anything. Split out here rather than written twice, because the one
+    /// place it was written twice — `has_room_for` in one and a bare `add` in
+    /// the other — is how a hundred and forty stone once went missing.
+    pub(crate) fn stow(&mut self, g: Good, amount: u16) -> u16 {
+        if !self.standing_now() || !self.kind.stores(g) {
+            return 0;
+        }
+        let room = self.kind.capacity().get(g).saturating_sub(self.store.get(g));
+        let taken = room.min(amount);
+        self.store.add(g, taken);
         taken
     }
 

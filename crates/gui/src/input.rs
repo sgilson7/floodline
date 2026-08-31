@@ -48,7 +48,7 @@ pub enum Tool {
 /// them and the order the number keys pick them. `Hearth` is not among them:
 /// the run starts with the only one a city gets. `Road` and `Bridge` are laid
 /// by the road tool, which routes and bridges by itself (design §6).
-const BUILDABLE: [(Kind, &str, KeyCode); 7] = [
+const BUILDABLE: [(Kind, &str, KeyCode); 8] = [
     (Kind::Cottage, "cottage", KeyCode::Key1),
     (Kind::Farm, "farm", KeyCode::Key2),
     (Kind::Granary, "granary", KeyCode::Key3),
@@ -56,6 +56,7 @@ const BUILDABLE: [(Kind, &str, KeyCode); 7] = [
     (Kind::Quarry, "quarry", KeyCode::Key5),
     (Kind::Stockpile, "stockpile", KeyCode::Key6),
     (Kind::Dike, "dike", KeyCode::Key7),
+    (Kind::TradingPost, "post", KeyCode::Key8),
 ];
 
 /// A trade being composed. Design §6: a standing daily exchange, proposed by
@@ -810,6 +811,7 @@ fn kind_name(k: Kind) -> &'static str {
         Kind::Quarry => "quarry",
         Kind::Granary => "granary",
         Kind::Stockpile => "stockpile",
+        Kind::TradingPost => "trading post",
         Kind::Dike => "dike",
         Kind::Road => "road",
         Kind::Bridge => "bridge",

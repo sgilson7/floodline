@@ -34,6 +34,11 @@ pub enum Job {
     Forester,
     Quarrier,
     Builder,
+    /// Sends a mule out and takes what it brings back. The trader itself never
+    /// leaves the post — the mule is a separate thing on the road, which is
+    /// what design §6's "haulers you can watch" becomes when the load is going
+    /// to another city.
+    Trader,
 }
 
 impl Job {
@@ -46,6 +51,7 @@ impl Job {
             Kind::Farm => Some(Job::Farmer),
             Kind::Forester => Some(Job::Forester),
             Kind::Quarry => Some(Job::Quarrier),
+            Kind::TradingPost => Some(Job::Trader),
             _ => None,
         }
     }
@@ -53,6 +59,19 @@ impl Job {
     /// Whether this job stands at one building and turns time into goods.
     pub fn produces(self) -> bool {
         matches!(self, Job::Farmer | Job::Forester | Job::Quarrier)
+    }
+
+    /// Whether this job is done *at* a building, standing in one place and
+    /// holding one of its slots.
+    ///
+    /// Not the same question as `produces`. A trader makes nothing — the gold
+    /// is earned on the road by a mule — but it stands at its post and its
+    /// slot is the trade rate, so every rule about being stationed applies to
+    /// it. Answering the wrong one of these two questions is how a trader
+    /// arriving at its post fell through to "there is no job here", had its
+    /// workplace cleared, and left a mule on the road belonging to nobody.
+    pub fn stationed(self) -> bool {
+        self.produces() || self == Job::Trader
     }
 }
 

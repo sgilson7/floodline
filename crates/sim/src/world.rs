@@ -13,6 +13,7 @@ use crate::command::Command;
 use crate::fx::V2;
 use crate::fx::Fx;
 use crate::map::{Ground, Map};
+use crate::mule::{Leg, Mule, MuleId};
 use crate::names::NAMES;
 use crate::nav::{self, Dest, FlowField, Nav};
 use crate::road::{self, Road, RoadId, Trade, TradeId};
@@ -155,6 +156,9 @@ pub struct World {
     /// Standing water. Design §3.1 puts a depth on every cell.
     pub water: Water,
     /// Roads that have been laid, in the order they were laid.
+    /// Carts on the road, indexed by `MuleId`. Retired ones stay in it, for
+    /// the reason every other id here does.
+    pub mules: Vec<Mule>,
     pub roads: Vec<Road>,
     /// Standing trade agreements, proposed and accepted.
     pub trades: Vec<Trade>,
@@ -226,6 +230,7 @@ impl World {
             ending: None,
             peak_population: vec![0; players as usize],
             water: Water::dry(),
+            mules: Vec::new(),
             roads: Vec::new(),
             trades: Vec::new(),
             pings: Vec::new(),
@@ -1217,12 +1222,72 @@ impl World {
             // A hauler is based nowhere: it goes where the work is.
             c.workplace = if job == Job::Hauler { None } else { Some(building) };
         }
+        // One trader is one mule. Spawned here rather than in the tick,
+        // because "assigning one spawns a mule" is a rule about the command
+        // and a rule about a command belongs inside `apply`.
+        if job == Job::Trader {
+            for _ in 0..citizens.len() {
+                self.spawn_mule(player, building);
+            }
+        }
         Ok(())
+    }
+
+    /// Send a cart out from a post.
+    fn spawn_mule(&mut self, owner: PlayerId, post: BuildingId) {
+        let (cx, cy) = self.buildings[post.0 as usize].centre();
+        // In the yard, not in the building: a post blocks movement like any
+        // other, and a cart standing inside one has no flow field to follow.
+        let at = (0..=3i32)
+            .flat_map(|r| (-r..=r).flat_map(move |dy| (-r..=r).map(move |dx| (dx, dy))))
+            .map(|(dx, dy)| (cx + dx, cy + dy))
+            .find(|&(x, y)| nav::passable(self, x, y))
+            .unwrap_or((cx, cy));
+        let id = MuleId(self.mules.len() as u16);
+        self.mules.push(Mule::new(id, owner, post, V2::cell_centre(at.0, at.1)));
+    }
+
+    /// Retire every mule belonging to a post that has more of them than it has
+    /// traders — because a trader was unassigned, or because the post is gone.
+    fn retire_spare_mules(&mut self, post: BuildingId) {
+        let traders = self
+            .citizens
+            .iter()
+            .filter(|c| c.alive() && c.workplace == Some(post) && c.job == Some(Job::Trader))
+            .count();
+        let standing = self
+            .buildings
+            .get(post.0 as usize)
+            .is_some_and(|b| b.standing_now() && b.kind == Kind::TradingPost);
+        let want = if standing { traders } else { 0 };
+
+        let mine: Vec<usize> = self
+            .mules
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.alive() && m.post == post)
+            .map(|(i, _)| i)
+            .collect();
+        // The newest go first, so a post that loses one trader keeps the mule
+        // that has been on the road longest and its load with it.
+        for &i in mine.iter().skip(want).rev() {
+            self.mules[i].retired = true;
+        }
     }
 
     /// Back to hauling, and off whatever roster it was on.
     fn unassign_one(&mut self, id: CitizenId) {
+        let was = self.citizens[id.0 as usize]
+            .workplace
+            .filter(|_| self.citizens[id.0 as usize].job == Some(Job::Trader));
         self.clear_from_rosters(id);
+        if let Some(post) = was {
+            // Done after `clear_from_rosters` and before the job is cleared
+            // would be a mule counted twice; done here it is counted once.
+            self.citizens[id.0 as usize].job = None;
+            self.citizens[id.0 as usize].workplace = None;
+            self.retire_spare_mules(post);
+        }
         let c = &mut self.citizens[id.0 as usize];
         c.job = None;
         c.workplace = None;
@@ -1238,6 +1303,231 @@ impl World {
     pub fn tick_alone(&mut self) {
         let mut nav = Nav::new();
         self.tick(&mut nav, &[]);
+    }
+
+    // ---- mules -------------------------------------------------------------
+
+    /// One tick of the carts on the road.
+    ///
+    /// Deliberately small, and deliberately not `walk`: a mule has no hunger,
+    /// no rest, no home, no crowd and no errand it can abandon, so sharing the
+    /// citizen path would have meant six rules that do not apply to it. What it
+    /// does share is the flow fields, which is the half that matters.
+    pub fn move_mules(&mut self, nav: &mut Nav) {
+        if self.mules.is_empty() {
+            return;
+        }
+        // A post taken by the flood retires its carts.
+        let posts: Vec<BuildingId> = {
+            let mut p: Vec<BuildingId> =
+                self.mules.iter().filter(|m| m.alive()).map(|m| m.post).collect();
+            p.sort_unstable();
+            p.dedup();
+            p
+        };
+        for post in posts {
+            self.retire_spare_mules(post);
+        }
+
+        for i in 0..self.mules.len() {
+            if self.mules[i].alive() {
+                self.set_mule_errand(i);
+            }
+        }
+
+        let mut wanted: Vec<Dest> = self
+            .mules
+            .iter()
+            .filter(|m| m.alive())
+            .filter_map(|m| m.dest)
+            .collect();
+        wanted.sort_unstable();
+        wanted.dedup();
+        for dest in wanted {
+            let field = nav.field(self, dest).clone();
+            for i in 0..self.mules.len() {
+                if self.mules[i].dest == Some(dest) && self.mules[i].alive() {
+                    self.step_mule(i, &field);
+                }
+            }
+        }
+    }
+
+    /// Where a mule is going, and what it is carrying while it goes there.
+    fn set_mule_errand(&mut self, i: usize) {
+        if self.mules[i].dest.is_some() {
+            return;
+        }
+        let (owner, post) = (self.mules[i].owner, self.mules[i].post);
+        match self.mules[i].leg {
+            Leg::Home => {
+                self.mules[i].dest = Some(Dest::Building(post));
+            }
+            Leg::Out | Leg::Stuck => {
+                if !self.mules[i].carrying_any() {
+                    // Load, out of the city's own stores. A post with nothing
+                    // to sell waits, which is a thing a player can see and act
+                    // on: build a forester's hut.
+                    let want = Mule::load();
+                    for g in Good::ALL {
+                        let n = want.get(g);
+                        if n == 0 {
+                            continue;
+                        }
+                        if self.take_from_stores(owner, g, n) < n {
+                            return;
+                        }
+                        self.mules[i].carrying.add(g, n);
+                    }
+                }
+                match self.trade_partner(owner) {
+                    Some(hearth) => {
+                        self.mules[i].leg = Leg::Out;
+                        self.mules[i].dest = Some(Dest::Building(hearth));
+                    }
+                    // Loaded and nowhere to take it. The panel says so; see
+                    // `Leg::Stuck`.
+                    None => self.mules[i].leg = Leg::Stuck,
+                }
+            }
+        }
+    }
+
+    /// The hearth a mule sells at: another city's, and the nearest of them.
+    pub fn trade_partner(&self, mine: PlayerId) -> Option<BuildingId> {
+        let home = self
+            .buildings
+            .iter()
+            .find(|b| b.owner == mine && b.kind == Kind::Hearth)
+            .map(|b| b.centre())?;
+        self.buildings
+            .iter()
+            .filter(|b| {
+                b.owner != mine
+                    && b.kind == Kind::Hearth
+                    && b.standing_now()
+                    && self.players.contains(&b.owner)
+                    && !self.dropped.contains(&b.owner)
+            })
+            .min_by_key(|b| {
+                let (x, y) = b.centre();
+                (x - home.0).abs() + (y - home.1).abs()
+            })
+            .map(|b| b.id)
+    }
+
+    /// Take up to `amount` of `good` out of a player's stores, nearest first.
+    fn take_from_stores(&mut self, owner: PlayerId, good: Good, amount: u16) -> u16 {
+        let mut left = amount;
+        for i in 0..self.buildings.len() {
+            if left == 0 {
+                break;
+            }
+            let b = &self.buildings[i];
+            if b.owner != owner || !b.standing_now() || !b.kind.is_store() {
+                continue;
+            }
+            left -= self.buildings[i].store.take(good, left);
+        }
+        amount - left
+    }
+
+    /// One mule, one step.
+    fn step_mule(&mut self, i: usize, field: &FlowField) {
+        let (cx, cy) = self.mules[i].pos.cell();
+        let Some(dest) = self.mules[i].dest else { return };
+
+        // Near enough. A cart does not have to stand on the doorstep.
+        let there = match dest {
+            Dest::Building(id) => {
+                let b = &self.buildings[id.0 as usize];
+                let (bx, by) = b.centre();
+                (cx - bx).abs().max((cy - by).abs()) <= MULE_ARRIVED
+            }
+            Dest::Cell(x, y) => {
+                (cx - x as i32).abs().max((cy - y as i32).abs()) <= MULE_ARRIVED
+            }
+        };
+        if there {
+            self.mule_arrived(i);
+            return;
+        }
+
+        let step = field.step_at(cx, cy).or_else(|| self.step_off_a_building(cx, cy));
+        let Some((dx, dy)) = step else {
+            // No way through from where it is standing. It waits rather than
+            // wanders; `Leg::Stuck` is for having nowhere to go at all, and
+            // this is a road that is not there yet.
+            return;
+        };
+        // A mule is spawned at its post and a post blocks movement, so its
+        // first step out is the same one a citizen born inside a hearth takes.
+        // Without it the cart stood in the yard for ever and the whole feature
+        // did nothing, silently.
+        let on_road =
+            self.building_at(cx, cy).map(|b| b.carries_traffic()).unwrap_or(false);
+        let speed = if on_road { Fx(MULE_SPEED * 2) } else { Fx(MULE_SPEED) };
+        let step = V2::new(Fx::cells(dx), Fx::cells(dy)).with_len(speed);
+        self.mules[i].pos += step;
+    }
+
+    /// A mule at the end of a leg: hand over, get paid, turn round.
+    fn mule_arrived(&mut self, i: usize) {
+        let owner = self.mules[i].owner;
+        match self.mules[i].leg {
+            Leg::Out | Leg::Stuck => {
+                let Some(Dest::Building(hearth)) = self.mules[i].dest else { return };
+                let them = self.buildings[hearth.0 as usize].owner;
+                for g in Good::ALL {
+                    let n = self.mules[i].carrying.take(g, u16::MAX);
+                    if n == 0 {
+                        continue;
+                    }
+                    let put = self.buildings[hearth.0 as usize].stow(g, n);
+                    // What will not fit stays on the cart and goes home again.
+                    self.mules[i].carrying.add(g, n - put);
+                }
+                // **Gold is minted by the exchange, not moved.** The other
+                // city does not pay out of a purse it has not got: nothing
+                // else in the game makes gold, so if trade only moved it the
+                // first trade could never happen. See DECISIONS.md.
+                let _ = them;
+                self.mules[i].carrying = Mule::pay();
+                self.mules[i].leg = Leg::Home;
+                self.mules[i].dest = None;
+            }
+            Leg::Home => {
+                for g in Good::ALL {
+                    let n = self.mules[i].carrying.take(g, u16::MAX);
+                    if n == 0 {
+                        continue;
+                    }
+                    let put = self.put_in_stores(owner, g, n);
+                    // Nowhere to put it is not a reason to destroy it.
+                    self.mules[i].carrying.add(g, n - put);
+                }
+                if !self.mules[i].carrying_any() {
+                    self.mules[i].leg = Leg::Out;
+                }
+                self.mules[i].dest = None;
+            }
+        }
+    }
+
+    /// Put up to `amount` of `good` into a player's stores. Returns what fitted.
+    fn put_in_stores(&mut self, owner: PlayerId, good: Good, amount: u16) -> u16 {
+        let mut left = amount;
+        for i in 0..self.buildings.len() {
+            if left == 0 {
+                break;
+            }
+            let b = &self.buildings[i];
+            if b.owner != owner || !b.standing_now() || !b.kind.stores(good) {
+                continue;
+            }
+            left -= self.buildings[i].stow(good, left);
+        }
+        amount - left
     }
 
     /// Move everyone who is going somewhere, one step along their field.

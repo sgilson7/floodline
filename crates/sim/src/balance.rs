@@ -107,6 +107,36 @@ pub const SLOPE_SPAN: i32 = 40;
 /// changing this or the octave weights.
 pub const NOISE_AMPLITUDE: i32 = 16;
 
+// ---- trade on the road -----------------------------------------------------
+
+/// What a mule carries to the other city, in wood.
+///
+/// Ten, which is a hauler's load and change: the point of a mule is that it
+/// goes a long way and comes back with something the city cannot make, not
+/// that it moves a lot at once. One trader is one mule, so a post's job slots
+/// are the trade rate.
+pub const MULE_LOAD: u16 = 10;
+
+/// What the other city pays for it, in gold.
+///
+/// **Provisional.** Gold buys levels and a level is one more pair of hands, so
+/// what a round trip is worth cannot be settled until M7 has priced an upgrade.
+/// Five for ten wood is a starting point that makes a post worth manning
+/// within an age and no more than that.
+pub const MULE_PAY: u16 = 5;
+
+/// How close a mule has to get to count as arrived. A cart does not have to
+/// stand on the doorstep.
+pub const MULE_ARRIVED: i32 = 2;
+
+/// How fast a mule walks on open ground, in 256ths of a cell a tick.
+///
+/// The same as a citizen at full rest, and it doubles on a road for the same
+/// reason — which is what the plan means by "the road bonus it inherits for
+/// free": a road is worth laying between two cities because the thing that
+/// walks it goes twice as fast.
+pub const MULE_SPEED: i32 = WALK_SPEED;
+
 // ---- the river -------------------------------------------------------------
 
 /// How many cells either side of the centreline are channel floor. Two makes

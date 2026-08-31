@@ -71,6 +71,20 @@ pub fn next_thing(w: &World, me: PlayerId) -> Option<&'static str> {
         return Some("nobody is at the quarry: right-click it");
     }
 
+    // Trade, once the city can feed itself and cut its own timber. A cart
+    // with nowhere to take its load is the one thing here that is *not*
+    // advice — it is a report, and without it a player watches a mule stand in
+    // the yard and has no way to find out why.
+    if w.mules.iter().any(|m| m.alive() && m.owner == me && m.leg == sim::Leg::Stuck) {
+        return Some("a mule has nowhere to take its load: no other city it can reach");
+    }
+    if standing(Kind::Forester) && !placed(Kind::TradingPost) {
+        return Some("press 8 for a trading post: its mules sell wood abroad for gold");
+    }
+    if standing(Kind::TradingPost) && !working(Kind::TradingPost) {
+        return Some("nobody is at the trading post: right-click it to send a mule out");
+    }
+
     // Then the flood.
     if !placed(Kind::Dike) {
         return Some("press 7 and drag a wall between your city and the water");
@@ -140,6 +154,7 @@ impl Welcome {
         line("THEN", 15.0, palette::FAINT, 26.0, &mut y);
         line("4 and 5             a forester's hut and a quarry: wood and stone", 18.0, palette::INK, 26.0, &mut y);
         line("7 then drag         a wall between your city and the water", 18.0, palette::INK, 26.0, &mut y);
+        line("8                   a trading post: mules sell wood for gold", 18.0, palette::INK, 26.0, &mut y);
         line("right-click ground  send them there, and they stay", 18.0, palette::INK, 40.0, &mut y);
 
         ui::centred(

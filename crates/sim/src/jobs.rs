@@ -172,9 +172,12 @@ impl World {
         match self.citizens[i].job {
             // Everything that is not hauling: a producer stands at its
             // building, a builder walks to sites.
+            // A trader stands at its post like a producer does; what leaves
+            // the post is the mule, and a mule is not a citizen.
             Some(Job::Farmer)
             | Some(Job::Forester)
             | Some(Job::Quarrier)
+            | Some(Job::Trader)
             | Some(Job::Builder) => {
                 if let Some(b) = self.citizens[i].workplace {
                     if self.buildings[b.0 as usize].state != BuildState::Rubble {
@@ -496,7 +499,7 @@ impl World {
                     self.citizens[i].state = State::Idle;
                 }
             }
-            (Some(job), BuildState::Standing) if job.produces() => {
+            (Some(job), BuildState::Standing) if job.stationed() => {
                 let b = &mut self.buildings[at.0 as usize];
                 if !b.workers.contains(&CitizenId(i as u16)) {
                     if b.workers.len() < b.kind.slots_for(job) {

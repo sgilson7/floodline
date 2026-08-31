@@ -2004,3 +2004,66 @@ levels and moving, job icons and workers indoors, and families are all
 independent of it, and the plan says so of M6 and M7 in as many words.
 **Finishing the balance belongs immediately before M10**, where a real run is
 the instrument, and it is listed there rather than left implicit.
+
+---
+
+## 2026-08-30 — Gold, a trading post, and a cart that is not a person
+
+M6. `Good::Gold` went in first and on its own, before anything depended on it,
+which is what the plan asked and was right: `covers`, `total` and the GUI's
+`cost_line` now walk `Good::ALL` instead of naming three fields, so a fifth
+good cannot be silently left off a price tag.
+
+**Gold is a departure from design §6's "there is no market, no price and no
+currency in version one", taken deliberately.** Barter is untouched —
+`Command::Trade` is still a standing daily exchange two players agree on and
+haulers walk — and gold is what a post's mules earn, which is a different thing
+in a different place.
+
+**Gold is minted by the exchange, not moved between players.** The other city
+does not pay out of a purse it has not got: nothing else in the game makes
+gold, so a first trade would be impossible if trade only moved it. A mule hands
+over ten wood and comes home with five gold that did not exist before. The wood
+is real and leaves the seller's store; the coin comes from outside the map, the
+way a coin does.
+
+**Gold is not hauled.** `Good::hauled` says so and the barter dialog will not
+offer it. A city whose haulers spent the day moving coins between the hearth
+and the stockpile would be doing nothing useful very busily; gold is kept where
+the mule left it and spent from there.
+
+**A mule is its own entity and not a citizen wearing a hat**, as the plan asks.
+A citizen has hunger, rest, a home, a job, a crowd around it and an errand it
+can abandon; a mule has a position, a destination, a load and one bit for which
+way round the trip it is on. Making it a citizen would have meant six rules
+that do not apply and one that does. What it shares is the half that matters —
+the same flow fields, so it finds its way round the river like everybody else,
+and road speed on a road, which is the first thing in this game that makes
+laying a road between two cities pay for itself.
+
+**Three things this cost that were not obvious:**
+
+* **A mule is spawned inside its own post, and a post blocks movement.** The
+  cart stood in the yard for ever and the whole feature did nothing, silently.
+  It spawns in the yard now and falls back to `step_off_a_building` — the same
+  escape a citizen born inside a hearth uses.
+* **`Building::deliver` is for construction sites only.** A mule handing wood
+  over at another city's hearth is not building it anything, so the delivery
+  returned zero and the load went home again. `Building::stow` is the
+  counterpart, written once and used by both ends of the trip.
+* **`Job::produces` was answering the wrong question.** A trader makes nothing
+  — the gold is earned on the road — but it *stands at* its post and holds one
+  of its slots, and the arm that puts a worker on a roster was guarded by
+  `produces`. So a trader arriving at its post fell through to "there is no job
+  here", had its workplace cleared, and left a mule on the road belonging to
+  nobody. `Job::stationed` is the question that was meant.
+
+**A cart with nowhere to go says so.** `Leg::Stuck` is a state rather than a
+mule standing still: it is ringed in red on the map and the panel reads "a mule
+has nowhere to take its load: no other city it can reach". With a river between
+the players this stops being a corner case — it is what a player sees before
+they have a bridge or found the ford.
+
+`MULE_PAY` is provisional and says so. What a round trip is worth cannot be
+settled until M7 has priced an upgrade, because gold buys levels and a level is
+one more pair of hands.
