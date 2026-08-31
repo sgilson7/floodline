@@ -20,8 +20,8 @@ This document is also an artifact, if a link is easier to hand on than a file:
 | M10.1 | Two agents in one room | **done** — green on localhost and the deployed build |
 | M10.2 | The clock, decided and written down | **done** — three paragraphs in `DECISIONS.md` |
 | M10.3 | Hands and eyes | **done** — `table.py`, `panel.py`, `driver.py`, `driver_check.py` |
-| M10.4 | The referee, and ten minutes of nothing going wrong | ← **next** |
-| M10.5 | A rehearsal: one age | |
+| M10.4 | The referee, and ten minutes of nothing going wrong | **done** — clean, though the soak is eight minutes and not ten |
+| M10.5 | A rehearsal: one age | ← **next**, and the first step that needs two agents |
 | M10.6 | The run | |
 | M10.7 | The account | |
 | M10.8 | What the run demands | two findings already waiting for it |

@@ -403,12 +403,28 @@ during the thirty-six minutes.
 
 Nothing.
 
+### M10.4, and what the soak said
+
+**The harness holds, and the clock is exact.** Three day-turns 121 and 120
+seconds apart against a nominal 120, no stalls, nothing red, two browsers, the
+deployed build.
+
+**And a soak cannot be ten minutes.** Nobody feeds anybody, so both cities
+starve on day four and an unattended game is over in about eight. That is a
+constraint on M10.6 as much as on the soak: both agents have to be feeding
+their people inside the first four days or the run ends on its own.
+
+Two things would have made the referee useless, and running it caught both. It
+reported twenty-six failures for a game that had finished normally, because an
+ended game and a stopped page are identical at the tick row. And `WaitingOn` is
+drawn in WARNING in the same row a desync uses ALARM, so "is it reddish" cries
+desync every few seconds — which is how often lockstep waits.
+
 ### Next action
 
-**M10.4 — the referee, and ten minutes of nothing going wrong.**
-`referee.py` attaches to both pages, issues no input, and every fifteen seconds
-saves a crop of each panel's foot and records whether the status row has gone
-red. Then a ten-minute soak on the deployed build: both pages holding about ten
-ticks a second, `peers at` never parted by more than the pipeline, no drop.
-That is the milestone that pays for itself — rendering throttle is invisible
-for four minutes and fatal at thirty.
+**M10.5 — the rehearsal.** Twelve minutes, two agents, the deployed build,
+through the first flood, with `PLAYTEST-M10.md` kept as it happens. Two things
+to settle before it starts: whether to push first, since the deployed build is
+now seven commits behind `main` and M10.6 has to run on what is deployed; and
+that spawning the two agents is a deliberate, billable step rather than
+something to drift into.
