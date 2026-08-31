@@ -343,48 +343,93 @@ impl World {
     /// Counts the way `assign` counts: whoever is already there and is *not*
     /// named in the list still holds their slot.
     pub fn will_take(&self, owner: PlayerId, building: BuildingId, citizens: &[CitizenId]) -> usize {
-        let Some(b) = self.buildings.get(building.0 as usize) else {
-            return 0;
-        };
+        self.room_for(owner, building, citizens).unwrap_or(0)
+    }
+
+    /// The same question, and **why** when the answer is none.
+    ///
+    /// `will_take` answers nought for a building that is not yours, a building
+    /// that is not built yet, a building nobody works at, and a building that
+    /// is full — four different problems that a player has to tell apart, and
+    /// the panel reported all four as *"no room left there"*. Both M11.9
+    /// players were sent looking for a capacity problem: one at a cottage that
+    /// was still a construction site, one at a nursery, which is not a
+    /// workplace at all and has no capacity to run out of.
+    ///
+    /// `RuleError` already had the right words for every one of these. Nothing
+    /// needed inventing; the panel needed to stop inventing.
+    pub fn room_for(
+        &self,
+        owner: PlayerId,
+        building: BuildingId,
+        citizens: &[CitizenId],
+    ) -> Result<usize, RuleError> {
+        let b = self.buildings.get(building.0 as usize).ok_or(RuleError::NoSuchBuilding)?;
         if b.owner != owner {
-            return 0;
+            return Err(RuleError::NotYours);
         }
         let job = match b.state {
             BuildState::Site => Job::Builder,
             BuildState::Standing => match Job::at(b.kind) {
                 Some(j) => j,
                 None if b.kind.is_store() => Job::Hauler,
-                None => return 0,
+                None => return Err(RuleError::NoJobThere),
             },
-            _ => return 0,
+            // Rubble. "It is not built yet" is the wrong half of the truth for
+            // a ruin, but it is the same answer to the same question — there is
+            // no building there to work at — and inventing a variant for a heap
+            // nobody can staff would be a word for its own sake.
+            _ => return Err(RuleError::NotStanding),
         };
         let slots = b.slots_for(job);
         if slots == usize::MAX {
-            return citizens.len();
+            return Ok(citizens.len());
         }
         let held = self
             .citizens
             .iter()
             .filter(|c| c.alive() && c.workplace == Some(building) && !citizens.contains(&c.id))
             .count();
-        citizens.len().min(slots.saturating_sub(held))
+        match citizens.len().min(slots.saturating_sub(held)) {
+            0 => Err(RuleError::Full),
+            n => Ok(n),
+        }
     }
 
     /// The same question for a cottage's beds, which `SetHome` limits the same
     /// way and would refuse the same way.
     pub fn will_house(&self, owner: PlayerId, cottage: BuildingId, citizens: &[CitizenId]) -> usize {
-        let Some(b) = self.buildings.get(cottage.0 as usize) else {
-            return 0;
-        };
-        if b.owner != owner || b.kind != Kind::Cottage || !b.standing_now() {
-            return 0;
+        self.beds_for(owner, cottage, citizens).unwrap_or(0)
+    }
+
+    /// And why, when there are none. See `room_for`: a cottage that is still a
+    /// site said *"no beds left there"*, which is what a **full** cottage says,
+    /// and sent a player looking for the wrong problem entirely.
+    pub fn beds_for(
+        &self,
+        owner: PlayerId,
+        cottage: BuildingId,
+        citizens: &[CitizenId],
+    ) -> Result<usize, RuleError> {
+        let b = self.buildings.get(cottage.0 as usize).ok_or(RuleError::NoSuchBuilding)?;
+        if b.owner != owner {
+            return Err(RuleError::NotYours);
+        }
+        if b.kind != Kind::Cottage {
+            return Err(RuleError::NotACottage);
+        }
+        if !b.standing_now() {
+            return Err(RuleError::NotStanding);
         }
         let held = self
             .citizens
             .iter()
             .filter(|c| c.alive() && c.home == Some(cottage) && !citizens.contains(&c.id))
             .count();
-        citizens.len().min(b.beds().saturating_sub(held))
+        match citizens.len().min(b.beds().saturating_sub(held)) {
+            0 => Err(RuleError::Full),
+            n => Ok(n),
+        }
     }
 
     /// Start a construction site. Materials still have to be hauled to it and

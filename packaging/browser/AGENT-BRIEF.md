@@ -121,6 +121,8 @@ the panel:
   clock. It fills its own small buffer and stops until a hauler empties it, so
   a farm with no granary to send to makes very little whatever its slots say.
 * **1 cottage** — beds. Two adults sharing a fed cottage become a household.
+  A cottage that is **not built yet** says so; only a *full* one says there is
+  no room.
 * **4 forester's hut** — the only source of wood.
 * **5 quarry** — the only source of stone. It needs rock beside it.
 * **6 stockpile** — free; somewhere to put things down.
@@ -250,3 +252,29 @@ play, not afterwards:
   died and of what, what is in somebody's arms. If one of them changed a
   decision you made, say which. If one of them was noise, say that — it is just
   as useful.
+
+## What the panel says when something goes wrong
+
+Three things changed in M12 and all three were costing players whole days.
+
+* **A right-click always answers.** With nobody chosen it now says *"nobody
+  chosen - drag over your people first"* instead of doing nothing at all. In
+  the last run a player right-clicked the cell they had just built a forester
+  on, got silence, and lost two game-days believing the building was in the
+  wrong place. It was not; the click had nobody to send.
+* **A refusal names the real problem.** Every "there is no room" used to cover
+  four different problems. Now: *"it is not built yet"* for a site, *"there is
+  no work there"* for a building nobody works at — a nursery — *"there is no
+  room"* only when the slots are genuinely taken, and *"that is not yours"*.
+* **Deaths have their own line**, above the refusal line and in a colour of
+  their own. They accumulate: a flood that takes eight people reads
+  `8 drowned`, not `1 drowned` eight times. A click-refusal in the same frame
+  no longer wipes it.
+
+And the **amber line puts the water first**. It used to be ordered as though
+food were the only clock, so it recommended a trading post to a player with a
+flood two days out. Now the water outranks everything, including "you have no
+granary" — drowning tomorrow beats starving in three days.
+
+The in-the-water warning says **how deep**: *"8 of your people are in the
+water, out of their depth"* is an evacuation; *"wading"* is not.

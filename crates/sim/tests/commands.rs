@@ -612,3 +612,183 @@ fn a_building_says_how_many_it_will_take_before_the_command_is_refused() {
     assert_eq!(w.will_take(PlayerId(1), farm, &all), 0);
     assert_eq!(w.will_take(me, sim::BuildingId(999), &all), 0);
 }
+
+#[test]
+fn a_building_is_where_it_was_clicked() {
+    // M12.4, reproduced before anything is fixed. City 0 placed a forester
+    // with `click-cell 75 97`; `right-click-cell 75 97` did nothing at all -
+    // no refusal, no message, the people went idle - and `76 98` worked
+    // instantly. Two game-days lost with a forester standing empty while the
+    // amber line said "nobody is cutting wood".
+    //
+    // The suspect: `Building::footprint`'s origin is the *top-left* cell. If
+    // `place` stores the clicked cell as the origin while the ghost is drawn
+    // centred on the cursor, the building lands up and left of where the
+    // player aimed and `building_at(clicked)` finds nothing.
+    use sim::building::{Facing, Kind};
+    use sim::command::Command;
+    use sim::world::World;
+    use sim::PlayerId;
+
+    let me = PlayerId(0);
+    let mut missed: Vec<String> = Vec::new();
+
+    for kind in Kind::ALL {
+        if matches!(kind, Kind::Hearth) {
+            continue;
+        }
+        for facing in [Facing::EastWest, Facing::NorthSouth] {
+            let mut w = World::new(31, 2);
+            let (hx, hy) = w.map.hearth_sites[0];
+            let mut put = None;
+            'ring: for r in 3..40i32 {
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        if dx.abs() != r && dy.abs() != r {
+                            continue;
+                        }
+                        let (x, y) = (hx + dx, hy + dy);
+                        if w.can_place(me, kind, facing, x, y).is_ok() {
+                            w.apply(
+                                me,
+                                &Command::Place {
+                                    kind,
+                                    facing,
+                                    x: x as u8,
+                                    y: y as u8,
+                                },
+                            )
+                            .unwrap();
+                            put = Some((x, y));
+                            break 'ring;
+                        }
+                    }
+                }
+            }
+            let Some((x, y)) = put else { continue };
+            match w.building_at(x, y) {
+                Some(b) if b.kind == kind => {}
+                other => missed.push(format!(
+                    "{kind:?} {facing:?} placed at ({x},{y}) is not there: {:?}",
+                    other.map(|b| b.kind)
+                )),
+            }
+        }
+    }
+
+    assert!(
+        missed.is_empty(),
+        "a click that placed a building did not put it under the click:\n  {}",
+        missed.join("\n  ")
+    );
+}
+
+#[test]
+fn a_refusal_says_which_problem_it_is() {
+    // Two refusals lied, and both sent an M11.9 player looking for the wrong
+    // thing. A cottage that was still a construction site said **"no beds left
+    // there"** - which is what a *full* cottage says - and a nursery said
+    // **"no room left there"**, when a nursery is not a workplace at all and
+    // has no capacity to run out of.
+    //
+    // Neither was a missing word. `RuleError` already had "it is not built
+    // yet" and "there is no work there"; the panel had its own sentence for
+    // every kind of nought and used it for all of them. `room_for` and
+    // `beds_for` are the same questions `will_take` and `will_house` ask, with
+    // the reason kept.
+    use sim::building::{Facing, Kind};
+    use sim::command::Command;
+    use sim::world::{RuleError, World};
+    use sim::PlayerId;
+
+    let me = PlayerId(0);
+    let them = PlayerId(1);
+    let mut w = World::new(31, 2);
+    let mine: Vec<sim::CitizenId> =
+        w.citizens.iter().filter(|c| c.owner == me && !c.is_child()).map(|c| c.id).take(2).collect();
+
+    let place = |w: &mut World, kind: Kind| -> sim::building::BuildingId {
+        let (hx, hy) = w.map.hearth_sites[0];
+        for r in 3..40i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (x, y) = (hx + dx, hy + dy);
+                    if w.can_place(me, kind, Facing::EastWest, x, y).is_ok() {
+                        w.apply(
+                            me,
+                            &Command::Place { kind, facing: Facing::EastWest, x: x as u8, y: y as u8 },
+                        )
+                        .unwrap();
+                        return w.buildings.last().unwrap().id;
+                    }
+                }
+            }
+        }
+        panic!("nowhere for a {kind:?}");
+    };
+
+    // A cottage that is not built yet is not a full cottage.
+    let cottage = place(&mut w, Kind::Cottage);
+    assert_eq!(
+        w.beds_for(me, cottage, &mine),
+        Err(RuleError::NotStanding),
+        "an unbuilt cottage should say it is not built yet"
+    );
+    assert_eq!(RuleError::NotStanding.to_message(), "it is not built yet");
+
+    // Built, and it has beds.
+    for g in sim::building::Good::ALL {
+        let want = w.buildings[cottage.0 as usize].outstanding().get(g);
+        if want > 0 {
+            w.deliver_to(cottage, g, want);
+        }
+    }
+    assert!(w.build_at(cottage, Kind::Cottage.build_ticks()));
+    assert!(w.beds_for(me, cottage, &mine).is_ok(), "a built cottage has beds");
+
+    // A nursery is not a workplace, and does not have "no room".
+    let nursery = place(&mut w, Kind::Nursery);
+    for g in sim::building::Good::ALL {
+        let want = w.buildings[nursery.0 as usize].outstanding().get(g);
+        if want > 0 {
+            w.deliver_to(nursery, g, want);
+        }
+    }
+    assert!(w.build_at(nursery, Kind::Nursery.build_ticks()));
+    assert_eq!(
+        w.room_for(me, nursery, &mine),
+        Err(RuleError::NoJobThere),
+        "a nursery is not a workplace and should say so"
+    );
+    assert_eq!(RuleError::NoJobThere.to_message(), "there is no work there");
+
+    // A full building is the only thing that says there is no room.
+    let quarry = place(&mut w, Kind::Quarry);
+    for g in sim::building::Good::ALL {
+        let want = w.buildings[quarry.0 as usize].outstanding().get(g);
+        if want > 0 {
+            w.deliver_to(quarry, g, want);
+        }
+    }
+    assert!(w.build_at(quarry, Kind::Quarry.build_ticks()));
+    w.apply(me, &Command::Assign { citizens: mine.clone(), building: quarry }).unwrap();
+    let more: Vec<sim::CitizenId> = w
+        .citizens
+        .iter()
+        .filter(|c| c.owner == me && !c.is_child() && !mine.contains(&c.id))
+        .map(|c| c.id)
+        .take(1)
+        .collect();
+    assert_eq!(
+        w.room_for(me, quarry, &more),
+        Err(RuleError::Full),
+        "a quarry with both slots taken is the one case that *is* no room"
+    );
+    assert_eq!(RuleError::Full.to_message(), "there is no room");
+
+    // And somebody else's building is neither.
+    assert_eq!(w.room_for(them, quarry, &more), Err(RuleError::NotYours));
+}

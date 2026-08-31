@@ -121,6 +121,19 @@ pub struct Input {
     /// `None` until the first frame that looks, so a late joiner arriving with
     /// a snapshot full of the dead does not announce all of them at once.
     buried: Option<Vec<bool>>,
+    /// The dead, accumulated over a window, in a slot of their own.
+    ///
+    /// **`say` has one slot and deaths arrive several to a frame.** M11.6 gave
+    /// deaths a cause and it worked, and almost nobody saw it: city 0 lost
+    /// eight people and read "1 drowned" throughout, because the next death
+    /// overwrote the last; city 1 never saw a death message at all, because
+    /// its own click-refusal landed in the same frame and took the slot.
+    ///
+    /// A refusal is a reply to something the player just did and a death is
+    /// not, so they were never the same kind of message and should never have
+    /// shared a line. This one accumulates: a flood that takes eight people
+    /// reads `8 drowned` and not `1 drowned`, eight times.
+    toll: Option<(u32, u32, u32, f64)>,
     /// How many of this player's people were in deep water last frame.
     wading: usize,
     /// How many households this player has, for the tab that lists them.
@@ -149,7 +162,7 @@ impl Default for Input {
         Input { tool: Tool::Select, selected: Vec::new(), drag: None, trade: Draft::default(),
                 notice: None, wall_hint: None, chosen: None,
                 tab: Tab::Tools, ringed: Vec::new(), overflowed: 0, ruins: 0,
-                buried: None, wading: 0, households_count: 0 }
+                buried: None, toll: None, wading: 0, households_count: 0 }
     }
 }
 
@@ -160,6 +173,19 @@ const NOTICE_SECONDS: f64 = 4.5;
 ///
 /// Enough to read if you go looking, faint enough not to compete with the map.
 const LINGER: f32 = 0.5;
+
+/// How long after a death another one counts as the same disaster.
+///
+/// Deaths in a flood arrive a few a frame and then stop; a starvation arrives
+/// alone, days later. Four seconds keeps a surge on one line and does not put
+/// two separate calamities on the same one.
+const TOLL_WINDOW: f64 = 4.0;
+
+/// How long the toll stays on screen. Longer than a refusal, because nobody
+/// asked for it and the player may well have been looking somewhere else when
+/// it happened - which is exactly how city 0 lost eight people and read "1
+/// drowned".
+const TOLL_SECONDS: f64 = 12.0;
 
 /// The lowest a variable row may reach.
 ///
@@ -260,6 +286,7 @@ impl Input {
             Tab::Citizens => self.people(ui, session, me, top),
         }
         self.wall_cost(ui);
+        self.toll();
         self.notice();
     }
 
@@ -299,15 +326,46 @@ impl Input {
                 other += 1;
             }
         }
+        if drowned + starved + other == 0 {
+            return;
+        }
+        // Added to whatever is already on the slab, unless the last death was
+        // long enough ago that this is a new disaster rather than more of the
+        // old one.
+        let now = get_time();
+        let fresh = self.toll.is_none_or(|(_, _, _, at)| now - at > TOLL_WINDOW);
+        let (d, s, o, _) = if fresh { (0, 0, 0, now) } else { self.toll.unwrap() };
+        self.toll = Some((d + drowned, s + starved, o + other, now));
+    }
+
+    /// The dead, on their own line above the refusals.
+    fn toll(&mut self) {
+        let Some((drowned, starved, other, at)) = self.toll else { return };
+        let age = get_time() - at;
+        if age > TOLL_SECONDS {
+            self.toll = None;
+            return;
+        }
         let mut said: Vec<String> = Vec::new();
         for (n, how) in [(drowned, "drowned"), (starved, "starved"), (other, "died")] {
             if n > 0 {
                 said.push(format!("{n} {how}"));
             }
         }
-        if !said.is_empty() {
-            self.say(said.join(", "));
-        }
+        let text = said.join(", ");
+        let fade = (1.0 - (age / TOLL_SECONDS) as f32).min(0.5) / 0.5;
+        let m = measure_text(&text, None, 22, 1.0);
+        let x = (LOGICAL_W - PANEL_W) / 2.0 - m.width / 2.0;
+        // Above the refusal plate, never over it. Two things can be true at
+        // once - "your click did nothing" and "three people just drowned" -
+        // and the whole fault this fixes was that only one of them could be
+        // said.
+        let plate = Rect::new(x - 18.0, LOGICAL_H - 96.0, m.width + 36.0, 36.0);
+        draw_rectangle(plate.x, plate.y, plate.w, plate.h,
+                       Color { a: 0.86 * fade, ..palette::PANEL });
+        draw_rectangle_lines(plate.x, plate.y, plate.w, plate.h, 1.0,
+                             Color { a: fade, ..palette::ALARM });
+        draw_text(&text, x, LOGICAL_H - 70.0, 22.0, Color { a: fade, ..palette::ALARM });
     }
 
     /// Notice people standing in the flood.
@@ -321,20 +379,37 @@ impl Input {
     /// Said when the number rises, not every frame: a warning that repeats is
     /// a warning that is scrolled past.
     fn mind_the_water(&mut self, w: &World, me: PlayerId) {
-        let n = w
-            .citizens
-            .iter()
-            .filter(|c| c.owner == me && c.alive())
-            .filter(|c| {
-                let (x, y) = c.pos.cell();
-                w.water.depth_at(x, y) >= sim::balance::WADE_DEPTH
-            })
-            .count();
+        // **How deep, not just how many.** Both M11.9 players asked for this
+        // and city 0 said why: `wading` against `out of your depth` is "the
+        // only thing on the whole screen that distinguishes survivable water
+        // from lethal water", and it lived under the cursor, where you have to
+        // already suspect a cell to find out. "Eight of your people are in the
+        // water" is a different sentence from "eight of your people are out of
+        // their depth", and the second one is an evacuation.
+        //
+        // The *deepest* of them, because that is the one that decides. A
+        // warning pitched at the shallowest would be true of the group and
+        // wrong about the emergency.
+        let mut n = 0usize;
+        let mut worst = 0u16;
+        for c in w.citizens.iter().filter(|c| c.owner == me && c.alive()) {
+            let (x, y) = c.pos.cell();
+            let d = w.water.depth_at(x, y);
+            if d >= sim::balance::WADE_DEPTH {
+                n += 1;
+                worst = worst.max(d);
+            }
+        }
         if n > self.wading {
-            self.say(if n == 1 {
-                "somebody is in the water - choose them and send them uphill".to_owned()
+            let how = if worst >= sim::balance::SWIM_DEPTH {
+                "out of their depth"
             } else {
-                format!("{n} of your people are in the water - send them uphill")
+                "wading"
+            };
+            self.say(if n == 1 {
+                format!("somebody is in the water, {how} - choose them and send them uphill")
+            } else {
+                format!("{n} of your people are in the water, {how} - send them uphill")
             });
         }
         self.wading = n;
@@ -437,14 +512,21 @@ impl Input {
         &mut self,
         session: &mut Session,
         citizens: Vec<CitizenId>,
-        room: usize,
-        what: &str,
+        room: Result<usize, sim::world::RuleError>,
         cmd: impl Fn(Vec<CitizenId>) -> Command,
     ) {
-        if room == 0 {
-            self.say(format!("no {what} left there"));
-            return;
-        }
+        // The rules' own words, not ours. This used to say "no {what} left
+        // there" for every reason there could be none - so an unbuilt cottage
+        // said what a *full* cottage says, and a nursery said it had run out
+        // of a capacity it never had. `RuleError` already had the right
+        // sentence for each; the panel needed to stop inventing one.
+        let room = match room {
+            Ok(n) => n,
+            Err(e) => {
+                self.say(e.to_message());
+                return;
+            }
+        };
         let wanted = citizens.len();
         // Whoever is free, first.
         //
@@ -478,7 +560,7 @@ impl Input {
         let sent = taken.len();
         self.issue(session, cmd(taken));
         if sent < wanted {
-            self.say(format!("{sent} of {wanted} - that is all the {what} there is"));
+            self.say(format!("{sent} of {wanted} - that is all the places there are"));
         }
     }
 
@@ -626,7 +708,19 @@ impl Input {
             }
         }
 
-        if ui.right_clicked && !self.selected.is_empty() {
+        if ui.right_clicked {
+            // **No gesture in this game may fail without a word.** A
+            // right-click with nobody chosen used to return here in silence,
+            // and it is the game's most common gesture: city 0 in the M11.9
+            // run right-clicked the cell it had just built a forester on,
+            // got nothing at all - no refusal, no message, the people stayed
+            // idle - and lost two game-days to it while the amber line said
+            // "nobody is cutting wood". The building was exactly where it had
+            // been put; the click had nobody to send.
+            if self.selected.is_empty() {
+                self.say("nobody chosen - drag over your people first");
+                return;
+            }
             let Some((x, y)) = cell else { return };
             let citizens = self.selected.clone();
             let target = session.world().building_at(x, y).map(|b| (b.id, b.owner, b.kind));
@@ -634,14 +728,14 @@ impl Input {
                 // Somebody else's building is not a place to work.
                 Some((id, owner, kind)) if owner == me => match kind {
                     Kind::Cottage => {
-                        let room = session.world().will_house(me, id, &citizens);
-                        self.send_as_many_as_fit(session, citizens, room, "beds", |c| {
+                        let room = session.world().beds_for(me, id, &citizens);
+                        self.send_as_many_as_fit(session, citizens, room, |c| {
                             Command::SetHome { citizens: c, cottage: id }
                         });
                     }
                     _ => {
-                        let room = session.world().will_take(me, id, &citizens);
-                        self.send_as_many_as_fit(session, citizens, room, "room", |c| {
+                        let room = session.world().room_for(me, id, &citizens);
+                        self.send_as_many_as_fit(session, citizens, room, |c| {
                             Command::Assign { citizens: c, building: id }
                         });
                     }
@@ -934,24 +1028,47 @@ impl Input {
         // building in turn" — both M10.6 accounts, and one of them said this
         // tab was where it instinctively came to ask and that it could not
         // answer. It can now.
+        // **`job == None` is hauling, not idling.** Design §3.2 makes hauling
+        // what an unassigned citizen does, and `Citizen::job` is an `Option`
+        // precisely so that `None` can mean it. Labelling those people "idle"
+        // was a straight contradiction of the button that creates them: both
+        // M11.9 players pressed "back to hauling", read `idle` here, and one
+        // re-pressed it for two game-days believing it had done nothing.
+        //
+        // `Some(Hauler)` - what assigning somebody to a store gives them - and
+        // `None` are the same work and are counted together.
         let mut jobs: Vec<(&str, usize)> = Vec::new();
-        for (name, job) in [
-            ("farming", Some(sim::Job::Farmer)),
-            ("cutting wood", Some(sim::Job::Forester)),
-            ("quarrying", Some(sim::Job::Quarrier)),
-            ("building", Some(sim::Job::Builder)),
-            ("trading", Some(sim::Job::Trader)),
-            ("hauling", Some(sim::Job::Hauler)),
-            ("idle", None),
+        for (name, jobs_of) in [
+            ("farming", &[Some(sim::Job::Farmer)][..]),
+            ("cutting wood", &[Some(sim::Job::Forester)]),
+            ("quarrying", &[Some(sim::Job::Quarrier)]),
+            ("cooking", &[Some(sim::Job::Cook)]),
+            ("building", &[Some(sim::Job::Builder)]),
+            ("trading", &[Some(sim::Job::Trader)]),
+            ("hauling", &[Some(sim::Job::Hauler), None]),
         ] {
             let n = w
                 .citizens
                 .iter()
-                .filter(|c| c.owner == me && c.alive() && !c.is_child() && c.job == job)
+                .filter(|c| {
+                    c.owner == me && c.alive() && !c.is_child() && jobs_of.contains(&c.job)
+                })
+                // Somebody told to stand on a hill is not hauling, whatever
+                // their job says. It is the one state where the roster and the
+                // job disagree, and the player put them there on purpose.
+                .filter(|c| !c.held)
                 .count();
             if n > 0 {
                 jobs.push((name, n));
             }
+        }
+        let waiting = w
+            .citizens
+            .iter()
+            .filter(|c| c.owner == me && c.alive() && !c.is_child() && c.held)
+            .count();
+        if waiting > 0 {
+            jobs.push(("waiting where you sent them", waiting));
         }
         let children = w
             .citizens

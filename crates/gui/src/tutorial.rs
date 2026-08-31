@@ -84,6 +84,35 @@ pub fn next_thing(w: &World, me: PlayerId) -> Option<String> {
             .any(|c| c.owner == me && c.alive() && c.job == sim::citizen::Job::at(k))
     };
 
+    // **The water outranks everything, including the bootstrap.**
+    //
+    // This ladder is "what kills you soonest" and it was ordered as though the
+    // only clock were food: the water was the *bottom* rung, under trade, gold
+    // and levelling a farm. So in the M11.9 run it spent the whole of age 2
+    // telling both players to build a trading post - one of them with a
+    // stalled household, no children and a flood two days out.
+    //
+    // Above the granary, and that is the deliberate part. Drowning tomorrow
+    // beats starving in three days, and a city with no granary and a flood on
+    // the map has two problems of which only one is happening now: telling it
+    // to press 3 is telling it to go and stand in the floodplain. The water is
+    // the only thing in this game that keeps a calendar, so it is the only
+    // thing that can be *late*.
+    if w.omen() == sim::Omen::Impact {
+        return Some("the water is here: choose everybody and send them uphill".to_owned());
+    }
+    if w.omen() == sim::Omen::Uneasy {
+        return Some(
+            if w.buildings.iter().any(|b| {
+                b.owner == me && b.kind == Kind::Dike && b.state != sim::building::BuildState::Rubble
+            }) {
+                "the water comes tomorrow: choose everybody, send them uphill".to_owned()
+            } else {
+                "the water comes tomorrow: get uphill, or press 7 and drag a wall".to_owned()
+            },
+        );
+    }
+
     // Food, in the order it can go wrong.
     if !placed(Kind::Granary) {
         return Some("press 3, click the ground: a granary. food is kept there, and eaten there".to_owned());
@@ -124,6 +153,15 @@ pub fn next_thing(w: &World, me: PlayerId) -> Option<String> {
     if w.mules.iter().any(|m| m.alive() && m.owner == me && m.leg == sim::Leg::Stuck) {
         return Some("a mule has nowhere to take its load: no other city it can reach".to_owned());
     }
+    // A household that has been settling for days with nothing else wrong is
+    // the fault M11.9 could not name - "nothing anywhere told me what was
+    // still missing" - and it outranks trade, which is a luxury.
+    if w.households.iter().any(|h| h.owner == me && h.alive() && !h.settled()) {
+        return Some(
+            "a household settles when both of them stay fed: keep the granary stocked"
+                .to_owned(),
+        );
+    }
     if standing(Kind::Forester) && !placed(Kind::TradingPost) {
         return Some("press 8 for a trading post: its mules sell wood abroad for gold".to_owned());
     }
@@ -143,12 +181,11 @@ pub fn next_thing(w: &World, me: PlayerId) -> Option<String> {
         return Some("you have gold: click a farm and level it - a level is one more pair of hands".to_owned());
     }
 
-    // Then the flood.
+    // And the wall, when there is time to build one. Hoisted above trade
+    // would make it the answer to everything; left here it is what a city
+    // does with a quiet day, which is what a quiet day is for.
     if !placed(Kind::Dike) {
         return Some("press 7 and drag a wall between your city and the water".to_owned());
-    }
-    if w.omen() == sim::Omen::Uneasy {
-        return Some("the water comes tomorrow: choose everybody, send them uphill".to_owned());
     }
     None
 }
@@ -295,5 +332,44 @@ mod tests {
 
         // A city that is fed says nothing about the larder at all.
         assert_eq!(super::larder(8, 96, 500), None);
+    }
+
+    /// The flood outranks trade, and a stalled household outranks it too.
+    ///
+    /// The ladder used to be "what kills you soonest" and stopped thinking
+    /// after food: the water was the *bottom* rung, under trade, gold and
+    /// levelling a farm. In the M11.9 run it spent the whole of age 2 telling
+    /// both players to build a trading post - one of them with a stalled
+    /// household, no children and a flood two days out.
+    #[test]
+    fn the_water_outranks_the_shopping() {
+        let mut w = World::new(31, 2);
+        let me = PlayerId(0);
+
+        // No setup at all, deliberately: this city has not built a granary and
+        // is still told about the water. That is the ordering under test - an
+        // empty larder is a three-day problem and the flood is a one-day one.
+
+        // Put it on the day before the impact, which is what `Uneasy` is.
+        let day = sim::balance::TICKS_PER_DAY;
+        w.age_start_tick = 0;
+        w.tick = (sim::World::IMPACT_DAY - 2) * day + 1;
+        assert_eq!(w.omen(), sim::Omen::Uneasy, "the test did not reach the day it needed");
+
+        let line = super::next_thing(&w, me).unwrap_or_default();
+        assert!(
+            line.contains("water") || line.contains("uphill"),
+            "with the water a day out the panel said: {line:?}"
+        );
+        assert!(
+            !line.contains("trading post"),
+            "the flood is tomorrow and it is still shopping: {line:?}"
+        );
+
+        // And on the day itself.
+        w.tick = (sim::World::IMPACT_DAY - 1) * day + 1;
+        assert_eq!(w.omen(), sim::Omen::Impact);
+        let line = super::next_thing(&w, me).unwrap_or_default();
+        assert!(line.contains("uphill"), "the water is here and the panel said: {line:?}");
     }
 }
