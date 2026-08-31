@@ -102,6 +102,16 @@ impl World {
             let per = b.kind.ticks_per_unit();
             b.work += hands;
             while b.work >= per && b.kind.has_room_for(good, &b.store) {
+                // A cookery is the only building that eats a good to make one,
+                // and it stops when the raw food runs out rather than making
+                // meals from nothing. The work already put in is kept: cooks
+                // waiting on a hauler have not wasted the morning.
+                if let Some((from, n)) = b.kind.consumes() {
+                    if b.store.get(from) < n {
+                        break;
+                    }
+                    b.store.take(from, n);
+                }
                 b.work -= per;
                 b.store.add(good, 1);
             }
@@ -121,12 +131,19 @@ impl World {
     }
 
     /// The nearest granary of this citizen's own city that has anything in it.
+    ///
+    /// Either thing: a granary holding only meals is a granary with food in
+    /// it. Asking for `Good::Food` alone was how a city with a working cookery
+    /// could starve in front of a full larder.
     fn nearest_food(&self, i: usize) -> Option<BuildingId> {
         let c = &self.citizens[i];
         let (x, y) = c.pos.cell();
         self.stores_for(c.owner, Good::Food, x, y)
             .into_iter()
-            .find(|id| self.buildings[id.0 as usize].store.food > 0)
+            .find(|id| {
+                let s = &self.buildings[id.0 as usize].store;
+                s.food > 0 || s.meal > 0
+            })
     }
 
     /// This citizen's cottage, claiming one if it has none.
@@ -191,6 +208,7 @@ impl World {
             | Some(Job::Forester)
             | Some(Job::Quarrier)
             | Some(Job::Trader)
+            | Some(Job::Cook)
             | Some(Job::Builder) => {
                 if let Some(b) = self.citizens[i].workplace {
                     let there = &self.buildings[b.0 as usize];
@@ -320,6 +338,14 @@ impl World {
             self.citizens[i].walk_to(Dest::Building(from));
             return true;
         }
+        // A cookery with an empty larder is two people standing still, which
+        // is the same fault as a farm that has backed up and is answered in
+        // the same place.
+        if let Some((from, good, to)) = self.next_feed_run(owner, x, y) {
+            self.citizens[i].errand = Some(Errand::Collect { from, good, to });
+            self.citizens[i].walk_to(Dest::Building(from));
+            return true;
+        }
         if let Some((from, good, to)) = self.next_collection(owner, x, y) {
             self.citizens[i].errand = Some(Errand::Collect { from, good, to });
             self.citizens[i].walk_to(Dest::Building(from));
@@ -400,6 +426,40 @@ impl World {
         None
     }
 
+    /// A building that eats a good to make one, with room for more of it, and
+    /// somewhere to fetch it from.
+    ///
+    /// Only a cookery, and only one that has somebody in it: sending a hauler
+    /// across the city to stock an unmanned kitchen is a walk, not work.
+    fn next_feed_run(
+        &self,
+        owner: PlayerId,
+        x: i32,
+        y: i32,
+    ) -> Option<(BuildingId, Good, BuildingId)> {
+        for dst in &self.buildings {
+            if dst.owner != owner || !dst.standing_now() || dst.workers.is_empty() {
+                continue;
+            }
+            let Some((good, _)) = dst.kind.consumes() else {
+                continue;
+            };
+            if !dst.kind.has_room_for(good, &dst.store) {
+                continue;
+            }
+            let (dx, dy) = dst.centre();
+            let from = self
+                .stores_for(owner, good, dx, dy)
+                .into_iter()
+                .find(|id| self.buildings[id.0 as usize].store.get(good) > 0);
+            if let Some(from) = from {
+                let _ = (x, y);
+                return Some((from, good, dst.id));
+            }
+        }
+        None
+    }
+
     /// Output waiting at a producer, and somewhere to put it.
     fn next_collection(
         &self,
@@ -435,15 +495,21 @@ impl World {
 
     fn eat_at(&mut self, i: usize, granary: BuildingId) {
         let b = &mut self.buildings[granary.0 as usize];
-        if !b.standing_now() || b.store.food == 0 || self.citizens[i].food >= FED_ENOUGH {
+        // Meals first. A meal is worth two of what a raw unit is worth, and a
+        // granary holding both should spend the better one — a city that ate
+        // its raw food while the meals went stale would have built the cookery
+        // for nothing. It is also the only ordering a player can predict.
+        let on_offer = if b.store.meal > 0 { Good::Meal } else { Good::Food };
+        if !b.standing_now() || b.store.get(on_offer) == 0 || self.citizens[i].food >= FED_ENOUGH
+        {
             self.citizens[i].errand = None;
             if self.citizens[i].state == State::Eating {
                 self.citizens[i].state = State::Idle;
             }
             return;
         }
-        let taken = b.store.take(Good::Food, EAT_RATE);
-        self.citizens[i].eat(taken * FOOD_PER_UNIT);
+        let taken = b.store.take(on_offer, EAT_RATE);
+        self.citizens[i].eat(taken * FOOD_PER_UNIT * on_offer.feeds());
         self.citizens[i].state = State::Eating;
     }
 
@@ -485,7 +551,7 @@ impl World {
             let accepted = match dest.state {
                 // A site takes exactly what it still needs.
                 BuildState::Site => dest.deliver(g, amount),
-                BuildState::Standing if dest.kind.stores(g) => {
+                BuildState::Standing if dest.kind.takes(g) => {
                     let room = dest.kind.capacity().get(g).saturating_sub(dest.store.get(g));
                     let put = room.min(amount);
                     dest.store.add(g, put);

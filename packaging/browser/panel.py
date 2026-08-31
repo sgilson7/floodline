@@ -31,7 +31,12 @@ RIGHT = LEFT + WIDE
 TITLE = 44.0
 AGE_DAY = 86.0          # "age 1 of 3   day 1 of 6"
 OMEN = 112.0            # "all quiet" / "THE WATER IS HERE"
-TREASURY = 148.0        # "food N   wood N   stone N   gold N"
+TREASURY = 148.0        # "food N  wood N  stone N  gold N" + "  meals N"
+# Sixteen point since M12.C, not eighteen: five figures do not fit on 330
+# pixels at the old size, and `draw.rs` hands the two pixels back so nothing
+# below this row moves. The meals figure appears only when the city has any -
+# content that varies inside a row that does not, which is the only safe way
+# to make this panel conditional.
 CITIES = 188.0          # the "CITIES" label
 FIRST_CITY = 211.0      # "city 0 (you): 8 souls"
 CITY_STEP = 24.0
@@ -95,7 +100,30 @@ def body_top(cities=2):
 # here costs a row, and a row is forty pixels that have to come from somewhere
 # above `input::VARIABLE_FLOOR`. See SECOND-ORDER-M12.md.
 BUILDS = ["cottage", "farm", "granary", "forester", "quarry",
-          "stockpile", "dike", "post", "nursery", "hut", "road", "point"]
+          "stockpile", "dike", "post", "nursery", "hut", "cookery",
+          "road", "point"]
+
+# `input.rs::TOOL_PITCH` and `TOOL_BUTTON_H`, verbatim. Thirty-six and
+# thirty-three since M12.C: thirteen buttons need seven rows, and at the old
+# forty-pixel pitch the seventh row left five pixels between the trade offer
+# and `VARIABLE_FLOOR` once a building was selected. See there.
+PITCH = 36.0
+BUTTON_H = 33.0
+
+
+def _tools_height():
+    """`input.rs::tools`: eight pixels, a rule, sixteen, the grid, eight.
+
+    The one number the rows below the grid hang off. Everything under the build
+    tab is `body_top + _tools_height() + k` in `input.rs`, and was written here
+    as `body_top + (272 + k)` while the grid's height never changed. M12.C
+    changed it twice over - a seventh row, and a shorter pitch - so it is
+    derived now.
+    """
+    import math
+    buildable = len(BUILDS) - 2          # road and point are not in BUILDABLE
+    rows = math.floor((buildable + 3) / 2.0)
+    return 24.0 + PITCH * rows + 8.0
 
 
 def build_button(name, cities=2):
@@ -103,7 +131,7 @@ def build_button(name, cities=2):
     i = BUILDS.index(name)
     top = body_top(cities)
     x = LEFT + HALF / 2.0 + (i % 2) * (HALF + 8.0)
-    return (x, top + 42.0 + 40.0 * (i // 2))
+    return (x, top + 24.0 + BUTTON_H / 2.0 + PITCH * (i // 2))
 
 
 def road_button(cities=2):
@@ -116,29 +144,29 @@ def point_button(cities=2):
 
 def tool_hint(cities=2):
     """"drag to choose. right-click to send them", and the rest."""
-    return body_top(cities) + 272.0
+    return body_top(cities) + _tools_height()
 
 
 def hover(cities=2):
     """What the cursor is over: `farm: 0 of 3 working`. Reserved when empty."""
-    return body_top(cities) + 294.0
+    return tool_hint(cities) + 22.0
 
 
 def chosen_count(cities=2):
     """"nobody chosen" / "3 chosen"."""
-    return body_top(cities) + 338.0
+    return tool_hint(cities) + 66.0
 
 
 def back_to_hauling(cities=2):
-    return (LEFT + HALF / 2.0, body_top(cities) + 367.0)
+    return (LEFT + HALF / 2.0, tool_hint(cities) + 95.0)
 
 
 def choose_all(cities=2):
-    return (LEFT + HALF + 8.0 + HALF / 2.0, body_top(cities) + 367.0)
+    return (LEFT + HALF + 8.0 + HALF / 2.0, tool_hint(cities) + 95.0)
 
 
 def propose_a_trade(cities=2):
-    return (LEFT + WIDE / 2.0, body_top(cities) + 437.0)
+    return (LEFT + WIDE / 2.0, tool_hint(cities) + 165.0)
 
 
 def below_the_trade(cities=2):

@@ -31,10 +31,20 @@ pub enum Good {
     Wood,
     Stone,
     Gold,
+    /// Cooked food. One fills twice the need one `Food` does, which is the
+    /// whole of what a cookery is for.
+    ///
+    /// A separate good rather than a cookery that returns two `Food` for one.
+    /// The conversion would have needed no new good, no wire change and no
+    /// build hash, and it was still the wrong shape: it makes a cookery a
+    /// multiplier on a number nobody sees, where a `Meal` is a thing a player
+    /// hauls, stores, watches move and can run out of. See DECISIONS.md.
+    Meal,
 }
 
 impl Good {
-    pub const ALL: [Good; 4] = [Good::Food, Good::Wood, Good::Stone, Good::Gold];
+    pub const ALL: [Good; 5] =
+        [Good::Food, Good::Wood, Good::Stone, Good::Gold, Good::Meal];
 
     /// Whether a hauler can be sent to fetch this.
     ///
@@ -44,6 +54,16 @@ impl Good {
     /// city doing nothing useful very busily.
     pub fn hauled(self) -> bool {
         self != Good::Gold
+    }
+
+    /// How much of a citizen's need one unit fills, as a multiple of
+    /// `FOOD_PER_UNIT`. Nought for anything nobody eats.
+    pub fn feeds(self) -> u16 {
+        match self {
+            Good::Food => 1,
+            Good::Meal => MEAL_WORTH,
+            _ => 0,
+        }
     }
 }
 
@@ -56,25 +76,35 @@ pub struct Goods {
     pub wood: u16,
     pub stone: u16,
     pub gold: u16,
+    pub meal: u16,
 }
 
 impl Goods {
-    pub const NONE: Goods = Goods { food: 0, wood: 0, stone: 0, gold: 0 };
+    pub const NONE: Goods =
+        Goods { food: 0, wood: 0, stone: 0, gold: 0, meal: 0 };
 
     pub const fn wood(n: u16) -> Goods {
-        Goods { food: 0, wood: n, stone: 0, gold: 0 }
+        Goods { food: 0, wood: n, stone: 0, gold: 0, meal: 0 }
     }
 
     pub const fn stone(n: u16) -> Goods {
-        Goods { food: 0, wood: 0, stone: n, gold: 0 }
+        Goods { food: 0, wood: 0, stone: n, gold: 0, meal: 0 }
     }
 
     pub const fn gold(n: u16) -> Goods {
-        Goods { food: 0, wood: 0, stone: 0, gold: n }
+        Goods { food: 0, wood: 0, stone: 0, gold: n, meal: 0 }
     }
 
+    pub const fn meal(n: u16) -> Goods {
+        Goods { food: 0, wood: 0, stone: 0, gold: 0, meal: n }
+    }
+
+    /// **Four goods, not five.** Kept at four deliberately: nothing in the game
+    /// *costs* meals, and every one of the twenty-seven call sites meant zero
+    /// when meals did not exist. A fifth parameter would have made all of them
+    /// say so out loud for no gain. Use `Goods::meal` for a quantity of meals.
     pub const fn of(food: u16, wood: u16, stone: u16, gold: u16) -> Goods {
-        Goods { food, wood, stone, gold }
+        Goods { food, wood, stone, gold, meal: 0 }
     }
 
     pub fn get(&self, g: Good) -> u16 {
@@ -83,6 +113,7 @@ impl Goods {
             Good::Wood => self.wood,
             Good::Stone => self.stone,
             Good::Gold => self.gold,
+            Good::Meal => self.meal,
         }
     }
 
@@ -92,6 +123,7 @@ impl Goods {
             Good::Wood => self.wood = n,
             Good::Stone => self.stone = n,
             Good::Gold => self.gold = n,
+            Good::Meal => self.meal = n,
         }
     }
 
@@ -124,6 +156,7 @@ impl Goods {
             wood: cost.wood.saturating_sub(self.wood),
             stone: cost.stone.saturating_sub(self.stone),
             gold: cost.gold.saturating_sub(self.gold),
+            meal: cost.meal.saturating_sub(self.meal),
         }
     }
 
@@ -134,7 +167,13 @@ impl Goods {
     /// A percentage of each, rounded down — what rubble gives back.
     pub fn percent(&self, pct: u16) -> Goods {
         let f = |n: u16| ((n as u32 * pct as u32) / 100) as u16;
-        Goods { food: f(self.food), wood: f(self.wood), stone: f(self.stone), gold: f(self.gold) }
+        Goods {
+            food: f(self.food),
+            wood: f(self.wood),
+            stone: f(self.stone),
+            gold: f(self.gold),
+            meal: f(self.meal),
+        }
     }
 }
 
@@ -213,6 +252,10 @@ pub enum Kind {
     /// a wall up quickly was to unassign the whole city, and then nobody
     /// farmed.
     BuildersHut,
+    /// Turns raw food into meals. The only building in the game that **eats a
+    /// good to make one** — everything else turns worker-ticks into something
+    /// out of nothing.
+    Cookery,
     Dike,
     Road,
     Bridge,
@@ -221,7 +264,7 @@ pub enum Kind {
 impl Kind {
     /// Everything the MVP builds. Design §3.3 also lists Fishery, Forester's
     /// hut, Quarry, Guildhall, Tavern and Watchtower; the plan defers all six.
-    pub const ALL: [Kind; 13] = [
+    pub const ALL: [Kind; 14] = [
         Kind::Hearth,
         Kind::Cottage,
         Kind::Farm,
@@ -232,6 +275,7 @@ impl Kind {
         Kind::TradingPost,
         Kind::Nursery,
         Kind::BuildersHut,
+        Kind::Cookery,
         Kind::Dike,
         Kind::Road,
         Kind::Bridge,
@@ -249,7 +293,8 @@ impl Kind {
             | Kind::Stockpile
             | Kind::TradingPost
             | Kind::Nursery
-            | Kind::BuildersHut => (2, 2),
+            | Kind::BuildersHut
+            | Kind::Cookery => (2, 2),
             Kind::Dike => match facing {
                 Facing::EastWest => (DIKE_LENGTH, 1),
                 Facing::NorthSouth => (1, DIKE_LENGTH),
@@ -305,6 +350,11 @@ impl Kind {
             // the click is a different verb from every other building in the
             // game, and the placement flow assumes a site. See DECISIONS.md.
             Kind::BuildersHut => Goods::NONE,
+            // Priced with the granary it depends on. A cookery with nowhere to
+            // send its meals stops at `COOKERY_BUFFER`, exactly as a farm does
+            // with nowhere to send its food, so the two are bought together or
+            // neither is worth having.
+            Kind::Cookery => Goods::of(0, 50, 20, 0),
             // Ten a level *per cell*, not forty. A wall that changes the
             // outcome of a run is about thirty-four cells long — measured, in
             // `tests/playtest.rs` — and at forty a cell that is 2 720 stone
@@ -341,6 +391,7 @@ impl Kind {
             // Cheap, because the city that most needs one is the city that
             // cannot spare four people to put it up.
             Kind::BuildersHut => 100,
+            Kind::Cookery => 240,
             // Fifty a cell, not a hundred and fifty.
             //
             // A hundred and fifty was set when a dike was decoration; M5
@@ -369,6 +420,7 @@ impl Kind {
             | Kind::TradingPost
             | Kind::Nursery
             | Kind::BuildersHut
+            | Kind::Cookery
             | Kind::Bridge => Material::Wood,
             Kind::Hearth | Kind::Dike | Kind::Road => Material::Stone,
         }
@@ -389,6 +441,7 @@ impl Kind {
             // A shed. It costs nothing to put up and it is meant to be lost
             // and replaced rather than defended.
             Kind::BuildersHut => 120,
+            Kind::Cookery => 220,
             Kind::Dike => 400,
             // A road cell is a strip of packed stone and a bridge a few
             // planks: far less building than a cottage, and design §6 wants
@@ -418,6 +471,7 @@ impl Kind {
             Kind::Forester | Kind::Quarry => 3,
             Kind::Stockpile => 2,
             Kind::BuildersHut => 2,
+            Kind::Cookery => 3,
             Kind::Bridge => 1,
             // A dike shelters nobody by being a building; it does it by
             // raising the ground, which the automaton already knows about.
@@ -470,6 +524,9 @@ impl Kind {
             // actually applies is in `slots_for`, which lets a hut take as
             // many as a player names — see there.
             Kind::BuildersHut => BUILDER_SLOTS,
+            // Two, like the forester and the quarry: a city that can put three
+            // people on cooking is a city that has forgotten who grows it.
+            Kind::Cookery => 2,
             _ => 0,
         }
     }
@@ -494,12 +551,18 @@ impl Kind {
             // Gold is kept where it lands, and it lands at the hearth: see
             // `Good::hauled`.
             Kind::Hearth => Goods::of(0, 900, 900, 900),
-            Kind::Granary => Goods::of(500, 0, 0, 0),
+            // Meals are kept where food is kept and eaten where food is eaten,
+            // because a citizen goes to one place to eat and asking it to
+            // choose between two granaries would be a walk, not a decision.
+            Kind::Granary => Goods { food: 500, meal: 500, ..Goods::NONE },
             Kind::Stockpile => Goods::of(0, 500, 500, 0),
             // Not stores — output buffers. See `is_store`.
             Kind::Farm => Goods::of(FARM_BUFFER, 0, 0, 0),
             Kind::Forester => Goods::of(0, PRODUCER_BUFFER, 0, 0),
             Kind::Quarry => Goods::of(0, 0, PRODUCER_BUFFER, 0),
+            // Room for the raw food coming in as well as the meals going out.
+            // A producer that also consumes needs both, and it is the only one.
+            Kind::Cookery => Goods { food: COOKERY_BUFFER, meal: COOKERY_BUFFER, ..Goods::NONE },
             _ => Goods::NONE,
         }
     }
@@ -521,6 +584,19 @@ impl Kind {
             Kind::Farm => Some(Good::Food),
             Kind::Forester => Some(Good::Wood),
             Kind::Quarry => Some(Good::Stone),
+            Kind::Cookery => Some(Good::Meal),
+            _ => None,
+        }
+    }
+
+    /// What this building eats to make what it makes, if anything.
+    ///
+    /// Only a cookery answers. Every other producer turns worker-ticks into a
+    /// good out of nothing, which is why `produce` had no notion of an input
+    /// until M12.C.
+    pub fn consumes(self) -> Option<(Good, u16)> {
+        match self {
+            Kind::Cookery => Some((Good::Food, FOOD_PER_MEAL)),
             _ => None,
         }
     }
@@ -532,6 +608,7 @@ impl Kind {
             Kind::Farm => FARM_TICKS_PER_UNIT,
             Kind::Forester => FOREST_TICKS_PER_UNIT,
             Kind::Quarry => QUARRY_TICKS_PER_UNIT,
+            Kind::Cookery => COOK_TICKS_PER_UNIT,
             _ => u32::MAX,
         }
     }
@@ -539,6 +616,17 @@ impl Kind {
     /// Whether goods of this kind may be *delivered* here for keeping.
     pub fn stores(self, g: Good) -> bool {
         self.is_store() && self.capacity().get(g) > 0
+    }
+
+    /// Whether a hauler may put `g` down here — a store that keeps it, or a
+    /// cookery that will cook it.
+    ///
+    /// Separate from `stores` on purpose. `stores_for` answers "where can I get
+    /// this" as well as "where can I leave it", and a cookery is not a place to
+    /// fetch food *from*: haulers that treated it as one would carry the same
+    /// sack between the granary and the kitchen for the rest of the run.
+    pub fn takes(self, g: Good) -> bool {
+        self.stores(g) || self.consumes().is_some_and(|(need, _)| need == g)
     }
 
     /// Whether this building can hold any more of `g`, given what it has.
@@ -575,7 +663,7 @@ impl Kind {
             // Unreachable: every other job produces. Written out rather than
             // left to a wildcard so a new job has to come here and say what it
             // means.
-            Job::Farmer | Job::Forester | Job::Quarrier => 0,
+            Job::Farmer | Job::Forester | Job::Quarrier | Job::Cook => 0,
         }
     }
 
@@ -778,6 +866,7 @@ impl Building {
             wood: times(c.wood),
             stone: times(c.stone),
             gold: times(c.gold),
+            meal: times(c.meal),
         }
     }
 
@@ -1018,12 +1107,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_fourth_good_is_a_good_like_the_others() {
+    fn every_good_is_a_good_like_the_others() {
         // Gold is a departure from design §6 and it is still a `Good`: every
         // rule that reads `Good::ALL` reads it too, so nothing can quietly
         // forget it. What is *not* the same is that a hauler will not fetch
-        // it — see `Good::hauled`.
-        assert_eq!(Good::ALL.len(), 4);
+        // it — see `Good::hauled`. M12.C's `Meal` is the fifth and the same
+        // rule holds for it.
+        assert_eq!(Good::ALL.len(), 5);
         let mut g = Goods::of(1, 2, 3, 4);
         assert_eq!(g.get(Good::Gold), 4);
         assert_eq!(g.total(), 10);
@@ -1033,6 +1123,20 @@ mod tests {
         assert_eq!(g.take(Good::Gold, 3), 3);
         assert_eq!(g.gold, 1);
         assert_eq!(Goods::of(0, 0, 0, 10).percent(50), Goods::gold(5));
+
+        // A meal is hauled, is worth two, and rides in `Goods` like the rest.
+        // `Goods::of` takes four on purpose — nothing costs meals — so this is
+        // the only constructor that names one.
+        assert!(Good::Meal.hauled());
+        assert_eq!(Good::Meal.feeds(), MEAL_WORTH);
+        assert_eq!(Good::Food.feeds(), 1);
+        assert_eq!(Good::Wood.feeds(), 0, "nobody eats a log");
+        let mut m = Goods::meal(7);
+        assert_eq!(m.get(Good::Meal), 7);
+        assert_eq!(m.total(), 7, "a meal is not counted in `total` by some other name");
+        assert_eq!(m.take(Good::Meal, 3), 3);
+        assert_eq!(m.meal, 4);
+        assert_eq!(Goods::of(1, 1, 1, 1).meal, 0, "`of` must leave meals alone");
 
         assert!(Good::ALL.into_iter().filter(|g| !g.hauled()).eq([Good::Gold]));
     }

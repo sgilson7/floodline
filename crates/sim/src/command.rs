@@ -225,6 +225,7 @@ pub fn kind_key(k: Kind) -> &'static str {
         Kind::TradingPost => "post",
         Kind::Nursery => "nursery",
         Kind::BuildersHut => "hut",
+        Kind::Cookery => "cookery",
         Kind::Dike => "dike",
         Kind::Road => "road",
         Kind::Bridge => "bridge",
@@ -253,6 +254,7 @@ pub fn good_key(g: Good) -> &'static str {
         Good::Wood => "wood",
         Good::Stone => "stone",
         Good::Gold => "gold",
+        Good::Meal => "meal",
     }
 }
 

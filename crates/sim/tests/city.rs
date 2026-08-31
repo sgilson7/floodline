@@ -991,3 +991,95 @@ fn a_hut_builder_builds_before_it_hauls_and_an_unassigned_citizen_does_not() {
          ({with} against {without}) — the ordering is the whole feature"
     );
 }
+
+// ---- M12.C: the cookery ----------------------------------------------------
+
+#[test]
+fn a_cookery_turns_food_into_meals_and_a_meal_feeds_twice_as_far() {
+    // The only building in the game that eats a good to make one. Everything
+    // else turns worker-ticks into something out of nothing, which is why
+    // `produce` had no notion of an input until now.
+    //
+    // **What this arranges**: the cookery's larder is filled by hand and its
+    // output drained by hand, which is what a hauler that keeps up does. The
+    // conversion is the thing under test, not the logistics — and the
+    // logistics have their own answer, which is that a cookery with nowhere to
+    // send meals stops at `COOKERY_BUFFER`, exactly as a farm does.
+    use sim::balance::{COOK_TICKS_PER_UNIT, FOOD_PER_MEAL, MEAL_WORTH, NEED_FULL, TICKS_PER_DAY};
+    use sim::building::{Good, Goods, Kind};
+    use sim::command::Command;
+    use sim::nav::Nav;
+    use sim::world::World;
+    use sim::PlayerId;
+
+    let me = PlayerId(0);
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+
+    let cookery = site_near_hearth(&mut w, me, Kind::Cookery);
+    assert!(w.build_at(cookery, Kind::Cookery.build_ticks()));
+    let two: Vec<sim::CitizenId> =
+        w.citizens.iter().filter(|c| c.owner == me && !c.is_child()).map(|c| c.id).take(2).collect();
+    assert_eq!(w.will_take(me, cookery, &two), 2, "a cookery did not offer its slots");
+    w.apply(me, &Command::Assign { citizens: two, building: cookery }).unwrap();
+
+    let mut made: u32 = 0;
+    let mut eaten: u32 = 0;
+    for _ in 0..TICKS_PER_DAY {
+        for c in &mut w.citizens {
+            c.food = NEED_FULL;
+            c.rest = NEED_FULL;
+        }
+        // A hauler that keeps up, in both directions.
+        let b = &mut w.buildings[cookery.0 as usize];
+        let had = b.store.food;
+        b.store.set(Good::Food, sim::balance::COOKERY_BUFFER);
+        eaten += (sim::balance::COOKERY_BUFFER - had) as u32;
+        w.tick(&mut nav, &[]);
+        let b = &mut w.buildings[cookery.0 as usize];
+        made += b.store.meal as u32;
+        b.store.set(Good::Meal, 0);
+    }
+    println!("  a day of one cookery: {made} meals from {eaten} food");
+
+    // Two cooks at COOK_TICKS_PER_UNIT, and one unit of food per meal.
+    let expected = 2 * TICKS_PER_DAY / COOK_TICKS_PER_UNIT;
+    assert!(
+        made.abs_diff(expected) <= expected / 10,
+        "a day of two cooks made {made} meals, and the rate says about {expected}"
+    );
+    assert!(
+        eaten >= made * FOOD_PER_MEAL as u32,
+        "{made} meals came out of {eaten} food, which is less than they cost"
+    );
+
+    // And what a meal is worth. A citizen eating one is fed `MEAL_WORTH` times
+    // as far as the same unit of raw food would have fed it.
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+    let granary = site_near_hearth(&mut w, me, Kind::Granary);
+    assert!(w.build_at(granary, Kind::Granary.build_ticks()));
+
+    let fill_from = |w: &mut World, nav: &mut Nav, g: Good| -> u16 {
+        w.buildings[granary.0 as usize].store = Goods::NONE;
+        w.buildings[granary.0 as usize].store.set(g, 200);
+        let who = w.citizens.iter().position(|c| c.owner == me && !c.is_child()).unwrap();
+        w.citizens[who].food = 1;
+        let before = w.buildings[granary.0 as usize].store.get(g);
+        for _ in 0..TICKS_PER_DAY {
+            w.tick(nav, &[]);
+            if w.citizens[who].food >= sim::balance::FED_ENOUGH {
+                break;
+            }
+        }
+        before - w.buildings[granary.0 as usize].store.get(g)
+    };
+    let on_food = fill_from(&mut w, &mut nav, Good::Food);
+    let on_meals = fill_from(&mut w, &mut nav, Good::Meal);
+    println!("  filling one citizen took {on_food} food or {on_meals} meals");
+    assert!(on_food > 0 && on_meals > 0, "nobody ate at all");
+    assert!(
+        on_meals * MEAL_WORTH <= on_food + MEAL_WORTH,
+        "{on_meals} meals against {on_food} food: a meal is not worth {MEAL_WORTH} of it"
+    );
+}

@@ -58,6 +58,8 @@ pub enum Job {
     /// what design §6's "haulers you can watch" becomes when the load is going
     /// to another city.
     Trader,
+    /// Stands at a cookery and turns raw food into meals.
+    Cook,
 }
 
 impl Job {
@@ -77,13 +79,14 @@ impl Job {
             // it. What assigning to it does is set the *job*, which is what
             // makes "these four are my builders" a thing a player can say.
             Kind::BuildersHut => Some(Job::Builder),
+            Kind::Cookery => Some(Job::Cook),
             _ => None,
         }
     }
 
     /// Whether this job stands at one building and turns time into goods.
     pub fn produces(self) -> bool {
-        matches!(self, Job::Farmer | Job::Forester | Job::Quarrier)
+        matches!(self, Job::Farmer | Job::Forester | Job::Quarrier | Job::Cook)
     }
 
     /// Whether this job is done *at* a building, standing in one place and

@@ -38,7 +38,7 @@ the first thing that can kill you.
     panel                     read your side panel - do this most often
     shot                      the whole window, map included
     rows                      the status line and the three rows at the foot
-    key <Name>                Digit0..Digit9, KeyR, KeyP, KeyM, Escape
+    key <Name>                Digit0..Digit9, KeyC, KeyR, KeyP, KeyM, Escape
     button <name>             a panel button by name
     click-cell <x> <y>        the map, 0..127 both ways
     right-click-cell <x> <y>  give an order, or put the current tool down
@@ -49,7 +49,8 @@ the first thing that can kill you.
     wait <seconds>            let the world run
 
 Button names: `cottage farm granary forester quarry stockpile dike post
-nursery hut road point choose-all back-to-hauling trade tab-build tab-households`.
+nursery hut cookery road point choose-all back-to-hauling trade tab-build
+tab-households`.
 
 **Do not zoom or pan.** Every `*-cell` verb assumes the camera is where it
 starts. If something moves it, `frame` puts it back.
@@ -115,7 +116,10 @@ the panel:
   seems to have done nothing has almost always been answered.
 
 * **3 granary** — the only place food is kept, and the only place it is eaten.
-* **2 farm** — the only thing that grows food.
+* **2 farm** — the only thing that grows food. Three slots, and a farm feeds
+  far more than the eight people you start with — food is a clock, not *the*
+  clock. It fills its own small buffer and stops until a hauler empties it, so
+  a farm with no granary to send to makes very little whatever its slots say.
 * **1 cottage** — beds. Two adults sharing a fed cottage become a household.
 * **4 forester's hut** — the only source of wood.
 * **5 quarry** — the only source of stone. It needs rock beside it.
@@ -140,6 +144,13 @@ the panel:
   to work on. That is the opposite of an unassigned citizen, who carries first
   and builds when there is nothing to carry. Assign as many as you like — the
   hut has no limit, though only four can crowd one site at a time.
+* **c cookery** — two slots. It is the only building that **eats a good to make
+  one**: haulers bring it raw food and its cooks turn it into **meals**, and
+  one meal feeds a citizen as far as two units of raw food do. Meals are kept
+  in the granary alongside food and are eaten first. The treasury row grows a
+  `meals N` figure the moment you have any. A cookery does not make more food
+  — it makes the food you have go twice as far, so it is worth building when
+  land or farmhands are the shortage and worth nothing when neither is.
 * **r road** — click where it starts, click where it ends.
 * **p point** — a marker, for looking at.
 
@@ -181,6 +192,7 @@ How a city grows, which is all the game will tell you and all you need:
   child. No nursery, no children.
 * **0 builders hut** — free. Assign people to it and they build before they
   haul, and go on doing so until you say otherwise.
+* **c cookery** — turns raw food into meals worth two of it. Needs cooks.
 * A child does not work, and it eats. It comes of age two ages after it is
   born, so one born in the first age is working by the third and one born just
   before the last flood never works at all.

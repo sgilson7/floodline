@@ -218,6 +218,11 @@ fn job_mark(px: f32, py: f32, job: Option<sim::Job>, colour: Color, big: f32) {
         }
         // A purse.
         sim::Job::Trader => draw_circle(px + 2.5 * big, py - 1.0 * big, 1.5 * big, palette::WARNING),
+        // A pot: a bowl on a short stand, level with the shoulder.
+        sim::Job::Cook => {
+            draw_rectangle(px - 2.5 * big, py - 3.5 * big, 5.0 * big, 2.0 * big, colour);
+            draw_line(px, py - 1.5 * big, px, py - 0.5 * big, 1.0, colour);
+        }
         // A hauler's arms are full or they are not; the load is drawn by the
         // errand and not by the job, so this adds nothing.
         sim::Job::Hauler => {}
@@ -325,16 +330,34 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
             format!("{at_rest}+{carried}")
         }
     };
-    line(
-        &format!(
-            "food {}   wood {}   stone {}   gold {}",
-            amount(goods.food, hand.food),
-            amount(goods.wood, hand.wood),
-            amount(goods.stone, hand.stone),
-            amount(goods.gold, hand.gold),
-        ),
-        18, palette::INK, &mut y,
+    // Meals appear *in* this row rather than under it, and that is a layout
+    // decision rather than a typographic one. One more row here would move the
+    // cities, the amber line, the tabs and the whole build tab down by
+    // twenty-six pixels, and the panel has eighty-one to spare before the
+    // trade offer crosses `input::VARIABLE_FLOOR` — a selected building costs
+    // forty-eight of those on its own. A row whose *content* varies is safe; a
+    // row that comes and goes is the fault that has bitten this panel five
+    // times.
+    //
+    // Sixteen rather than eighteen, and two spaces rather than three, because
+    // five figures do not fit on 330 pixels at the old size. A city with no
+    // cookery never sees the fifth and reads exactly what it always did.
+    let mut goods_line = format!(
+        "food {}  wood {}  stone {}  gold {}",
+        amount(goods.food, hand.food),
+        amount(goods.wood, hand.wood),
+        amount(goods.stone, hand.stone),
+        amount(goods.gold, hand.gold),
     );
+    if goods.meal > 0 || hand.meal > 0 {
+        goods_line.push_str(&format!("  meals {}", amount(goods.meal, hand.meal)));
+    }
+    line(&goods_line, 16, palette::INK, &mut y);
+    // The two pixels the smaller face gave back, returned. `line` advances by
+    // `size + 8`, so shrinking this row would otherwise pull the cities, the
+    // amber line and everything under them up by two - a change nobody asked
+    // for, in the one file `panel.py` mirrors by hand.
+    y += 2.0;
     y += 14.0;
 
     line("CITIES", 15, palette::FAINT, &mut y);

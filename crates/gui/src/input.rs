@@ -50,7 +50,7 @@ pub enum Tool {
 /// them and the order the number keys pick them. `Hearth` is not among them:
 /// the run starts with the only one a city gets. `Road` and `Bridge` are laid
 /// by the road tool, which routes and bridges by itself (design §6).
-const BUILDABLE: [(Kind, &str, KeyCode); 10] = [
+const BUILDABLE: [(Kind, &str, KeyCode); 11] = [
     (Kind::Cottage, "cottage", KeyCode::Key1),
     (Kind::Farm, "farm", KeyCode::Key2),
     (Kind::Granary, "granary", KeyCode::Key3),
@@ -61,6 +61,7 @@ const BUILDABLE: [(Kind, &str, KeyCode); 10] = [
     (Kind::TradingPost, "post", KeyCode::Key8),
     (Kind::Nursery, "nursery", KeyCode::Key9),
     (Kind::BuildersHut, "builders hut", KeyCode::Key0),
+    (Kind::Cookery, "cookery", KeyCode::C),
 ];
 
 /// A trade being composed. Design §6: a standing daily exchange, proposed by
@@ -175,6 +176,24 @@ const LINGER: f32 = 0.5;
 /// level/move row and not both — so the overflow is real and has to be said
 /// rather than drawn.
 const VARIABLE_FLOOR: f32 = LOGICAL_H - 70.0;
+
+/// The build grid's row pitch, and the height of a button in it.
+///
+/// Thirty-six and thirty-three, and they were forty and thirty-six. M12.C's
+/// cookery made eleven buildings, which with the road and the point is
+/// thirteen buttons and a **seventh row** — forty pixels the panel does not
+/// have. Measured before it was written: the trade offer sat 93 px above
+/// `VARIABLE_FLOOR`, a selected building's level/move row costs 48 of them,
+/// and a seventh row at the old pitch left five. The overflow counter would
+/// then have quietly stopped drawing the trade row, which is the M10.6 fault
+/// wearing its other face — not drawn *over* the foot, but not drawn at all.
+///
+/// At thirty-six the seventh row costs four pixels in total and the slack
+/// stays at eighty-nine. `panel.py` mirrors both numbers; `play.py` and
+/// `assign.py` keep their own literals as tripwires and are expected to fail
+/// once here.
+const TOOL_PITCH: f32 = 36.0;
+const TOOL_BUTTON_H: f32 = 33.0;
 
 /// Whether a row of this height still fits above the foot.
 fn room_for(y: f32, height: f32) -> bool {
@@ -873,9 +892,9 @@ impl Input {
         for (i, (kind, name, key)) in BUILDABLE.iter().enumerate() {
             let r = Rect::new(
                 left + (i % 2) as f32 * (half + 8.0),
-                y + (i / 2) as f32 * 40.0,
+                y + (i / 2) as f32 * TOOL_PITCH,
                 half,
-                36.0,
+                TOOL_BUTTON_H,
             );
             let cost = kind.cost();
             let afford = goods.food >= cost.food && goods.wood >= cost.wood
@@ -913,9 +932,9 @@ impl Input {
         let slot = |i: usize| {
             Rect::new(
                 left + (i % 2) as f32 * (half + 8.0),
-                y + (i / 2) as f32 * 40.0,
+                y + (i / 2) as f32 * TOOL_PITCH,
                 half,
-                36.0,
+                TOOL_BUTTON_H,
             )
         };
         let road = slot(BUILDABLE.len());
@@ -932,7 +951,7 @@ impl Input {
         if self.tool == Tool::Ping {
             draw_rectangle_lines(ping.x, ping.y, ping.w, ping.h, 2.0, palette::INK);
         }
-        y += 40.0 * ((BUILDABLE.len() as f32 + 2.0 + 1.0) / 2.0).floor() + 8.0;
+        y += TOOL_PITCH * ((BUILDABLE.len() as f32 + 2.0 + 1.0) / 2.0).floor() + 8.0;
 
         draw_text(
             match self.tool {
@@ -1454,7 +1473,10 @@ fn digit_of(key: KeyCode) -> char {
         KeyCode::Key7 => '7',
         KeyCode::Key8 => '8',
         KeyCode::Key9 => '9',
-        // Unreachable while `BUILDABLE` only carries digits, and a question
+        // The cookery is `c`: the digits ran out at ten and a building is
+        // worth more than the shape of its shortcut.
+        KeyCode::C => 'c',
+        // Unreachable while `BUILDABLE` carries only these, and a question
         // mark on a button is a better failure than a panic in a draw loop.
         _ => '?',
     }
@@ -1472,6 +1494,7 @@ fn kind_name(k: Kind) -> &'static str {
         Kind::TradingPost => "trading post",
         Kind::Nursery => "nursery",
         Kind::BuildersHut => "builders hut",
+        Kind::Cookery => "cookery",
         Kind::Dike => "dike",
         Kind::Road => "road",
         Kind::Bridge => "bridge",
@@ -1535,6 +1558,7 @@ fn good_name(g: Good) -> &'static str {
         Good::Wood => "wood",
         Good::Stone => "stone",
         Good::Gold => "gold",
+        Good::Meal => "meals",
     }
 }
 

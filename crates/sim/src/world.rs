@@ -716,9 +716,16 @@ impl World {
     ///
     /// `None` when there is nobody left to feed, which is not the same answer
     /// as nought days and must not read like it.
+    /// Meals count for what they are worth, not for what they are: one meal
+    /// feeds a citizen as far as `MEAL_WORTH` raw units do, and a city that
+    /// had cooked its whole larder would otherwise be told it had half the
+    /// days it has. This number is the amber line's, and a wrong one here is
+    /// worse than none.
     pub fn days_of_food(&self, owner: PlayerId) -> Option<u32> {
         let eaten = self.eaten_a_day(owner);
-        (eaten > 0).then(|| self.treasury(owner).food as u32 / eaten)
+        let t = self.treasury(owner);
+        let stored = t.food as u32 + t.meal as u32 * crate::balance::MEAL_WORTH as u32;
+        (eaten > 0).then(|| stored / eaten)
     }
 
     /// Which in-game day it is, counting from one.
@@ -1586,7 +1593,7 @@ impl World {
             let [a, b] = self.households[i].members;
             let fed = self.citizens[a.0 as usize].food >= CHILD_FOOD
                 && self.citizens[b.0 as usize].food >= CHILD_FOOD
-                && self.treasury(owner).food > 0;
+                && (self.treasury(owner).food > 0 || self.treasury(owner).meal > 0);
             let spare_bed = {
                 let cottage = self.households[i].cottage;
                 let taken = self

@@ -613,7 +613,39 @@ pub const PRODUCER_BUFFER: u16 = 100;
 /// How much a farm holds before its farmers stop, waiting for a hauler. Small
 /// on purpose: a farm that could stockpile a week of food would make haulers
 /// optional, and watching the food move is the point.
+///
+/// It is also, until a granary is standing, the *only* cap that matters on a
+/// farm: a Hearth holds no food, so with nowhere to put the output a farm
+/// makes exactly this much in a day whatever `FARM_TICKS_PER_UNIT` says.
+/// `a_farm_feeds_a_founding_party_several_times_over` drains it and says so.
 pub const FARM_BUFFER: u16 = 60;
+
+/// How many `FOOD_PER_UNIT` one `Good::Meal` fills. Two: a cookery's whole
+/// purpose is that a unit of its output feeds a citizen twice as far as a unit
+/// of the raw food that went into it.
+pub const MEAL_WORTH: u16 = 2;
+
+/// Units of raw food one meal is cooked from.
+///
+/// One in, one out, and the *worth* doubles — so a cookery does not multiply
+/// food, it upgrades it. Two in for one out would have made the building a
+/// wash (two food fed two citizen-units before, and one meal feeds two after),
+/// which is a building with no reason to exist.
+pub const FOOD_PER_MEAL: u16 = 1;
+
+/// Cook-ticks per meal.
+///
+/// Slower than a farm is per unit, because a meal is worth two of what a farm
+/// makes: at eleven and eleven a cook and a farmer would be the same job with
+/// a better rate, and the cookery would simply replace the farm. At twenty-two
+/// a cook converts food at the same worth-per-tick a farmer grows it, so the
+/// building buys *density* - the same hands feeding twice as many mouths from
+/// half the farmland - rather than a free doubling.
+pub const COOK_TICKS_PER_UNIT: u32 = 22;
+
+/// How many meals a cookery holds before its cooks stop, waiting for a hauler.
+/// The same rule as a farm, and the same reason.
+pub const COOKERY_BUFFER: u16 = 40;
 
 /// Units a citizen can carry at once.
 pub const CARRY_CAPACITY: u16 = 20;
