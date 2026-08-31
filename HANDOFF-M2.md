@@ -13,7 +13,7 @@ comes next**. Read `CLAUDE.md`, then `HANDOFF.md`, then this.
 have finished a run together and survived the first flood — the first time
 anybody has played it.
 
-252 cargo tests, 14 browser checks, no warnings. `make test` ~24s,
+277 cargo tests, 14 browser checks, no warnings. `make test` ~30s,
 `make browser-test` ~6 minutes.
 
 The plan is an artifact, and it is the plan of record:
@@ -26,11 +26,11 @@ The plan is an artifact, and it is the plan of record:
 | M3 | Dikes: 3×1, drawn, breakable | **done** |
 | M4 | The river and the wave | **done** |
 | M5 | Tuning: which dikes break | **measured; food balance parked before M10** |
-| M6 | Gold, the trading hut, mules | ← **you are here** |
-| M7 | Levels, and moving buildings | |
-| M8 | Job icons, and workers going indoors | |
-| M9 | Families, children, a nursery, a households tab | |
-| M10 | Two agents, one game, played to the end | |
+| M6 | Gold, the trading hut, mules | **done** |
+| M7 | Levels, and moving buildings | **done** |
+| M8 | Job icons, and workers going indoors | **done** |
+| M9 | Families, children, a nursery, a households tab | **done** |
+| M10 | Two agents, one game, played to the end | ← **you are here** |
 
 Nothing is half-written. Every commit is green. M3 is pushed and deployed; M4
 is committed and **not** pushed, so the Pages build has no river in it yet.

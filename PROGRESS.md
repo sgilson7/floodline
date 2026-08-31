@@ -282,3 +282,57 @@ wearing a hat. The river has just made this the most interesting milestone
 left: the cities are on opposite banks, so a mule has to find the ford or a
 bridge, and "a mule that cannot get across says so in the panel" stops being a
 corner case and becomes the common one.
+
+---
+
+## Session 7 — 2026-08-31
+
+**M6, M7, M8 and M9 built.** 277 cargo tests, 14 browser checks, no warnings.
+M5's residual is still parked before M10, and none of these four touched it.
+
+* **M6 — gold, the trading post, the mule.** `Good::Gold` went in on its own
+  first; `covers`, `total` and the panel's cost line now walk `Good::ALL` so a
+  fifth good cannot be left off a price tag. A post's traders are mules on the
+  road: one trader is one mule, it carries ten wood to the nearest other city
+  and comes home with gold, it drowns like a hauler, and one with nowhere to go
+  says so on the map and in the panel. Gold is *minted* by the exchange rather
+  than moved — nothing else makes it, so a first trade would be impossible
+  otherwise.
+* **M7 — levels and moving.** A level is one more citizen the building can
+  hold, one sentence for every kind. A move keeps the id, the store and the
+  level and arrives as a site with its materials in it, so it costs time and
+  not materials. The plan's "one more hauler based there" for stores could not
+  be honoured: a hauler here is based nowhere, so levels are sold only where
+  hands go.
+* **M8 — silhouettes and going indoors.** Six shapes over the head, because the
+  colour already says whose city this is. `nav::passable` gained one exception
+  — you may go inside the place you are going to — and the flow field is seeded
+  at the *middle*, which is what actually made three farmers stand on one
+  corner. The crowd drifts a worker in and then spreads them through the
+  inside.
+* **M9 — families.** Two adults sharing a fed cottage for a day are a
+  household; a fed household with a nursery place and a spare bed has a child
+  on a timer; a child does not work and comes of age two ages later. A
+  households tab lists them and hovering one rings its people on the map.
+
+### Three bugs these turned up in earlier work
+
+* **A road over the ford came out with a hole in it** and nothing said so:
+  `lay_road` bridged `Ground::Shallows` exactly and a ford is water too, so
+  every road cell laid on it was refused and `Road::intact` quietly said the
+  cities were not linked. An M4 bug, found by M8.
+* **`Job::produces` was answering the wrong question** about where a worker
+  stands, so a trader arriving at its post had its workplace cleared and left a
+  mule belonging to nobody. `Job::stationed` is the question that was meant.
+* **`two_cities_found_a_road_and_trade_for_three_days` had drifted into the
+  flood.** Founding two cities across a river takes four days now, so its third
+  day of trading was the impact day and the water took the road — a failure
+  that read as "trade moved nothing".
+
+### Next action
+
+**M10 — two agents, one game, played to the end.** It is the last milestone by
+construction, and it is the only one that cannot be done by writing code: it
+needs a second agent driving a second browser, and the balance work parked
+after M5 is meant to be answered by what that run shows. Ask before starting
+it — it is a long, expensive run and it is the user's call.
