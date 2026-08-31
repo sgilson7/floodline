@@ -228,9 +228,35 @@ would have wasted the thirty-six minutes:
 * The first-click complaint was neither of those and does not reproduce; it is
   recorded here rather than fixed, because there is nothing yet to fix.
 
-Everything else in this document is about the game, and none of it is changed
-here. M10.8 is where the run's findings are answered, and the run has not
-happened yet.
+One finding about the *game* was judged to block the run rather than wait for
+M10.8, and was fixed before it:
+
+**The panel now names the clock as well as the mechanism.** The amber line said
+"the granary is empty - give the farm a moment" for two days while both cities
+starved. It reads
+
+    1 food left, and 8 mouths eat 96 a day - under a day
+
+and, when the granary is bare,
+
+    the granary is empty. 8 mouths eat 96 a day - more farmers, or fewer
+    hands carrying stone
+
+Twelve units a citizen a day is arithmetic on the eating model rather than a
+number anybody chose: a need falls one point a tick over 1 200 ticks and one
+stored unit fills a hundred of it. `World::eaten_a_day` and
+`World::days_of_food` are the queries, with a test; `larder` is its own
+function so its sentences can be tested at the widths a city of ninety makes of
+them, because the panel keeps two rows and silently drops a third.
+
+**And a working building now says what is standing on it**: `farm: 3 of 3
+working, 1 food waiting`. City 0's two days of not knowing were exactly this
+question — a farm with three farmers and nothing waiting has just been emptied
+by a hauler, and one with a pile waiting has nobody carrying it. Opposite
+problems, and the row read identically for both.
+
+Everything else in this document is about the game and none of it is changed
+here. M10.8 is where the rest is answered, and the run has not happened yet.
 
 ## What still has to be true for M10.6
 

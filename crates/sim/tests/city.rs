@@ -601,3 +601,44 @@ fn the_two_producers_are_bought_with_what_the_other_one_makes() {
         quarry.wood
     );
 }
+
+/// What a city costs to keep, which the panel could not say until M10.5.
+///
+/// Both players in the rehearsal starved beside a staffed farm while the panel
+/// told them "the granary is empty - give the farm a moment", unchanged, for
+/// two days. It named the mechanism and never the clock. These are the two
+/// numbers that fix it, and they are arithmetic on the eating model rather
+/// than constants somebody chose: a need falls `FOOD_DECAY` a tick over
+/// `TICKS_PER_DAY` and one stored unit fills `FOOD_PER_UNIT` of it.
+#[test]
+fn a_city_can_say_what_it_eats_and_how_long_the_larder_lasts() {
+    let mut w = World::new(7, 2);
+    let me = PlayerId(0);
+    let mouths = w.population(me);
+    assert!(mouths > 0, "a new city has nobody in it");
+
+    // Twelve a head a day, derived from the decay and the exchange rate.
+    assert_eq!(FOOD_A_DAY, (TICKS_PER_DAY * FOOD_DECAY as u32) / FOOD_PER_UNIT as u32);
+    assert_eq!(w.eaten_a_day(me), mouths * FOOD_A_DAY);
+
+    // An empty granary is nought days, and says so.
+    assert_eq!(w.treasury(me).food, 0, "a city does not start with food");
+    assert_eq!(w.days_of_food(me), Some(0));
+
+    // Three days' worth is three days.
+    let three = 3 * w.eaten_a_day(me);
+    let store = w.buildings.iter().position(|b| b.owner == me).expect("a hearth");
+    w.buildings[store].store.add(Good::Food, three as u16);
+    assert_eq!(w.treasury(me).food as u32, three);
+    assert_eq!(w.days_of_food(me), Some(3));
+
+    // And a dead city is not a city with nought days of food. Telling a player
+    // "0 days left" about people who are already gone would be worse than
+    // saying nothing, which is what the panel does with `None`.
+    for c in w.citizens.iter_mut().filter(|c| c.owner == me) {
+        c.die();
+    }
+    assert_eq!(w.population(me), 0);
+    assert_eq!(w.eaten_a_day(me), 0);
+    assert_eq!(w.days_of_food(me), None, "nobody left to feed is not nought days");
+}

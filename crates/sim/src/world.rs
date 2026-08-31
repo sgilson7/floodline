@@ -699,6 +699,28 @@ impl World {
         self.citizens.iter().filter(|c| c.owner == owner && c.alive()).count() as u32
     }
 
+    /// What this player's people eat in a day, in units of `Good::Food`.
+    ///
+    /// Children included: M9 made a child a citizen in every way but work, and
+    /// the way that matters here is that it eats.
+    pub fn eaten_a_day(&self, owner: PlayerId) -> u32 {
+        self.population(owner) * crate::balance::FOOD_A_DAY
+    }
+
+    /// Whole days the granary will feed this city for, if nothing is grown.
+    ///
+    /// The number both players in the M10.5 rehearsal said would have saved
+    /// them. The panel could say "the granary is empty" and did; what it could
+    /// not say was how long that had left to run, and a city with a staffed
+    /// farm and an empty granary cannot tell "too slow" from "not working".
+    ///
+    /// `None` when there is nobody left to feed, which is not the same answer
+    /// as nought days and must not read like it.
+    pub fn days_of_food(&self, owner: PlayerId) -> Option<u32> {
+        let eaten = self.eaten_a_day(owner);
+        (eaten > 0).then(|| self.treasury(owner).food as u32 / eaten)
+    }
+
     /// Which in-game day it is, counting from one.
     pub fn day(&self) -> u32 {
         self.tick / TICKS_PER_DAY + 1

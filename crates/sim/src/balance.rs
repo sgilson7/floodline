@@ -495,6 +495,16 @@ pub const NAV_CACHE_MAX: usize = 24;
 /// haulers carry. At 100, a citizen eats about eight units a day.
 pub const FOOD_PER_UNIT: u16 = 100;
 
+/// Units of stored food one citizen eats in a day.
+///
+/// Derived, not chosen: a need falls `FOOD_DECAY` a tick over `TICKS_PER_DAY`,
+/// and one stored unit fills `FOOD_PER_UNIT` of it. Twelve, as the comment on
+/// `FARM_TICKS_PER_UNIT` has said all along — it is written down as a number
+/// the game can do arithmetic with because two players starved to death next
+/// to a working farm without ever being told what their people cost to keep.
+pub const FOOD_A_DAY: u32 =
+    (TICKS_PER_DAY * FOOD_DECAY as u32) / FOOD_PER_UNIT as u32;
+
 /// Farmer-ticks per unit of food produced.
 ///
 /// A citizen burns a thousand points of food need a day and one unit fills a

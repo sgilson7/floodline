@@ -790,11 +790,23 @@ impl Input {
             w.citizens.iter().filter(|c| c.alive() && f(c, b.id)).count()
         };
         Some(match b.kind {
+            // What it is holding, as well as who is in it. A farm with three
+            // farmers and nothing waiting is a farm that has just been emptied
+            // by a hauler; a farm with three farmers and a pile waiting is a
+            // city with nobody carrying it. They are opposite problems and the
+            // row used to read identically for both — which is what left a
+            // player in the M10.5 rehearsal watching an empty granary for two
+            // days unable to tell whether the farm was even working.
             k if sim::citizen::Job::at(k).is_some() => format!(
-                "{name}: {} of {} working{}",
+                "{name}: {} of {} working{}{}",
                 here(|c, id| c.workplace == Some(id)),
                 b.slots_for(sim::citizen::Job::at(k).expect("just matched")),
                 level_note(b),
+                if b.store.total() > 0 {
+                    format!(", {} waiting", goods_line(b.store))
+                } else {
+                    String::new()
+                },
             ),
             Kind::Cottage => format!(
                 "{name}: {} of {} beds taken{}",

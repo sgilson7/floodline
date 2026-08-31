@@ -18,12 +18,41 @@ use macroquad::prelude::*;
 use sim::building::Kind;
 use sim::{PlayerId, World};
 
+/// What to say about the larder, if it is worth saying anything.
+///
+/// Its own function so the sentences can be tested at the widths a big city
+/// makes of them: the panel keeps two rows of 52 columns and drops a third
+/// without a word, and these are the only lines here that carry numbers.
+///
+/// It exists because of the M10.5 rehearsal, where the line said "the granary
+/// is empty - give the farm a moment", unchanged, for two days while both
+/// cities starved with their farms staffed three-of-three. It named the
+/// mechanism and never the clock, so neither player could tell "a day too
+/// slow" from "the food is not moving at all", and both of them separately
+/// asked for this number afterwards.
+fn larder(mouths: u32, eaten: u32, food: u16) -> Option<String> {
+    if food == 0 {
+        return Some(format!(
+            "the granary is empty. {mouths} mouths eat {eaten} a day - \
+             more farmers, or fewer hands carrying stone"
+        ));
+    }
+    // Less than a day left. `days_of_food` would say nought; this says it in
+    // the words a player can act on.
+    if eaten > 0 && u32::from(food) < eaten {
+        return Some(format!(
+            "{food} food left, and {mouths} mouths eat {eaten} a day - under a day"
+        ));
+    }
+    None
+}
+
 /// The one thing this city most needs, and how to do it.
 ///
 /// Ordered by what kills you soonest: a citizen empties at tick 1000 and dies
 /// 3600 later, so a city with nowhere to eat has until day four, and the water
 /// does not come until day six. Food first, always.
-pub fn next_thing(w: &World, me: PlayerId) -> Option<&'static str> {
+pub fn next_thing(w: &World, me: PlayerId) -> Option<String> {
     if !w.players.contains(&me) || w.population(me) == 0 || w.finished().is_some() {
         return None;
     }
@@ -41,34 +70,35 @@ pub fn next_thing(w: &World, me: PlayerId) -> Option<&'static str> {
 
     // Food, in the order it can go wrong.
     if !placed(Kind::Granary) {
-        return Some("press 3, click the ground: a granary. food is kept there, and eaten there");
+        return Some("press 3, click the ground: a granary. food is kept there, and eaten there".to_owned());
     }
     if !placed(Kind::Farm) {
-        return Some("press 2, click the ground: a farm. nothing else grows food");
+        return Some("press 2, click the ground: a farm. nothing else grows food".to_owned());
     }
     if !standing(Kind::Granary) || !standing(Kind::Farm) {
-        return Some("they are being built - your people fetch the wood themselves");
+        return Some("they are being built - your people fetch the wood themselves".to_owned());
     }
     if !working(Kind::Farm) {
-        return Some("drag to choose your people, then right-click the farm");
+        return Some("drag to choose your people, then right-click the farm".to_owned());
     }
-    if w.treasury(me).food == 0 {
-        return Some("the granary is empty - give the farm a moment");
+    // What the city costs to keep, whenever the larder is thin.
+    if let Some(line) = larder(w.population(me), w.eaten_a_day(me), w.treasury(me).food) {
+        return Some(line);
     }
 
     // Then the two things that run out.
     let goods = w.treasury(me);
     if goods.wood < Kind::Cottage.cost().wood && !placed(Kind::Forester) {
-        return Some("low on wood: press 4 for a forester's hut, the only source");
+        return Some("low on wood: press 4 for a forester's hut, the only source".to_owned());
     }
     if standing(Kind::Forester) && !working(Kind::Forester) {
-        return Some("nobody is cutting wood: right-click the forester's hut");
+        return Some("nobody is cutting wood: right-click the forester's hut".to_owned());
     }
     if goods.stone < Kind::Dike.cost().stone * 8 && !placed(Kind::Quarry) {
-        return Some("low on stone: press 5 for a quarry. it needs rock beside it");
+        return Some("low on stone: press 5 for a quarry. it needs rock beside it".to_owned());
     }
     if standing(Kind::Quarry) && !working(Kind::Quarry) {
-        return Some("nobody is at the quarry: right-click it");
+        return Some("nobody is at the quarry: right-click it".to_owned());
     }
 
     // Trade, once the city can feed itself and cut its own timber. A cart
@@ -76,33 +106,33 @@ pub fn next_thing(w: &World, me: PlayerId) -> Option<&'static str> {
     // advice — it is a report, and without it a player watches a mule stand in
     // the yard and has no way to find out why.
     if w.mules.iter().any(|m| m.alive() && m.owner == me && m.leg == sim::Leg::Stuck) {
-        return Some("a mule has nowhere to take its load: no other city it can reach");
+        return Some("a mule has nowhere to take its load: no other city it can reach".to_owned());
     }
     if standing(Kind::Forester) && !placed(Kind::TradingPost) {
-        return Some("press 8 for a trading post: its mules sell wood abroad for gold");
+        return Some("press 8 for a trading post: its mules sell wood abroad for gold".to_owned());
     }
     if standing(Kind::TradingPost) && !working(Kind::TradingPost) {
-        return Some("nobody is at the trading post: right-click it to send a mule out");
+        return Some("nobody is at the trading post: right-click it to send a mule out".to_owned());
     }
     // Then the next generation.
     if standing(Kind::Cottage) && !placed(Kind::Nursery) {
-        return Some("press 9 for a nursery: no nursery, no children");
+        return Some("press 9 for a nursery: no nursery, no children".to_owned());
     }
     if standing(Kind::Nursery)
         && !w.households.iter().any(|h| h.owner == me && h.alive())
     {
-        return Some("put two people in one cottage: a day of that makes a household");
+        return Some("put two people in one cottage: a day of that makes a household".to_owned());
     }
     if w.treasury(me).gold >= sim::balance::UPGRADE_GOLD {
-        return Some("you have gold: click a farm and level it - a level is one more pair of hands");
+        return Some("you have gold: click a farm and level it - a level is one more pair of hands".to_owned());
     }
 
     // Then the flood.
     if !placed(Kind::Dike) {
-        return Some("press 7 and drag a wall between your city and the water");
+        return Some("press 7 and drag a wall between your city and the water".to_owned());
     }
     if w.omen() == sim::Omen::Uneasy {
-        return Some("the water comes tomorrow: choose everybody, send them uphill");
+        return Some("the water comes tomorrow: choose everybody, send them uphill".to_owned());
     }
     None
 }
@@ -181,5 +211,54 @@ impl Welcome {
         if ui.clicked || ui.right_clicked || get_last_key_pressed().is_some() {
             self.shown = false;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sim::{PlayerId, World};
+
+    /// Every sentence this can say has to fit the two rows the panel reserves.
+    ///
+    /// `draw::panel` wraps at 52 columns and takes two rows; a third is dropped
+    /// without a word. The food lines are the longest here and the only ones
+    /// that carry numbers, so they are the ones that can grow past the edge
+    /// when a city does — a city of thirty eats three digits a day.
+    #[test]
+    fn every_line_fits_the_two_rows_the_panel_keeps_for_it() {
+        let mut w = World::new(3, 2);
+        let me = PlayerId(0);
+
+        // Walk a city through the states that produce a line, checking each.
+        let mut seen = 0;
+        for _ in 0..40 {
+            if let Some(line) = super::next_thing(&w, me) {
+                let rows = crate::ui::wrapped_words(&line, 52);
+                assert!(
+                    rows.len() <= 2,
+                    "{:?} needs {} rows and the panel keeps two",
+                    line,
+                    rows.len()
+                );
+                seen += 1;
+            }
+            w.tick(&mut sim::nav::Nav::new(), &[]);
+        }
+        assert!(seen > 0, "the tutorial line never said anything");
+
+        // And the worst case the numbers can make. Not played to: the point
+        // is the width of the digits, and a city of ninety with three-digit
+        // consumption is the widest these sentences ever get.
+        for (mouths, eaten, food) in [(8u32, 96u32, 0u16), (30, 360, 0), (90, 1080, 0),
+                                      (8, 96, 5), (90, 1080, 999)] {
+            let line = super::larder(mouths, eaten, food)
+                .unwrap_or_else(|| panic!("a hungry city of {mouths} says nothing"));
+            assert!(line.contains(&eaten.to_string()), "it should name what they eat: {line:?}");
+            let rows = crate::ui::wrapped_words(&line, 52);
+            assert!(rows.len() <= 2, "{:?} needs {} rows and the panel keeps two", line, rows.len());
+        }
+
+        // A city that is fed says nothing about the larder at all.
+        assert_eq!(super::larder(8, 96, 500), None);
     }
 }

@@ -318,7 +318,7 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
     // or not there is anything in them, so the buttons below do not move as a
     // city's situation changes.
     if let Some(next) = crate::tutorial::next_thing(w, me) {
-        for (i, row) in crate::ui::wrapped_words(next, 52).iter().take(2).enumerate() {
+        for (i, row) in crate::ui::wrapped_words(&next, 52).iter().take(2).enumerate() {
             draw_text(row, left, y + i as f32 * 18.0, 15.0, palette::WARNING);
         }
     }

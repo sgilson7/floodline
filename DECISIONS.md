@@ -2418,3 +2418,51 @@ is drawn in `palette::ALARM` (230, 84, 71) and `Status::WaitingOn` in
 a row where only a refusal is ever coloured. Here it would report a desync
 every few seconds, since waiting on the other peer is what lockstep does all
 day. `alarm_pixels` separates them on green.
+
+---
+
+## 2026-08-31 — The panel names the clock, not just the mechanism
+
+The M10.5 rehearsal killed both cities in age one and neither death was the
+water. The plan puts the run's findings in M10.8, *after* the run; this one was
+pulled forward because it is the reason a run to age three could not happen.
+
+The amber line is the most trusted thing on screen — both agents said so
+unprompted, one calling it "the best thing in this game" — and it said "the
+granary is empty - give the farm a moment", unchanged, for two days while eight
+people starved beside a farm staffed three-of-three. It was correct. It named
+the mechanism and never the clock, so neither player could tell "a day too
+slow" from "the food is not moving at all", and both of them separately asked
+for the same number afterwards.
+
+    1 food left, and 8 mouths eat 96 a day - under a day
+    the granary is empty. 8 mouths eat 96 a day - more farmers, or fewer
+    hands carrying stone
+
+**Twelve units a citizen a day is derived, not chosen.** `FOOD_A_DAY` is
+`TICKS_PER_DAY * FOOD_DECAY / FOOD_PER_UNIT`: a need falls a point a tick and
+one stored unit fills a hundred of it. The comment on `FARM_TICKS_PER_UNIT` has
+said "about twelve units a day" since phase 1; this writes it down as a number
+the game can do arithmetic with rather than one only the author knew.
+
+`days_of_food` returns `None` for a city with nobody left in it, which is not
+the same answer as nought days and must not read like it — telling a player
+"0 days left" about people who are already gone would be worse than the silence
+the panel keeps now.
+
+**`larder` is its own function so it can be tested at the width a big city
+makes of it.** `draw::panel` wraps the line at 52 columns and takes two rows;
+a third is dropped without a word. The food lines are the only ones here
+carrying numbers, so they are the only ones that grow when a city does, and a
+city of ninety eating four digits a day is what the test checks.
+
+**A working building now says what is standing on it** — `farm: 3 of 3
+working, 1 food waiting`. That row used to read identically for two opposite
+situations: a farm just emptied by a hauler, and a farm nobody is carrying
+from. One player spent two days unable to tell which it was watching, and it
+was the question that killed its city.
+
+Nothing about the balance changed. No constant was retuned, no yield altered,
+no rule about how food is made or moved. This is the panel saying out loud a
+number the simulation already had — which is what M5 meant when it said the
+food economy needed a person to look at it, rather than a probe.
