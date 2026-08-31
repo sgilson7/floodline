@@ -2225,3 +2225,92 @@ how close the next one is; hovering it rings those people on the map in a
 wider, warmer ring than a selection's — a different question ("where are these
 people") deserving a different mark. It is only useful because M2 put a camera
 over the map to see them at.
+
+---
+
+## 2026-08-31 — M10 is played at ten ticks a second, on the deployed build
+
+`HANDOFF-M10.md` leaves this open and asks for it to be chosen deliberately: a
+run is three ages of six days of 1 200 ticks, which at `TICKS_PER_SECOND` is
+thirty-six minutes of wall clock, and the alternative is a test-only multiplier
+on `Clock::ticks_due`.
+
+**There is no multiplier.** The choice closes itself once both halves of the
+milestone are written down together. The done-condition names *the deployed
+build*; a multiplier lives in `crates/gui/src/main.rs` and must never reach a
+shipped build. Both cannot hold — to multiply the clock on the deployed page
+you have to deploy the multiplier. The escape is to run both peers on a
+matching local build, which the build-hash guard permits, but then the one
+artefact nobody has ever played is still the page a player opens, and that is
+the whole milestone.
+
+And it would compress the variable under test. A day is two minutes of thinking
+time. At four times the clock it is thirty seconds, and "was the wall worth
+building" is partly a question about whether a city can afford the *attention*
+and not only the labour — which is exactly what M5 parked for a run to answer.
+A multiplier would not make the agents decide faster; it would only give them
+less time to.
+
+The cost is accepted rather than worked around: thirty-six minutes for the run
+and about twelve for the rehearsal, both of them spent watching. The polling
+cadence that follows from it is about one look every twenty-five seconds
+through a quiet day, tightening to five or ten seconds on day six of each age
+— roughly ninety looks each over a run.
+
+---
+
+## 2026-08-31 — Two browsers, because thirty seconds of not rendering is a drop
+
+The handoff asks for two browser *contexts* rather than two pages in one, so
+that two agents do not share a clipboard, a `localStorage` or a permission
+grant. `two_agents.py` uses two whole browsers instead, for a reason that only
+appears over a long run and that nothing in the repo had written down.
+
+`Lockstep::DROP_AFTER_TICKS` is 300 ticks — thirty seconds — and it is counted
+in the *waiting* peer's own ticks, so it is thirty seconds of wall clock at ten
+ticks a second. `Clock::MOST_PER_FRAME` is 8, so a page must render at least
+1.25 frames a second to hold the rate at all, and a backlog past eight ticks is
+dropped rather than caught up. Chromium throttles animation frames in
+backgrounded and occluded pages, and two pages in one browser cannot both be in
+front. A run would therefore be decided by which tab Chromium thought was
+visible, and the symptom — one peer dropped twenty minutes in — would look
+exactly like a network fault.
+
+So: one browser each, launched with `--disable-background-timer-throttling`,
+`--disable-backgrounding-occluded-windows` and
+`--disable-renderer-backgrounding`. Playwright passes all three itself today;
+they are named in our launch anyway, because the reason we need them is ours
+and not Playwright's to keep.
+
+`two_agents.py` also checks something `game_two_tabs.py` does not: that both
+tabs are still ticking three seconds after they arrive. A page that stopped
+rendering draws the same map as one that is playing, and looks correct right up
+until it is dropped.
+
+---
+
+## 2026-08-31 — An agent's hands are one-shot commands, and it is told what a player knows
+
+Two things about the shape of the playtest, decided before it starts because
+both of them are easier to get right than to fix halfway through a run.
+
+**The hands.** An agent's turns are separate processes and it cannot hold a
+`sync_playwright()` session open across them. So the browsers are launched once
+with their own `--remote-debugging-port`, and every action an agent takes is a
+short `connect_over_cdp`, act, screenshot, disconnect. The state lives in the
+browser, which is where it already lives. Each agent is given exactly one port
+and never learns the other's — which turns "neither may read the other's page"
+from a promise into a property of the setup rather than a rule somebody has to
+keep.
+
+**The briefing.** An agent is told what a player could know: the controls, the
+goods, the buildings, the deadline, the river and the ford — the first-run card
+and the manual, written down. It is told nothing from `crates/sim`: no balance
+constants, no source, no probe tables, no idea which dikes break. Otherwise the
+run measures an agent's reading of `balance.rs` rather than the game, and design
+step 7's question — whether this is *fun* — cannot be answered by somebody who
+has read the answer key.
+
+The referee is the exception and is not a player: it reads both panels on a
+schedule, issues no input, and detects the desync banner as red in the status
+row, the way `assign.py::alarm_band` detects a refusal. It is an instrument.
