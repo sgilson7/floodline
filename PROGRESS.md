@@ -520,7 +520,21 @@ growth objective.
 strategy table is identical either side — the game is unchanged and a run is
 eighteen minutes. 282 cargo tests and 17 browser checks green.
 
-The single next action is **M11.2 — a panel that tells the truth**: decide how
-the foot of the panel stops being overdrawn by a pending trade offer, write the
-decision down, and get `panel_rows.py` failing on today's build with an offer
-pending and a building selected.
+**M11.2 is done**, all six of it. The foot of the panel can no longer be drawn
+over — `VARIABLE_FLOOR`, with 68 pixels of clearance found where there were 15,
+38 bought back from the tools and 23 from the foot itself. `day 7 of 6` is
+fixed, a city that has died is told so, a refusal dims rather than disappearing
+and is cleared by the next command that works, and the host now tells every
+peer when the worlds come apart instead of freezing them on `playing`.
+
+Three panel tripwires fired, which is what they are for; one of them,
+`two_agents.py`, had copied the tick row instead of importing it and was ours
+to fix. Writing the desync test found a second bug in the first version of that
+fix: the host announced the fault once per turn in the drain, so the two
+players were shown different ticks for the same desync.
+
+The single next action is **M11.3 — ground you can read**, which is what both
+players asked for above everything else. `Map::height` already exists, so
+hovering ground is display only; the high-water mark is a running maximum of
+`Water::depth`, new state in the checksum, and one bit a cell costs 2 KB of the
+`Welcome` snapshot against a budget of 50-150.

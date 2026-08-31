@@ -123,7 +123,7 @@ five harness files promising thirty-six minutes.
 
 ---
 
-## M11.2 — A panel that tells the truth
+## M11.2 — A panel that tells the truth — **done**
 
 The instrument first, because M10's own referee was fooled by it and because
 half of this is self-inflicted.
@@ -362,7 +362,7 @@ account says whether a city that grows survives better than a city that walls.
 | | | why here |
 |---|---|---|
 | M11.1 | The clock | **done** — free, measured neutral, and it halves the wall-clock cost of every test after it |
-| M11.2 | A panel that tells the truth | the instrument everything else is judged with, and half of it is our doing |
+| M11.2 | A panel that tells the truth | **done** — the instrument everything else is judged with, and half of it was our doing |
 | M11.3 | Ground you can read | what both players asked for above everything else |
 | M11.4 | A wall you can read | the game's central purchase, still never tested above level one |
 | M11.5 | Sending some of the people | the worst part of the game by both accounts |

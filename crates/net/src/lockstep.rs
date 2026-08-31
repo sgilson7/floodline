@@ -492,7 +492,7 @@ impl Lockstep {
                 self.reported.entry(checked_tick).or_default().insert(player, checksum);
                 self.seen_at.insert(player, checked_tick);
                 self.waited.insert(player, 0);
-                self.check_agreement(checked_tick);
+                self.check_agreement(checked_tick, peer);
             }
 
             Message::Bundle { tick, turns } if !self.host => {
@@ -509,8 +509,28 @@ impl Lockstep {
 
     /// Everyone who reported a checksum for `tick` must have reported the same
     /// one. The host is the only peer that sees them all, which is why it is
-    /// the one that notices.
-    fn check_agreement(&mut self, tick: u32) {
+    /// the one that notices — and, since M11.2, the one that tells everybody
+    /// else.
+    ///
+    /// A checksum rides on `Turn`, which every peer sends to the host and to
+    /// nobody else, so a joiner has nothing to compare and its status can never
+    /// become `Desync` on its own. Before this it was never told either: the
+    /// host stopped, its bundles stopped with it, and the joiner sat on
+    /// `playing` for ever with a frozen world and no explanation. Two people
+    /// playing, one shown the fault and the other's game simply stopping.
+    ///
+    /// Said with `Bye`, which already exists and already ends a joiner's run
+    /// with a reason in `palette::ALARM`. A new message would have changed the
+    /// wire format, and therefore the build hash, for a sentence.
+    fn check_agreement(&mut self, tick: u32, peer: &mut impl Peer) {
+        // Once, and once only. Several turns can arrive in one drain and every
+        // one of them calls this; without the guard the host announced the
+        // fault again for each, and the last announcement named a later tick
+        // than its own status did — so the two players were shown different
+        // ticks for the same desync.
+        if self.status.is_stopped() {
+            return;
+        }
         let Some(reports) = self.reported.get(&tick) else {
             return;
         };
@@ -524,6 +544,17 @@ impl Lockstep {
                     // disagreement, so it is the one that has to report it.
                     let with = if player == self.me { first } else { player };
                     self.status = Status::Desync { with, tick };
+                    // Both names, because a joiner reading this is neither
+                    // sure to be one of them nor able to work out who was.
+                    peer.broadcast(
+                        &encode(&Message::Bye {
+                            reason: format!(
+                                "DESYNC at tick {tick}: city {} and city {} disagree about the world",
+                                first.0, player.0
+                            ),
+                        }),
+                        true,
+                    );
                     return;
                 }
                 _ => {}

@@ -297,6 +297,25 @@ fn a_peer_whose_world_differs_is_caught_and_the_game_stops() {
     let stopped_at = g.steps[0].tick();
     g.run(20);
     assert_eq!(g.steps[0].tick(), stopped_at, "the host kept simulating after a desync");
+
+    // Everybody else is told, which they were not until M11.2. A checksum
+    // rides on `Turn`, which goes to the host and to nobody else, so a joiner
+    // can never notice a desync itself — and it used to be left sitting on
+    // `playing` with a frozen world and no explanation while the host showed
+    // the fault. Two people playing, one shown why and the other's game simply
+    // stopping.
+    for (i, ls) in g.steps.iter().enumerate().skip(1) {
+        match &ls.status {
+            Status::Ended(reason) => {
+                assert!(reason.contains("DESYNC"), "peer {i} was told {reason:?}");
+                assert!(
+                    reason.contains(&format!("tick {_tick}")),
+                    "peer {i} should be told when: {reason:?}"
+                );
+            }
+            other => panic!("peer {i} was never told the game came apart: {other:?}"),
+        }
+    }
 }
 
 /// The panel's "peers at" row: the host can see how far everybody has got, and

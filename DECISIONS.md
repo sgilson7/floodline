@@ -2636,3 +2636,50 @@ M10.5 rehearsal lost their city without being told; one found out by noticing a
 grey nought in the roster. `tutorial::obituary` is a separate function from
 `next_thing` because it answers a different question, and it is silent once the
 run is over: the score screen says it better and says it for everybody.
+
+---
+
+## 2026-08-31 — A refusal that outlives a glance, and a joiner that is told
+
+The last two of M11.2, and both are the same fault in different places: the
+game knew something and stopped saying it too soon.
+
+**A refusal now dims rather than disappearing.** It was removed at
+`NOTICE_SECONDS`, four and a half seconds, which is right for the player who is
+watching their own click and useless to anybody who looks away. In the M10.6
+run both players concluded that clicks were being ignored, and every one of
+those clicks had in fact been answered — seconds earlier, in a message that had
+already gone. "Nothing happened" is exactly the state a player puzzles over for
+a while, so the answer has to still be there when they come back to it.
+
+It holds at full strength for `NOTICE_SECONDS`, fades to `LINGER`, and stays.
+What clears it is **the next command that works**: the line then always names
+the last thing that did not, and never something already put right. A timer
+cannot know that and a player should not have to.
+
+Half alpha rather than a third, checked in a browser twelve seconds after the
+event rather than reasoned about — at a third it was there and not worth
+reading.
+
+**And the host tells everybody when the worlds come apart.** A checksum rides
+on `Turn`, which every peer sends to the host and to nobody else, so a joiner
+has nothing to compare and its status can never become `Desync` on its own.
+Until now it was never *told* either: the host stopped, its bundles stopped
+with it, and the joiner sat on `playing` with a frozen world and no
+explanation. Two people playing, one shown the fault and the other's game
+simply stopping.
+
+Said with `Bye`, which already exists and already ends a joiner's run with a
+reason drawn in `palette::ALARM`. A new message would have changed the wire
+format, and therefore the build hash, for one sentence. It names both cities,
+because a joiner reading it is neither sure to be one of them nor able to work
+out who was.
+
+**Writing the test found a second bug in the first version of the fix.**
+Several turns can arrive in one drain and every one of them calls
+`check_agreement`, so the host announced the fault once per turn — and the last
+announcement named a later tick than its own status did. The two players were
+shown different ticks for the same desync. It returns early once the game is
+stopped now. `a_peer_whose_world_differs_is_caught_and_the_game_stops` asserts
+on every peer rather than only on the host, which is what it should have done
+since phase 3.

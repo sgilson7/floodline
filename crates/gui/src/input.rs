@@ -124,8 +124,13 @@ impl Default for Input {
     }
 }
 
-/// How long a refusal stays on screen.
+/// How long a refusal stays at full strength before it dims.
 const NOTICE_SECONDS: f64 = 4.5;
+
+/// What a refusal fades *to*, rather than away to nothing.
+///
+/// Enough to read if you go looking, faint enough not to compete with the map.
+const LINGER: f32 = 0.5;
 
 /// The lowest a variable row may reach.
 ///
@@ -230,8 +235,11 @@ impl Input {
     }
 
     fn issue(&mut self, session: &mut Session, cmd: Command) {
-        if let Err(e) = session.issue(cmd) {
-            self.say(e.to_message());
+        match session.issue(cmd) {
+            Err(e) => self.say(e.to_message()),
+            // A command that worked answers the question the last refusal was
+            // still sitting there asking.
+            Ok(()) => self.notice = None,
         }
     }
 
@@ -1064,16 +1072,21 @@ impl Input {
     fn notice(&mut self) {
         let Some((text, at)) = &self.notice else { return };
         let age = get_time() - at;
-        if age > NOTICE_SECONDS {
-            self.notice = None;
-            return;
-        }
-        // Held at full strength for most of its life and then faded, on a
-        // dark plate. It used to fade from the first frame straight into the
-        // terrain, which made the one piece of feedback the game gives when a
-        // command is refused into something you could look straight past —
-        // and did.
-        let fade = (1.0 - (age / NOTICE_SECONDS) as f32).min(0.35) / 0.35;
+        // Dimmed after a few seconds, and then left there.
+        //
+        // It used to be removed at `NOTICE_SECONDS`, which is fine for the
+        // player who was watching their own click and useless to anybody who
+        // looked away — and in the M10.6 run both players concluded that
+        // clicks were being ignored when every one of them had in fact been
+        // answered, four and a half seconds earlier. "Nothing happened" is
+        // exactly the state you puzzle over for a while, so the answer has to
+        // still be there when you come back to it.
+        //
+        // Cleared by the next command that *works*, in `say_nothing`, so the
+        // line always refers to the last thing that did not — never to
+        // something already put right.
+        let bright = (1.0 - (age / NOTICE_SECONDS) as f32).min(0.35) / 0.35;
+        let fade = bright.max(LINGER);
         let m = measure_text(text, None, 22, 1.0);
         let x = (LOGICAL_W - PANEL_W) / 2.0 - m.width / 2.0;
         let plate = Rect::new(x - 18.0, LOGICAL_H - 52.0, m.width + 36.0, 36.0);
