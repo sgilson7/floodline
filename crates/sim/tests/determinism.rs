@@ -11,7 +11,7 @@
 //! and needs — and the scripted `Command` stream covering every variant
 //! arrives with `Command` in item 7.
 
-use sim::balance::{FOUNDING_CITIZENS, NEED_FULL, TICKS_PER_DAY};
+use sim::balance::{DAYS_PER_AGE, FOUNDING_CITIZENS, NEED_FULL, SURGE_TICKS, TICKS_PER_DAY};
 use sim::building::{BuildState, Facing, Good, Kind};
 use sim::citizen::{Job, PlayerId};
 use sim::citizen::CitizenId;
@@ -614,4 +614,60 @@ fn a_scripted_command_stream_covering_every_variant_replays() {
         "a city with no granary is not even hungry"
     );
     let _ = (CitizenId(0), granary);
+}
+
+/// The high-water mark is state, so two peers have to agree about it.
+///
+/// M11.3 put a bit a cell into `Water`, which means it rides in the checksum
+/// and in the `Welcome` snapshot. A mark that drifted between peers would be a
+/// desync — and one that drifted *only during a flood* would be a desync that
+/// only ever happened at the worst moment of a run, which is the kind this
+/// project has learned to test for rather than hope about.
+///
+/// Both worlds are put at the start of the impact day rather than played to
+/// it. Six days of two worlds in a debug build takes longer than the whole
+/// rest of the suite, and what is under test is the flood, not the walk to it.
+#[test]
+fn two_peers_remember_the_same_high_water_mark() {
+    let mut a = World::new(23, 2);
+    let mut b = World::new(23, 2);
+    let (mut na, mut nb) = (Nav::new(), Nav::new());
+    let impact_day = (World::IMPACT_DAY - 1) * TICKS_PER_DAY;
+    a.tick = impact_day;
+    b.tick = impact_day;
+
+    let until = impact_day + SURGE_TICKS + 600;
+    while a.tick < until {
+        a.tick(&mut na, &[]);
+        b.tick(&mut nb, &[]);
+        if a.tick % 100 == 0 {
+            assert_eq!(a.checksum(), b.checksum(), "the worlds parted at tick {}", a.tick);
+        }
+    }
+
+    let mut marked = 0usize;
+    for y in 0..sim::MAP_H {
+        for x in 0..sim::MAP_W {
+            assert_eq!(
+                a.water.reached_at(x, y),
+                b.water.reached_at(x, y),
+                "the mark differs at ({x},{y}) after the flood"
+            );
+            marked += a.water.reached_at(x, y) as usize;
+        }
+    }
+    assert!(marked > 100, "a flood should leave a mark, and left {marked} cells");
+    println!("  the age-one flood reached {marked} cells");
+
+    // And an age turning forgets it, so the mark is always the *last* flood
+    // rather than every flood there has ever been.
+    a.tick = DAYS_PER_AGE * TICKS_PER_DAY - 1;
+    a.tick(&mut na, &[]);
+    a.tick(&mut na, &[]);
+    assert_eq!(a.age(), 2, "the age should have turned");
+    let still = (0..sim::MAP_H)
+        .flat_map(|y| (0..sim::MAP_W).map(move |x| (x, y)))
+        .filter(|&(x, y)| a.water.reached_at(x, y))
+        .count();
+    assert!(still < marked, "the new age kept the old age's mark: {still} of {marked}");
 }

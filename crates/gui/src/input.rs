@@ -824,23 +824,47 @@ impl Input {
     /// The building under the mouse, and how full it is.
     fn under_the_cursor(&self, w: &World, me: PlayerId, ui: &Ui, view: &MapView) -> Option<String> {
         let (x, y) = view.cell_at(ui.mouse)?;
-        let b = w.building_at(x, y)?;
+        // Whatever this cell is, say how much water is standing on it. "Is my
+        // own hearth under water" was a question neither player in the M10.6
+        // run could ask during a flood, and it is the one moment when the
+        // answer decides what to do next.
+        Some(self.what_is_there(w, me, x, y) + &wetness(w, x, y))
+    }
+
+    fn what_is_there(&self, w: &World, me: PlayerId, x: i32, y: i32) -> String {
+        let Some(b) = w.building_at(x, y) else {
+            // Bare ground, which this row used to have nothing to say about.
+            //
+            // Both players in the M10.6 run named it as the biggest gap in the
+            // game: in something entirely about water height there was no way
+            // to ask how high a cell stands. One of them chose a nineteen-cell
+            // wall by cropping a screenshot and eyeballing the shoreline, and
+            // planned a whole age by noting which pixels had stayed green
+            // through the last flood — "that is reading the renderer, not
+            // playing the game". `Map::height` has been there since phase 1.
+            return format!(
+                "{}  height {}{}",
+                ground_name(w.map.ground_at(x, y)),
+                w.map.height_at(x, y),
+                if w.water.reached_at(x, y) { "  the water reached here" } else { "" },
+            );
+        };
         let name = kind_name(b.kind);
         if b.owner != me {
-            return Some(format!("city {}'s {name}", b.owner.0));
+            return format!("city {}'s {name}", b.owner.0);
         }
         if !b.standing_now() {
             let want = b.outstanding();
-            return Some(if want.is_empty() {
+            return if want.is_empty() {
                 format!("{name}: being built")
             } else {
                 format!("{name}: waiting for {}", cost_line(want))
-            });
+            };
         }
         let here = |f: fn(&sim::Citizen, sim::BuildingId) -> bool| {
             w.citizens.iter().filter(|c| c.alive() && f(c, b.id)).count()
         };
-        Some(match b.kind {
+        match b.kind {
             // What it is holding, as well as who is in it. A farm with three
             // farmers and nothing waiting is a farm that has just been emptied
             // by a hauler; a farm with three farmers and a pile waiting is a
@@ -867,7 +891,7 @@ impl Input {
             ),
             Kind::Dike => format!("{name}: level {} of {}", b.level, sim::balance::DIKE_MAX_LEVEL),
             _ => format!("{name}: {}", goods_line(b.store)),
-        })
+        }
     }
 
     /// Roads and trades that are waiting on this player to say yes.
@@ -1125,6 +1149,38 @@ fn kind_name(k: Kind) -> &'static str {
 }
 
 /// What a store is holding, or that it is empty.
+/// What the ground is called, in the words the first-run card uses.
+fn ground_name(g: sim::Ground) -> &'static str {
+    match g {
+        sim::Ground::Shallows => "shallows",
+        sim::Ground::Ford => "a ford",
+        sim::Ground::Sand => "sand",
+        sim::Ground::Grass => "grass",
+        sim::Ground::Rock => "rock",
+    }
+}
+
+/// How much water is standing on a cell, in what it means for a person.
+///
+/// Not a number: `Water::depth` is in sixteenths of a unit of terrain height,
+/// which is the right unit for the automaton and no use at all to somebody
+/// deciding whether to walk through it. Design §3.4 already draws the two
+/// lines that matter — `WADE_DEPTH` and `SWIM_DEPTH` — so those are the words.
+fn wetness(w: &World, x: i32, y: i32) -> String {
+    let d = w.water.depth_at(x, y);
+    if d < sim::balance::PUDDLE {
+        return String::new();
+    }
+    let how = if d >= sim::balance::SWIM_DEPTH {
+        "out of your depth"
+    } else if d >= sim::balance::WADE_DEPTH {
+        "wading"
+    } else {
+        "underfoot"
+    };
+    format!("  water: {how}")
+}
+
 fn goods_line(g: sim::building::Goods) -> String {
     let line = cost_line(g);
     if line == "free" {

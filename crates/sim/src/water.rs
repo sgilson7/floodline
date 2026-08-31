@@ -38,6 +38,25 @@ pub struct Water {
     pub drained: u64,
     /// Everything the sea has pushed *in* over the edges during a surge.
     pub poured: u64,
+    /// Where the water got to this age, one bit a cell.
+    ///
+    /// The high-water mark, and the thing both players in the M10.6 run asked
+    /// for above everything else — in a game entirely about water height there
+    /// was no way to ask where the water had been. One of them planned a whole
+    /// age by screenshotting the previous flood at its peak and noting which
+    /// pixels stayed green.
+    ///
+    /// **A bit and not a depth.** A `Welcome` with a snapshot was already
+    /// 100 369 bytes against design §8's 150 KB, so the width had to be priced
+    /// rather than chosen: a `u16` a cell is 32 KB of that headroom and a `u8`
+    /// is 16, while a bit is two. What was asked for is a *line* — where did it
+    /// reach — and a line is one bit. Measured after: 102 419 bytes, which is
+    /// the 2 048 of the bitset and two more for its length.
+    ///
+    /// Cost in time, from `tests/profile.rs`: a flooding tick went from 0.75 ms
+    /// to 0.78 against a 20 ms budget, because the marking is folded into the
+    /// sweep `step` already makes rather than given a pass of its own.
+    reached: Vec<u8>,
 }
 
 impl Water {
@@ -48,8 +67,31 @@ impl Water {
             flow_y: vec![0; CELLS],
             drained: 0,
             poured: 0,
+            reached: vec![0; CELLS.div_ceil(8)],
         }
     }
+
+    /// Did the water reach this cell, deep enough to matter, since the age
+    /// began?
+    ///
+    /// `WADE_DEPTH` is the line, which is design §3.4's own: below it the water
+    /// is underfoot and harmless, at it a citizen is slowed. A mark that
+    /// counted every damp cell would shade most of the map and say nothing.
+    pub fn reached_at(&self, x: i32, y: i32) -> bool {
+        if !Map::contains(x, y) {
+            return false;
+        }
+        let i = Map::idx(x, y);
+        self.reached[i / 8] & (1 << (i % 8)) != 0
+    }
+
+    /// Forget the last flood. Called when an age turns, so the mark always
+    /// shows the most recent one rather than every one that ever happened.
+    pub fn forget_the_mark(&mut self) {
+        self.reached.fill(0);
+    }
+
+
 
     pub fn depth_at(&self, x: i32, y: i32) -> u16 {
         if Map::contains(x, y) {
@@ -150,14 +192,28 @@ impl Water {
         let mut fy = vec![0i32; CELLS];
         let mut drained_now: u64 = 0;
 
+        // Borrowed field by field rather than through `self`, so the mark can
+        // be written inside the same sweep that reads the depths. `surface`
+        // holds `depth` for the whole loop, and `reached` is a different field.
+        let Water { depth, reached, .. } = self;
+
         // Ground is in terrain units and depth in sixteenths, so the surface
         // has to be spoken in sixteenths for the two to be compared at all.
-        let surface = |i: usize| ground[i] * DEPTH_SCALE as i32 + self.depth[i] as i32;
+        let surface = |i: usize| ground[i] * DEPTH_SCALE as i32 + depth[i] as i32;
 
         for y in 0..MAP_H {
             for x in 0..MAP_W {
                 let i = Map::idx(x, y);
-                let here = self.depth[i];
+                let here = depth[i];
+                // Where the water got to, taken before it moves: a cell that
+                // drains this tick was still under it when the tick began.
+                //
+                // In this loop rather than a pass of its own, because a second
+                // sweep of sixteen thousand cells a tick is most of a tick's
+                // budget on a map that is dry five days out of six.
+                if here >= crate::balance::WADE_DEPTH {
+                    reached[i / 8] |= 1 << (i % 8);
+                }
                 if here <= PUDDLE {
                     continue;
                 }

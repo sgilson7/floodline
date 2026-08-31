@@ -2683,3 +2683,55 @@ shown different ticks for the same desync. It returns early once the game is
 stopped now. `a_peer_whose_world_differs_is_caught_and_the_game_stops` asserts
 on every peer rather than only on the host, which is what it should have done
 since phase 3.
+
+---
+
+## 2026-08-31 — The map remembers where the water got to
+
+M11.3, and the thing both players in the M10.6 run asked for above everything
+else. In a game entirely about water height there was no way to ask how high a
+cell stands or where the water had been; one of them planned a whole age by
+screenshotting the previous flood at its peak and noting which pixels stayed
+green — "that is reading the renderer, not playing the game".
+
+**Half of it was already there.** `Map::height` has held a height per cell
+since phase 1, so hovering bare ground is a display change and nothing more.
+The row says what the ground is and how high it stands, and every hover —
+building or not — now ends with how much water is on the cell, in design
+§3.4's own words rather than in sixteenths of a terrain unit: *underfoot*,
+*wading*, *out of your depth*. "Is my own hearth under water" was a question
+neither player could ask during a flood, which is the one moment the answer
+decides what to do.
+
+**The mark is one bit a cell, and the width was priced rather than chosen.**
+A `Welcome` with a snapshot was already 100 369 bytes against design §8's
+150 KB budget. A `u16` a cell would have taken 32 KB of the remaining fifty, a
+`u8` 16, a bit two. What was asked for is a *line* — where did it reach — and a
+line is one bit. Measured after: 102 419 bytes, which is the 2 048 of the
+bitset and two more for its length.
+
+`WADE_DEPTH` is the threshold, which is design §3.4's own line: below it the
+water is underfoot and harmless. A mark that counted every damp cell would
+shade most of the map and say nothing.
+
+Forgotten when an age turns, so it is always the *last* flood. Floods escalate,
+so that is only ever a difference *during* a flood — which is exactly when
+somebody is watching it.
+
+**Two things went wrong in the writing and both were about cost.** The first
+version gave the marking a pass of its own: sixteen thousand cells every tick,
+dry or not, which is most of a tick's budget on a map that is dry five days out
+of six and made the determinism test take longer than the whole rest of the
+suite. It is folded into the sweep `step` already makes, through disjoint field
+borrows so `surface` can go on holding `depth`. A flooding tick went from
+0.75 ms to 0.78 against a 20 ms budget.
+
+The second was the test itself, which reached the flood by simulating six days
+in a debug build and took over ten minutes. Both worlds are put at the impact
+day now and it runs in 0.6 seconds. What is under test is the flood, not the
+walk to it.
+
+**A number worth keeping.** The age-one flood reaches 10 951 cells of 16 384 —
+two thirds of the map. That matches both accounts of a flood that "swallows the
+map", and it means the mark's value is not in showing where the water went but
+in showing the third of the map where it did not.

@@ -16,6 +16,14 @@ pub const FAINT: Color = Color::new(0.42, 0.42, 0.52, 1.0);
 pub const WARNING: Color = Color::new(0.94, 0.72, 0.28, 1.0);
 pub const ALARM: Color = Color::new(0.90, 0.33, 0.28, 1.0);
 
+/// Where the water got to, drawn under everything.
+///
+/// Faint on purpose. It is a memory of a flood, not a flood, and it covers
+/// large parts of the map — at anything stronger it competes with the ground
+/// it is meant to annotate, and the ground is what tells a player where the
+/// rock and the grass are.
+pub const HIGH_WATER: Color = Color::new(0.36, 0.55, 0.72, 0.16);
+
 /// Ground, shaded by height so the lie of the land reads without contours.
 ///
 /// The ramp runs from a drab olive in the lowlands to a pale grey on the

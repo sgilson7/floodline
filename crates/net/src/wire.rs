@@ -149,6 +149,7 @@ mod tests {
             snapshot: Some(Box::new(World::new(1, 6))),
         };
         let n = encode(&m).len();
+        println!("  a Welcome with a snapshot is {n} bytes");
         assert!(n < 150_000, "a Welcome with a snapshot is {n} bytes");
     }
 

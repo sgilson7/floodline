@@ -248,6 +248,11 @@ impl World {
             }
             self.age += 1;
             self.age_start_tick = self.tick;
+            // The high-water mark shows the *last* flood, so it is forgotten
+            // when a new age begins. Floods escalate, so this is only ever a
+            // difference during a flood — but during a flood is exactly when
+            // somebody is watching it.
+            self.water.forget_the_mark();
             // Drawn at age start, from the one Rng, and not shown.
             self.disaster = Disaster::draw(self.age, &self.map, &mut self.rng);
         }

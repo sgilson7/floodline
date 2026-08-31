@@ -22,6 +22,7 @@ pub fn world(
 ) {
     let seen = view.visible();
     ground(w, seen);
+    high_water(w, seen);
     water(w, seen);
     buildings(w, seen);
     citizens(w, selected, ringed);
@@ -46,6 +47,34 @@ fn ground(w: &World, seen: (i32, i32, i32, i32)) {
                 CELL,
                 CELL,
                 palette::ground(w.map.ground[i], w.map.height[i], relief),
+            );
+        }
+    }
+}
+
+/// Where the water reached this age, under everything else.
+///
+/// The one thing both players in the M10.6 run asked for above all else. One
+/// of them planned an entire age by screenshotting the previous flood at its
+/// peak and noting which pixels had stayed green — "that is reading the
+/// renderer, not playing the game". It is the map's job to remember.
+///
+/// A wash rather than an outline: a line along the boundary would be prettier
+/// and would need edge detection over sixteen thousand cells every frame, and
+/// what a player is asking is "was this cell under water", which is a property
+/// of the cell.
+fn high_water(w: &World, seen: (i32, i32, i32, i32)) {
+    for y in seen.1..=seen.3 {
+        for x in seen.0..=seen.2 {
+            if !w.water.reached_at(x, y) {
+                continue;
+            }
+            draw_rectangle(
+                MAP_X + x as f32 * CELL,
+                MAP_Y + y as f32 * CELL,
+                CELL,
+                CELL,
+                palette::HIGH_WATER,
             );
         }
     }
