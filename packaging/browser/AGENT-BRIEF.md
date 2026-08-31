@@ -13,6 +13,9 @@ whether this is *fun*, which nobody can answer from the answer key.
 **You may not look at the other player's screen.** You are given one port. The
 other one exists and is not yours.
 
+**Cities are told apart by colour on the map.** City 0 is yellow, city 1 is
+magenta. Both are legible against water, which the flood makes a lot of.
+
 ---
 
 ## The game
@@ -63,7 +66,13 @@ starts. If something moves it, `frame` puts it back.
 * The status line: `playing`, `waiting on city N`, or **`DESYNC with city N at
   tick T`** in red. If you ever see the red one, **stop and say so at once** —
   that outranks everything else in the run.
-* At the foot: `tick N`, `peers at [...]`, the build hash and the seed.
+* At the foot: `tick N   peers at [...]`, and under it the build hash and the
+  seed. Nothing is ever drawn over those rows — if something is waiting that
+  the panel has no room for, it says how many.
+* Your treasury reads `wood 40+130` when some of it is in somebody's arms. The
+  first number is what you can spend; the second is on its way somewhere.
+* A refusal is written **under the map** in red and now *stays* there, dimmed,
+  until you do something that works. If a click seemed to do nothing, read it.
 
 ## Building
 
@@ -71,6 +80,28 @@ Press the digit, then click the ground. The button shows what it costs; you may
 start something you cannot yet pay for, because your people haul the materials
 to the site over time and build it there. Nothing builds itself: somebody has
 to be free to do it.
+
+## Reading the ground
+
+`hover-cell` over bare ground now answers, and this is the most useful verb you
+have:
+
+    grass  height 142  the water reached here
+    rock   height 201
+    sand   height  96  water: wading
+
+* **height** is how high that cell stands, on the same scale everywhere, so you
+  can compare one cell with another. Higher is safer.
+* **the water reached here** means the last flood covered this cell deep enough
+  to wade in. **The map is shaded, faintly, wherever that is true** — so after
+  the first flood you can see where the water goes and plan against it. Before
+  the first flood there is no mark, and height is all you have.
+* **water:** *underfoot*, *wading* or *out of your depth* says what is standing
+  there right now. It appears on buildings too, so you can ask whether your own
+  granary is under water.
+
+Hovering a building says what it is doing, what is stored in it, and — for a
+dike — its level and how hard the water is leaning on it.
 
 **Not every cell will take a building.** Rock, water and ground already spoken
 for will refuse. Two things tell you, and both are on the map rather than in
@@ -90,9 +121,16 @@ the panel:
 * **5 quarry** — the only source of stone. It needs rock beside it.
 * **6 stockpile** — free; somewhere to put things down.
 * **7 dike** — a wall. *Press 7 and drag*: it goes down as three-cell segments
-  along the line, with a ghost and a running cost under the cursor. Click an
-  existing one to raise it a level. Walls take stress from water leaning on
-  them and break if it is too much for their level.
+  along the line, and the cost under the cursor says both what it costs in
+  stone **and how many days of one pair of hands** it will take to build. The
+  second number is the one that has hurt people: the hands that build a wall
+  are the hands that carry grain.
+  **Click an existing segment to raise it a level.** A raise takes effect at
+  once and puts that segment back to being built, so its row changes from
+  `level 1 of 4` to `level 2 of 4, being built` — that is the raise working,
+  not a refusal. A segment that is not finished cannot be raised and will say
+  `it is not built yet`. Hovering a wall says how strained it is, and a stretch
+  that gives way is announced under the map.
 * **8 trading post** — its workers are mules that carry goods to the other city
   and come back with gold. They need a way across.
 * **9 nursery** — no nursery, no children.
@@ -107,9 +145,20 @@ hold) and **m move** (it walks there and keeps what is in it).
 
 Drag a box over them to choose them, or press `choose all`. Then:
 
-* **right-click a building** — go and work there. It takes as many as will fit.
+* **right-click a building** — go and work there. It takes as many as will fit,
+  and it takes **whoever is free first**, so filling a second farm will not
+  empty the first.
 * **right-click the ground** — go there and stay.
 * **back to hauling** — stop working, carry things again.
+* **Escape** cancels everything: the tool, the selection, and any building you
+  had clicked.
+
+The **households** tab says what your whole city is doing — `3 farming, 2
+hauling, 1 idle` — which is faster than hovering every building in turn.
+
+The game tells you when people die and what of (`2 drowned`, `1 starved`), and
+warns you when anybody is standing in the water. **Hauling during a flood is
+how people drown**: an order given on day five can walk them into it.
 
 Children do not work. They come of age two ages after they are born.
 
@@ -159,4 +208,10 @@ play, not afterwards:
 * **whether the wall was worth building** — this is the question the run exists
   to answer;
 * anything confusing, unreadable, or that silently did nothing;
-* anything that was *fun*, and anything that was not.
+* anything that was *fun*, and anything that was not;
+* **whether the things listed above actually helped.** Most of them are new
+  since the last playtest and exist because the last two players said they were
+  missing: the ground's height and the high-water mark, the wall's strain, who
+  died and of what, what is in somebody's arms. If one of them changed a
+  decision you made, say which. If one of them was noise, say that — it is just
+  as useful.
