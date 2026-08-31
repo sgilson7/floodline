@@ -2735,3 +2735,61 @@ walk to it.
 two thirds of the map. That matches both accounts of a flood that "swallows the
 map", and it means the mark's value is not in showing where the water went but
 in showing the third of the map where it did not.
+
+---
+
+## 2026-08-31 — Five small honesties, and a city that is not the colour of water
+
+M11.6, M11.7 and M11.8 together. Every one of these is the game knowing
+something and not saying it, which is the thesis of the whole phase.
+
+**Who died, and of what.** The soul count dropped and nothing else was said;
+neither player in the M10.6 run could tell drowning from starving during a
+flood, which is exactly when the difference decides what to do next. The cause
+is read off the body rather than recorded: `Citizen::die` clears what a living
+person was doing but leaves `food` and `drowning_for` alone, so a citizen that
+went under still says so and one that emptied still says so. No new state in
+`sim` and nothing added to the checksum.
+
+**People standing in the flood.** A player gave a routine "back to hauling" on
+day five and came back seventy-five seconds later to a city less than half its
+size: the order had sent its people into the floodplain. Design §3.2 makes "get
+uphill" the one order that matters and an ordinary order should not quietly
+undo it. Said when the number *rises*, because a warning that repeats every
+frame is a warning that is scrolled past.
+
+**Goods in somebody's arms.** `treasury` counts standing stores only, which is
+the right answer to "what can I spend" and a bewildering thing to watch: siting
+one 50-wood granary sends eight people to pick up a load each, and both players
+watched wood fall to a fifth of itself and concluded they had been overcharged.
+`wood 40+130` is the whole fix. Mules are not counted — what a mule carries is
+on its way to another city and is not this one's to spend.
+
+**A site that nobody is walking to says so.** One dike sat on "being built" for
+two entire ages without receiving a single stone, with 460 stone in the bank
+and no way to find out what was wrong. The row said what it wanted and never
+whether anybody was coming.
+
+**An offer you cannot pay for, and a dialog you cannot see.** "20 food for your
+20 stone" sat in a panel through the whole of age three against a treasury with
+no stone in it. And the trade dialog draws over the *map*, so a player watching
+the panel sees a button that appears to do nothing — the panel says it is open
+now.
+
+**And blue is no longer the first seat.** `palette::water` is a mid-blue that
+reaches 0.85 alpha at swimming depth and player 0 was a light blue: in the
+M10.6 run one player's buildings, its dike and the flood were all the same
+colour — "five blue squares on a blue field" — while the other city stayed
+legible from across the map. On a map that goes two-thirds under water twice a
+run, the first two seats have to be colours that water is not. Yellow and
+magenta lead; cyan and blue are still there for the fifth and sixth seats,
+which is a bigger problem than this one and a rarer game.
+
+That change broke three browser checks, which find a player's own city by its
+colour. That is what those constants are for.
+
+**People are drawn at a size that survives the fit.** A body two units across
+is a bit over one screen pixel at the default zoom, and both players said they
+could never count their own. Everything about a citizen is scaled by
+`(1/zoom).clamp(1.0, 2.2)`, so they hold a couple of pixels wherever the camera
+is and a close-up looks exactly as it did.

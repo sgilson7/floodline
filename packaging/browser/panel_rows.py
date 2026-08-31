@@ -32,7 +32,9 @@ import panel as P
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8123/index.html"
 W, H = 1400, 900
 V = View(W, H)
-BLUE = (92, 168, 242)          # palette::player(PlayerId(0))
+MINE = (235, 217, 92)          # palette::player(PlayerId(0)), yellow
+# Yellow since M11.8: player 0 was a light blue and vanished into the
+# flood, which is two thirds of the map twice a run.
 errors = []
 
 
@@ -109,7 +111,7 @@ with sync_playwright() as p:
     for y in range(int(y0), int(y1), 2):
         for x in range(int(x0), int(x1), 2):
             r, g, b = px[x, y]
-            if abs(r - BLUE[0]) < 26 and abs(g - BLUE[1]) < 26 and abs(b - BLUE[2]) < 26:
+            if abs(r - MINE[0]) < 26 and abs(g - MINE[1]) < 26 and abs(b - MINE[2]) < 26:
                 pts.append((x, y))
     check(bool(pts), "found the city on screen")
     if not pts:

@@ -157,7 +157,7 @@ refused, and whether their city is alive — and a browser check says so.
 
 ---
 
-## M11.3 — Ground you can read
+## M11.3 — Ground you can read — **done**
 
 **The thing both players asked for above everything else**, from opposite banks
 and without conferring.
@@ -194,7 +194,7 @@ is a judgement rather than a guess.
 
 ---
 
-## M11.4 — A wall you can read
+## M11.4 — A wall you can read — **done**
 
 The dike is the game's central purchase and the only building whose value
 cannot be estimated before buying it.
@@ -222,7 +222,7 @@ finally play a run with a level-three wall, which nobody ever has.
 
 ---
 
-## M11.5 — Sending some of the people
+## M11.5 — Sending some of the people — **done**
 
 Named by both players, independently, as the worst part of the game. City 0
 spent about a third of its entire run on a workaround.
@@ -248,7 +248,7 @@ and a player can see where everybody is without hovering the map.
 
 ---
 
-## M11.6 — What the flood did
+## M11.6 — What the flood did — **done**
 
 **Deliverables**
 * **Who died, and of what.** The soul count drops and nothing else is said.
@@ -267,7 +267,7 @@ routine order given on the eve of a flood does not silently kill people.
 
 ---
 
-## M11.7 — Small honesties
+## M11.7 — Small honesties — **done**
 
 Each of these is one sentence the game already knows and does not say. Cheap,
 and together they account for a lot of the confusion in both accounts.
@@ -293,7 +293,7 @@ and together they account for a lot of the confusion in both accounts.
 
 ---
 
-## M11.8 — Legible at the fit
+## M11.8 — Legible at the fit — **done**
 
 Last, because it is the only group nobody died of.
 
@@ -363,12 +363,12 @@ account says whether a city that grows survives better than a city that walls.
 |---|---|---|
 | M11.1 | The clock | **done** — free, measured neutral, and it halves the wall-clock cost of every test after it |
 | M11.2 | A panel that tells the truth | **done** — the instrument everything else is judged with, and half of it was our doing |
-| M11.3 | Ground you can read | what both players asked for above everything else |
-| M11.4 | A wall you can read | the game's central purchase, still never tested above level one |
-| M11.5 | Sending some of the people | the worst part of the game by both accounts |
-| M11.6 | What the flood did | the deaths nobody could explain |
-| M11.7 | Small honesties | cheap, and a lot of the confusion |
-| M11.8 | Legible at the fit | nobody died of it |
+| M11.3 | Ground you can read | **done** — what both players asked for above everything else |
+| M11.4 | A wall you can read | **done** — the central purchase, still never tested above level one |
+| M11.5 | Sending some of the people | **done** — the worst part of the game by both accounts |
+| M11.6 | What the flood did | **done** — the deaths nobody could explain |
+| M11.7 | Small honesties | **done** — cheap, and a lot of the confusion |
+| M11.8 | Legible at the fit | **done** — nobody died of it |
 | M11.9 | The second run | the only thing that can say whether any of it worked |
 
 M11.1 and M11.2 are the two that change what a run *is*. If only two get done,

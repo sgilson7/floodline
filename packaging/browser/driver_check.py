@@ -99,7 +99,8 @@ with sync_playwright() as p:
         for y in range(int(y0), int(y1), 2):
             for x in range(int(x0), int(x1), 2):
                 r, g, b = px[x, y]
-                if abs(r - 92) < 26 and abs(g - 168) < 26 and abs(b - 242) < 26:
+                # palette::player(PlayerId(0)) - yellow since M11.8.
+                if abs(r - 235) < 26 and abs(g - 217) < 26 and abs(b - 92) < 26:
                     pts.append((x, y))
         if not pts:
             return None

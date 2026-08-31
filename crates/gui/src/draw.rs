@@ -25,7 +25,7 @@ pub fn world(
     high_water(w, seen);
     water(w, seen);
     buildings(w, seen);
-    citizens(w, selected, ringed);
+    citizens(w, selected, ringed, view.zoom);
     mules(w);
     pings(w);
     let _ = me;
@@ -143,7 +143,13 @@ fn buildings(w: &World, seen: (i32, i32, i32, i32)) {
 
 /// A circle with two lines for legs (design §1), and a ring in the owner's
 /// colour when selected.
-fn citizens(w: &World, selected: &[sim::CitizenId], ringed: &[sim::CitizenId]) {
+fn citizens(w: &World, selected: &[sim::CitizenId], ringed: &[sim::CitizenId], zoom: f32) {
+    // A body drawn two units across is a bit over one screen pixel at the
+    // default zoom, and both players in the M10.6 run said they could never
+    // count their own people. Everything here is scaled so that a person is at
+    // least a couple of pixels wherever the camera is — and no *larger* than it
+    // used to be when zoomed in, so a close-up looks as it always did.
+    let big = (1.0 / zoom).clamp(1.0, 2.2);
     for c in &w.citizens {
         if !c.alive() {
             continue;
@@ -153,18 +159,18 @@ fn citizens(w: &World, selected: &[sim::CitizenId], ringed: &[sim::CitizenId]) {
         let colour = palette::player(c.owner);
 
         if selected.contains(&c.id) {
-            draw_circle_lines(px, py, 5.0, 1.0, palette::INK);
+            draw_circle_lines(px, py, 5.0 * big, 1.0, palette::INK);
         }
         // Whoever the households list is pointing at. A wider, warmer ring
         // than a selection's, because it is a different question — "where are
         // these people" rather than "who am I about to order".
         if ringed.contains(&c.id) {
-            draw_circle_lines(px, py, 7.0, 1.0, palette::WARNING);
+            draw_circle_lines(px, py, 7.0 * big, 1.0, palette::WARNING);
         }
         // A child is smaller, and drawn after the rings so it is still legible
         // inside one.
         if c.is_child() {
-            draw_circle(px, py, 1.0, palette::BACKDROP);
+            draw_circle(px, py, 1.0 * big, palette::BACKDROP);
         }
         // A body and two legs, in the city's colour, and then what the job
         // adds. Everybody was the same circle until M8 and a player could not
@@ -174,14 +180,14 @@ fn citizens(w: &World, selected: &[sim::CitizenId], ringed: &[sim::CitizenId]) {
         // *outline* rather than the colour carries the job — the colour is
         // already spoken for by whose city it is, and a second meaning on it
         // would make a two-player map unreadable.
-        draw_circle(px, py, 2.0, colour);
-        draw_line(px, py + 1.5, px - 1.5, py + 4.0, 1.0, colour);
-        draw_line(px, py + 1.5, px + 1.5, py + 4.0, 1.0, colour);
-        job_mark(px, py, c.job, colour);
+        draw_circle(px, py, 2.0 * big, colour);
+        draw_line(px, py + 1.5 * big, px - 1.5 * big, py + 4.0 * big, 1.0, colour);
+        draw_line(px, py + 1.5 * big, px + 1.5 * big, py + 4.0 * big, 1.0, colour);
+        job_mark(px, py, c.job, colour, big);
 
         // Somebody in trouble is worth seeing from across the map.
         if c.swept {
-            draw_circle_lines(px, py, 4.0, 1.0, palette::ALARM);
+            draw_circle_lines(px, py, 4.0 * big, 1.0, palette::ALARM);
         }
     }
 }
@@ -193,25 +199,25 @@ fn citizens(w: &World, selected: &[sim::CitizenId], ringed: &[sim::CitizenId]) {
 /// different length of the same one: a scythe leans, a saw is level, a pick
 /// is a wedge, a hammer is a block, a trader has a purse, and somebody with
 /// no job carries nothing at all.
-fn job_mark(px: f32, py: f32, job: Option<sim::Job>, colour: Color) {
+fn job_mark(px: f32, py: f32, job: Option<sim::Job>, colour: Color, big: f32) {
     let Some(job) = job else { return };
     match job {
         // A scythe: a long stroke leaning back over the shoulder.
-        sim::Job::Farmer => draw_line(px - 2.5, py - 3.5, px + 1.5, py + 0.5, 1.0, colour),
+        sim::Job::Farmer => draw_line(px - 2.5 * big, py - 3.5 * big, px + 1.5 * big, py + 0.5 * big, 1.0, colour),
         // A saw: level, held out in front.
-        sim::Job::Forester => draw_line(px - 3.0, py - 2.0, px + 3.0, py - 2.0, 1.0, colour),
+        sim::Job::Forester => draw_line(px - 3.0 * big, py - 2.0 * big, px + 3.0 * big, py - 2.0 * big, 1.0, colour),
         // A pick: two strokes meeting at a point.
         sim::Job::Quarrier => {
-            draw_line(px - 3.0, py - 3.0, px, py - 1.0, 1.0, colour);
-            draw_line(px + 3.0, py - 3.0, px, py - 1.0, 1.0, colour);
+            draw_line(px - 3.0 * big, py - 3.0 * big, px, py - 1.0 * big, 1.0, colour);
+            draw_line(px + 3.0 * big, py - 3.0 * big, px, py - 1.0 * big, 1.0, colour);
         }
         // A hammer: a block on a short handle.
         sim::Job::Builder => {
-            draw_line(px, py - 1.0, px, py - 3.5, 1.0, colour);
-            draw_rectangle(px - 2.0, py - 4.5, 4.0, 1.5, colour);
+            draw_line(px, py - 1.0 * big, px, py - 3.5 * big, 1.0, colour);
+            draw_rectangle(px - 2.0 * big, py - 4.5 * big, 4.0 * big, 1.5 * big, colour);
         }
         // A purse.
-        sim::Job::Trader => draw_circle(px + 2.5, py - 1.0, 1.5, palette::WARNING),
+        sim::Job::Trader => draw_circle(px + 2.5 * big, py - 1.0 * big, 1.5 * big, palette::WARNING),
         // A hauler's arms are full or they are not; the load is drawn by the
         // errand and not by the job, so this adds nothing.
         sim::Job::Hauler => {}
@@ -303,11 +309,29 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
     line(omen, 18, omen_colour, &mut y);
     y += 10.0;
 
+    // What is at rest, and what is in somebody's arms.
+    //
+    // `treasury` counts standing stores only, which is right for "what can I
+    // spend" and baffling to watch: siting one 50-wood granary sends eight
+    // people to pick up a load each, and both players in the M10.6 run watched
+    // wood fall to a fifth of itself and concluded they had been overcharged.
+    // `40+130` is the whole fix — the second number is on its way somewhere.
     let goods = w.treasury(me);
+    let hand = w.in_hand(me);
+    let amount = |at_rest: u16, carried: u16| {
+        if carried == 0 {
+            at_rest.to_string()
+        } else {
+            format!("{at_rest}+{carried}")
+        }
+    };
     line(
         &format!(
             "food {}   wood {}   stone {}   gold {}",
-            goods.food, goods.wood, goods.stone, goods.gold
+            amount(goods.food, hand.food),
+            amount(goods.wood, hand.wood),
+            amount(goods.stone, hand.stone),
+            amount(goods.gold, hand.gold),
         ),
         18, palette::INK, &mut y,
     );

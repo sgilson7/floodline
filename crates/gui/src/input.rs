@@ -109,6 +109,20 @@ pub struct Input {
     /// segment was raised: raising returns it to a site, and a site is not a
     /// ruin.
     ruins: usize,
+    /// Which of this player's people have already been mourned, by citizen id.
+    ///
+    /// Ids are indices into `World::citizens` and nothing ever reorders or
+    /// reuses one — `bear_a_child` appends and that is the only thing that adds
+    /// anybody — so a growing `Vec<bool>` is a safe way to remember who has
+    /// been counted.
+    ///
+    /// `None` until the first frame that looks, so a late joiner arriving with
+    /// a snapshot full of the dead does not announce all of them at once.
+    buried: Option<Vec<bool>>,
+    /// How many of this player's people were in deep water last frame.
+    wading: usize,
+    /// How many households this player has, for the tab that lists them.
+    households_count: usize,
 }
 
 /// The two halves of the panel: what you can do, and who is doing it.
@@ -131,7 +145,8 @@ impl Default for Input {
     fn default() -> Input {
         Input { tool: Tool::Select, selected: Vec::new(), drag: None, trade: Draft::default(),
                 notice: None, wall_hint: None, chosen: None,
-                tab: Tab::Tools, ringed: Vec::new(), overflowed: 0, ruins: 0 }
+                tab: Tab::Tools, ringed: Vec::new(), overflowed: 0, ruins: 0,
+                buried: None, wading: 0, households_count: 0 }
     }
 }
 
@@ -178,6 +193,14 @@ impl Input {
         self.keys();
         self.forget_the_dead(session.world());
         self.mind_the_wall(session.world(), me);
+        self.mind_the_dead(session.world(), me);
+        self.mind_the_water(session.world(), me);
+        self.households_count = session
+            .world()
+            .households
+            .iter()
+            .filter(|h| h.owner == me && h.alive())
+            .count();
         if self.trade.open {
             return;
         }
@@ -197,6 +220,18 @@ impl Input {
         if self.trade.open {
             self.trade_dialog(ui, session, me);
         }
+        if self.trade.open {
+            // The dialog is drawn over the *map*, so a player watching the
+            // panel sees a button that appears to have done nothing. One in
+            // the M10.6 run had it open, unseen, through several actions.
+            draw_text(
+                "a trade is open, over the map",
+                LOGICAL_W - PANEL_W + 18.0,
+                panel_top - 6.0,
+                15.0,
+                palette::WARNING,
+            );
+        }
         let top = self.tabs(ui, panel_top);
         match self.tab {
             Tab::Tools => self.tools(ui, session, me, top, view),
@@ -204,6 +239,83 @@ impl Input {
         }
         self.wall_cost(ui);
         self.notice();
+    }
+
+    /// Notice who has died, and of what.
+    ///
+    /// The soul count dropped and nothing else was said. Neither player in the
+    /// M10.6 run could tell drowning from starving during a flood — which is
+    /// exactly when the difference decides what to do next, and one of them
+    /// ordered a blind evacuation that may well have marched people into deep
+    /// water.
+    ///
+    /// The cause is read off the body. `Citizen::die` clears what a living
+    /// person was doing but leaves `food` and `drowning_for` alone, so a
+    /// citizen that went under still says so and one that emptied still says
+    /// so. No new state in `sim`, and nothing in the checksum.
+    fn mind_the_dead(&mut self, w: &World, me: PlayerId) {
+        let n = w.citizens.len();
+        let first_look = self.buried.is_none();
+        let buried = self.buried.get_or_insert_with(|| vec![false; n]);
+        buried.resize(n, false);
+
+        let (mut drowned, mut starved, mut other) = (0, 0, 0);
+        for c in w.citizens.iter().filter(|c| c.owner == me && !c.alive()) {
+            let i = c.id.0 as usize;
+            if buried[i] {
+                continue;
+            }
+            buried[i] = true;
+            if first_look {
+                continue;
+            }
+            if c.drowning_for > 0 {
+                drowned += 1;
+            } else if c.food == 0 {
+                starved += 1;
+            } else {
+                other += 1;
+            }
+        }
+        let mut said: Vec<String> = Vec::new();
+        for (n, how) in [(drowned, "drowned"), (starved, "starved"), (other, "died")] {
+            if n > 0 {
+                said.push(format!("{n} {how}"));
+            }
+        }
+        if !said.is_empty() {
+            self.say(said.join(", "));
+        }
+    }
+
+    /// Notice people standing in the flood.
+    ///
+    /// A player in the M10.6 run gave a routine "back to hauling" on day five
+    /// and came back seventy-five seconds later to a city less than half its
+    /// size: the order had sent its people into the floodplain, and nothing
+    /// said so. Design §3.2 makes "get uphill" the one order that matters, and
+    /// it should not be quietly undone by an ordinary one.
+    ///
+    /// Said when the number rises, not every frame: a warning that repeats is
+    /// a warning that is scrolled past.
+    fn mind_the_water(&mut self, w: &World, me: PlayerId) {
+        let n = w
+            .citizens
+            .iter()
+            .filter(|c| c.owner == me && c.alive())
+            .filter(|c| {
+                let (x, y) = c.pos.cell();
+                w.water.depth_at(x, y) >= sim::balance::WADE_DEPTH
+            })
+            .count();
+        if n > self.wading {
+            self.say(if n == 1 {
+                "somebody is in the water - choose them and send them uphill".to_owned()
+            } else {
+                format!("{n} of your people are in the water - send them uphill")
+            });
+        }
+        self.wading = n;
     }
 
     /// Notice a stretch of wall giving way, and say so.
@@ -609,8 +721,18 @@ impl Input {
         let wide = PANEL_W - 36.0;
         let half = (wide - 8.0) / 2.0;
         let y = top + 10.0;
+        // The households tab carries its count, because it is the one place in
+        // this game where the city stops being counters and becomes people —
+        // "Pagan and Oswin, settling in" — and a player in the M10.6 run found
+        // it only by opening it out of curiosity.
+        let families = self.households_count;
+        let households = if families > 0 {
+            format!("households ({families})")
+        } else {
+            "households".to_owned()
+        };
         for (i, (tab, label)) in
-            [(Tab::Tools, "build"), (Tab::Households, "households")].into_iter().enumerate()
+            [(Tab::Tools, "build"), (Tab::Households, households.as_str())].into_iter().enumerate()
         {
             let r = Rect::new(left + i as f32 * (half + 8.0), y, half, 28.0);
             if ui.button(r, label, true) {
@@ -981,11 +1103,30 @@ impl Input {
                 String::new()
             };
             let want = b.outstanding();
-            return if want.is_empty() {
-                format!("{name}: {level}being built")
-            } else {
-                format!("{name}: {level}waiting for {}", cost_line(want))
-            };
+            if want.is_empty() {
+                return format!("{name}: {level}being built");
+            }
+            // Whether anybody is actually bringing it.
+            //
+            // A player in the M10.6 run watched a dike sit on "being built"
+            // for two entire ages without receiving a single stone, with 460
+            // stone in the bank and no way to find out what was wrong. The row
+            // said what it wanted and never whether anyone was coming.
+            let coming = w.citizens.iter().any(|c| {
+                c.owner == me
+                    && c.alive()
+                    && matches!(
+                        c.errand,
+                        Some(sim::citizen::Errand::Carry { to })
+                            | Some(sim::citizen::Errand::Collect { to, .. })
+                            if to == b.id
+                    )
+            });
+            return format!(
+                "{name}: {level}waiting for {}{}",
+                cost_line(want),
+                if coming { "" } else { " - nobody is carrying to it" },
+            );
         }
         let here = |f: fn(&sim::Citizen, sim::BuildingId) -> bool| {
             w.citizens.iter().filter(|c| c.alive() && f(c, b.id)).count()
@@ -1090,8 +1231,16 @@ impl Input {
             if ui.button(
                 Rect::new(left, y, wide, 32.0),
                 &format!(
-                    "city {}: {} {} for your {} {}",
-                    from.0, give.1, good_name(give.0), take.1, good_name(take.0)
+                    "city {}: {} {} for your {} {}{}",
+                    from.0, give.1, good_name(give.0), take.1, good_name(take.0),
+                    // An offer sat in a player's panel through the whole of age
+                    // three while it had no stone at all, with nothing saying
+                    // it could not be taken.
+                    if session.world().treasury(me).get(take.0) < take.1 {
+                        " - you have not got it"
+                    } else {
+                        ""
+                    },
                 ),
                 true,
             ) {

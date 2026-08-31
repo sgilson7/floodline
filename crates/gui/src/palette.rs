@@ -62,13 +62,24 @@ pub fn water(depth: u16) -> Color {
 
 /// One per city, and they have to be told apart at a glance across a whole map.
 pub fn player(p: sim::PlayerId) -> Color {
+    // **Blue is last, not first.** `palette::water` is a mid-blue that reaches
+    // 0.85 alpha at swimming depth, and player 0 used to be a light blue: in
+    // the M10.6 run one player's buildings, its dike and the flood were all the
+    // same colour, and it reported its settlement as "five blue squares on a
+    // blue field" while the other city stayed legible from across the map. On
+    // a map that is two-thirds under water twice a run, the first two seats
+    // have to be colours that water is not.
+    //
+    // Yellow and magenta lead because they are far from the water and far from
+    // each other. Cyan and blue are still here for the fifth and sixth seats,
+    // which is a five-or-six-player game and a worse problem than this one.
     const CITIES: [Color; 6] = [
-        Color::new(0.36, 0.66, 0.95, 1.0), // blue
-        Color::new(0.95, 0.55, 0.30, 1.0), // orange
-        Color::new(0.45, 0.82, 0.48, 1.0), // green
-        Color::new(0.85, 0.45, 0.80, 1.0), // magenta
         Color::new(0.92, 0.85, 0.36, 1.0), // yellow
+        Color::new(0.85, 0.45, 0.80, 1.0), // magenta
+        Color::new(0.45, 0.82, 0.48, 1.0), // green
+        Color::new(0.95, 0.55, 0.30, 1.0), // orange
         Color::new(0.55, 0.85, 0.85, 1.0), // cyan
+        Color::new(0.36, 0.66, 0.95, 1.0), // blue
     ];
     CITIES[p.0 as usize % CITIES.len()]
 }

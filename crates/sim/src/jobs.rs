@@ -544,6 +544,26 @@ impl World {
         }
     }
 
+    /// Everything a city's people are carrying, right now.
+    ///
+    /// `treasury` counts only what is at rest in a standing store, which is the
+    /// right answer for "what can I spend" and a bewildering one to watch: both
+    /// players in the M10.6 run saw wood drop from 200 to 40 and back to 150
+    /// after siting one 50-wood granary — eight people each picking up a load —
+    /// and one of them was sure it had been overcharged.
+    ///
+    /// Mules are not counted. What a mule carries is on its way to another city
+    /// and is not this one's to spend.
+    pub fn in_hand(&self, owner: PlayerId) -> Goods {
+        let mut total = Goods::NONE;
+        for c in self.citizens.iter().filter(|c| c.owner == owner && c.alive()) {
+            for g in Good::ALL {
+                total.add(g, c.carrying.get(g));
+            }
+        }
+        total
+    }
+
     /// Everything a city holds, across all its standing stores. For the panel
     /// and for the tests.
     pub fn treasury(&self, owner: PlayerId) -> Goods {
