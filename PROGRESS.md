@@ -487,54 +487,20 @@ game.
 
 ### Next action
 
-**M11 — make the world legible**, which is what M10.8 turned out to be. The run
-demanded more than one milestone, so it is nine, in `PLAN-M11.md`, and
-**not one of them changes a balance constant**. Every one is the game failing
-to say something it already knows.
+**Read `HANDOFF-M11.md`.** M11.1 through M11.9 are done — the clock halved, the
+panel stopped drawing over its own instruments, the ground got a height and a
+high-water mark, the wall got a strain readout, and the M11.9 run played three
+ages with two agents and no desync.
 
-**Start with M11.1 — the clock**, because it is free and it halves the
-wall-clock cost of every test after it. `TICKS_PER_SECOND` turns out to be a
-pure wall-clock knob once `SURGE_TICKS` and `DROWN_TICKS` are pinned in ticks
-rather than seconds; measured, the five-strategy table at twice the rate is
-identical, and a run becomes eighteen minutes. **Not `WALK_SPEED`** — doubling
-that is the obvious way and the wrong one, and the same table says so: the
-tallest wall a city can raise before the first flood goes from 60 stone to 540.
+That run found that **no city in this game could ever grow**, and that the one
+probe pointed at growth was the reason nobody knew: `how_a_city_grows` sets
+`c.food = NEED_FULL` every tick, so it had only ever tested a city that cannot
+get hungry. `CHILD_FOOD` was `FED_ENOUGH`, which is the level a citizen *stops
+eating* at, so a household never got past 99 of the 1 200 consecutive ticks it
+needed. Fixed, with a test that plays rather than feeds.
 
-Then the two that change what a run *is*:
-
-* **M11.2 — a panel that tells the truth.** A pending trade offer overdraws
-  `tick`, `peers at` and `build`/`seed`, which are the rows a player is told to
-  read when something is wrong. Partly this session's doing.
-* **M11.3 — ground you can read.** Both players asked for the last flood's
-  high-water line above everything else. `Map::height` already exists, so
-  hovering ground is display only; the mark is a running maximum of
-  `Water::depth`, and one bit a cell costs 2 KB of the `Welcome` snapshot.
-
-And **M11.9 ends the phase the way M10 did**: two agents, a full run, an
-account — this time asked to get a city *above* eight souls. Both M10 runs
-ended smaller than they started, so families, children and the nursery have
-never been played on purpose by anybody. `AGENT-BRIEF.md` already carries the
-growth objective.
-
-**M11.1 is done.** The rate is 20, the two constants are pinned, and the
-strategy table is identical either side — the game is unchanged and a run is
-eighteen minutes. 282 cargo tests and 17 browser checks green.
-
-**M11.2 is done**, all six of it. The foot of the panel can no longer be drawn
-over — `VARIABLE_FLOOR`, with 68 pixels of clearance found where there were 15,
-38 bought back from the tools and 23 from the foot itself. `day 7 of 6` is
-fixed, a city that has died is told so, a refusal dims rather than disappearing
-and is cleared by the next command that works, and the host now tells every
-peer when the worlds come apart instead of freezing them on `playing`.
-
-Three panel tripwires fired, which is what they are for; one of them,
-`two_agents.py`, had copied the tick row instead of importing it and was ours
-to fix. Writing the desync test found a second bug in the first version of that
-fix: the host announced the fault once per turn in the drain, so the two
-players were shown different ticks for the same desync.
-
-The single next action is **M11.3 — ground you can read**, which is what both
-players asked for above everything else. `Map::height` already exists, so
-hovering ground is display only; the high-water mark is a running maximum of
-`Water::depth`, new state in the checksum, and one bit a cell costs 2 KB of the
-`Welcome` snapshot against a budget of 50-150.
+Thirteen further findings are ranked in the handover: five confirmed and small,
+four reported but **not reproduced**, four design questions. The single next
+action is to reproduce the first of the unreproduced ones — right-clicking the
+cell you built on does not always staff the building, silently, on the game's
+most common gesture.
