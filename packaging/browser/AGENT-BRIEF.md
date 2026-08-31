@@ -50,7 +50,7 @@ the first thing that can kill you.
 
 Button names: `cottage farm granary forester quarry stockpile dike post
 nursery hut cookery road point choose-all back-to-hauling trade tab-build
-tab-households`.
+tab-households tab-people person-0 .. person-11`.
 
 **Do not zoom or pan.** Every `*-cell` verb assumes the camera is where it
 starts. If something moves it, `frame` puts it back.
@@ -153,6 +153,21 @@ the panel:
   land or farmhands are the shortage and worth nothing when neither is.
 * **r road** — click where it starts, click where it ends.
 * **p point** — a marker, for looking at.
+
+### The people tab
+
+`tab-people` lists **one chip per person**: their name, what they are doing
+right now, a sliver down the left edge saying how fed they are, and a line
+along the foot of the chip saying how far through the task they are. Clicking a
+chip chooses that person — `driver.py <port> click person-3`.
+
+The same progress line is drawn **over the head of anyone working** on the map,
+so a wall going up and a farm turning over are both visible without opening
+anything. Only working: somebody eating or asleep has a bar in the tab and not
+on the map, or most of the city would be wearing one most of the time.
+
+Somebody walking has no bar anywhere. The game knows where they are going and
+not where they set out from, so there is no honest way to draw one.
 
 Click one of your own buildings to select it. The bottom of the panel then
 offers **level** (costs gold; a level is one more citizen the building can

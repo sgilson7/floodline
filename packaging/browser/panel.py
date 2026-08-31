@@ -78,11 +78,29 @@ def fixed_ends(cities=2):
 
 # ---- input.rs::tabs -----------------------------------------------------
 
+# Three tabs since M12.D, so a third of the width each. The row's *height* is
+# unchanged, which is the part that matters: a taller tab row would move the
+# whole build tab down, and there are eighty-one pixels between the trade offer
+# and `input::VARIABLE_FLOOR`.
+THIRD = (WIDE - 16.0) / 3.0
+TABS = ["build", "households", "people"]
+
+
 def tab(which, cities=2):
-    """The middle of the "build" or "households" tab button."""
+    """The middle of the "build", "households" or "people" tab button."""
     y = fixed_ends(cities) + 24.0
-    x = LEFT + HALF / 2.0 + (0.0 if which == "build" else HALF + 8.0)
+    x = LEFT + THIRD / 2.0 + TABS.index(which) * (THIRD + 8.0)
     return (x, y)
+
+
+def person_chip(n, cities=2):
+    """The middle of the nth chip in the people tab, counting from nought.
+
+    Twenty-eight high on a thirty-two pitch, and the tab stops drawing chips
+    that would cross `VARIABLE_FLOOR` and says "and N more" instead. A city of
+    eight fits with room to spare.
+    """
+    return (LEFT + WIDE / 2.0, body_top(cities) + 8.0 + 14.0 + 32.0 * n)
 
 
 def body_top(cities=2):

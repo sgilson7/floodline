@@ -141,6 +141,42 @@ fn buildings(w: &World, seen: (i32, i32, i32, i32)) {
     }
 }
 
+/// How far through its current task a citizen is, from nought to one, or
+/// `None` when the question does not apply.
+///
+/// **Derived, never stored.** Every number here is already in the world for
+/// its own reasons: a producer's `work` against its `ticks_per_unit`, a site's
+/// `progress` against its `build_ticks`, `food` against `FED_ENOUGH`, `rest`
+/// against `RESTED_ENOUGH`. Nothing was added to `sim` for this and the
+/// snapshot did not grow by a byte — a progress field per citizen would have
+/// been two bytes each on the wire to say what the world already knows.
+///
+/// A walker gets `None`. The world records where somebody is going and not
+/// where they set out from, so "half way" is not a question it can answer, and
+/// a bar that guessed would be the only lie on the screen.
+///
+/// The one copy: `input::Input::doing` names the task, this measures it.
+pub fn task_progress(w: &World, c: &sim::Citizen) -> Option<f32> {
+    use sim::building::BuildState;
+    match c.state {
+        sim::State::Eating => Some(c.food as f32 / sim::balance::FED_ENOUGH as f32),
+        sim::State::Sleeping => Some(c.rest as f32 / sim::balance::RESTED_ENOUGH as f32),
+        sim::State::Working => {
+            let b = w.buildings.get(c.workplace?.0 as usize)?;
+            match b.state {
+                BuildState::Site => {
+                    Some(b.progress as f32 / b.kind.build_ticks().max(1) as f32)
+                }
+                _ => {
+                    let per = b.kind.ticks_per_unit();
+                    (per != u32::MAX).then(|| b.work as f32 / per as f32)
+                }
+            }
+        }
+        _ => None,
+    }
+}
+
 /// A circle with two lines for legs (design §1), and a ring in the owner's
 /// colour when selected.
 fn citizens(w: &World, selected: &[sim::CitizenId], ringed: &[sim::CitizenId], zoom: f32) {
@@ -184,6 +220,23 @@ fn citizens(w: &World, selected: &[sim::CitizenId], ringed: &[sim::CitizenId], z
         draw_line(px, py + 1.5 * big, px - 1.5 * big, py + 4.0 * big, 1.0, colour);
         draw_line(px, py + 1.5 * big, px + 1.5 * big, py + 4.0 * big, 1.0, colour);
         job_mark(px, py, c.job, colour, big);
+
+        // How far through the task, over the head.
+        //
+        // Working only. A bar on somebody eating or asleep would be true and
+        // would also put a mark over most of the city most of the time, and
+        // the thing this is for is watching *work* happen — whether the wall
+        // is going up, whether the farm is turning over. The panel's people
+        // tab carries the other two, where a player has asked for detail.
+        if c.state == sim::State::Working {
+            if let Some(p) = task_progress(w, c) {
+                let full = 7.0 * big;
+                let x0 = px - full / 2.0;
+                let y0 = py - 6.0 * big;
+                draw_line(x0, y0, x0 + full, y0, 1.0, palette::BACKDROP);
+                draw_line(x0, y0, x0 + full * p.clamp(0.0, 1.0), y0, 1.0, palette::WARNING);
+            }
+        }
 
         // Somebody in trouble is worth seeing from across the map.
         if c.swept {

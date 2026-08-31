@@ -132,6 +132,7 @@ pub struct Input {
 enum Tab {
     Tools,
     Households,
+    Citizens,
 }
 
 /// Which tool puts a kind down. Everything is placed with a click except the
@@ -256,6 +257,7 @@ impl Input {
         match self.tab {
             Tab::Tools => self.tools(ui, session, me, top, view),
             Tab::Households => self.households(ui, session, me, top),
+            Tab::Citizens => self.people(ui, session, me, top),
         }
         self.wall_cost(ui);
         self.notice();
@@ -739,7 +741,11 @@ impl Input {
     fn tabs(&mut self, ui: &Ui, top: f32) -> f32 {
         let left = LOGICAL_W - PANEL_W + 18.0;
         let wide = PANEL_W - 36.0;
-        let half = (wide - 8.0) / 2.0;
+        // Three tabs since M12.D, so a third of the width each rather than a
+        // half. The row's *height* is unchanged, which is what matters: a tab
+        // row that grew would move the whole build tab down and there are
+        // eighty-one pixels between the trade offer and `VARIABLE_FLOOR`.
+        let third = (wide - 16.0) / 3.0;
         let y = top + 10.0;
         // The households tab carries its count, because it is the one place in
         // this game where the city stops being counters and becomes people —
@@ -751,10 +757,15 @@ impl Input {
         } else {
             "households".to_owned()
         };
-        for (i, (tab, label)) in
-            [(Tab::Tools, "build"), (Tab::Households, households.as_str())].into_iter().enumerate()
+        for (i, (tab, label)) in [
+            (Tab::Tools, "build"),
+            (Tab::Households, households.as_str()),
+            (Tab::Citizens, "people"),
+        ]
+        .into_iter()
+        .enumerate()
         {
-            let r = Rect::new(left + i as f32 * (half + 8.0), y, half, 28.0);
+            let r = Rect::new(left + i as f32 * (third + 8.0), y, third, 28.0);
             if ui.button(r, label, true) {
                 self.tab = tab;
                 self.ringed.clear();
@@ -764,6 +775,143 @@ impl Input {
             }
         }
         y + 30.0
+    }
+
+    /// What one citizen is doing, and how far through it they are.
+    ///
+    /// The words; `draw::task_progress` is the number, and is the one copy.
+    fn doing(w: &sim::World, c: &sim::Citizen) -> (String, Option<f32>) {
+        use sim::building::BuildState;
+        let bar = crate::draw::task_progress(w, c);
+        let what = match c.state {
+            sim::State::Dead => "gone".to_owned(),
+            sim::State::Eating => "eating".to_owned(),
+            sim::State::Sleeping => "sleeping".to_owned(),
+            sim::State::Walking => match c.errand {
+                Some(sim::citizen::Errand::ToEat(_)) => "going to eat".to_owned(),
+                Some(sim::citizen::Errand::ToSleep(_)) => "going to bed".to_owned(),
+                Some(sim::citizen::Errand::ToWork(_)) => "going to work".to_owned(),
+                Some(sim::citizen::Errand::Collect { .. }) => "going to fetch".to_owned(),
+                Some(sim::citizen::Errand::Carry { .. }) => "carrying".to_owned(),
+                None => "on the way".to_owned(),
+            },
+            sim::State::Working => match c.workplace.and_then(|b| w.buildings.get(b.0 as usize)) {
+                Some(b) if b.state == BuildState::Site => {
+                    format!("building the {}", kind_name(b.kind))
+                }
+                Some(b) => format!("at the {}", kind_name(b.kind)),
+                None => "working".to_owned(),
+            },
+            sim::State::Idle => {
+                if c.is_child() {
+                    "too young".to_owned()
+                } else if c.held {
+                    "waiting where you sent them".to_owned()
+                } else {
+                    "nothing to do".to_owned()
+                }
+            }
+        };
+        (what, bar)
+    }
+
+    /// One chip per person: their name, what they are doing, how far through
+    /// it and how fed they are. Clicking one chooses them.
+    ///
+    /// The complaint every run has made in some form is that **the game has
+    /// eight people in it and shows you a count**. M11.5 pointed the same idea
+    /// at households and both players used it; this points it at individuals,
+    /// and it is what makes a builder's hut visible - four people who say
+    /// "building the dike" are a decision the player can see working.
+    fn people(&mut self, ui: &Ui, session: &mut Session, me: PlayerId, top: f32) {
+        let left = LOGICAL_W - PANEL_W + 18.0;
+        let wide = PANEL_W - 36.0;
+        let mut y = top + 8.0;
+        self.ringed.clear();
+
+        let mut rows: Vec<(sim::CitizenId, String, String, Option<f32>, f32, bool)> = Vec::new();
+        {
+            let w = session.world();
+            for c in w.citizens.iter().filter(|c| c.owner == me && c.alive()) {
+                let (what, bar) = Self::doing(w, c);
+                rows.push((
+                    c.id,
+                    sim::names::NAMES[c.name as usize].to_owned(),
+                    what,
+                    bar,
+                    c.food as f32 / sim::balance::NEED_FULL as f32,
+                    self.selected.contains(&c.id),
+                ));
+            }
+        }
+
+        if rows.is_empty() {
+            draw_text("nobody left", left, y + 16.0, 15.0, palette::FAINT);
+            return;
+        }
+
+        // Thirty-two of pitch and a twenty-eight chip: a city of eight fits
+        // with room to spare, and the cap below is what happens to a city that
+        // does not. Nothing here may cross `VARIABLE_FLOOR` — the whole panel
+        // budget is spent and the foot is the one thing a player is told to
+        // read when something is wrong.
+        let mut shown = 0usize;
+        let total = rows.len();
+        for (id, name, what, bar, fed, chosen) in rows {
+            if !room_for(y, 28.0 + 18.0) {
+                break;
+            }
+            let chip = Rect::new(left, y, wide, 28.0);
+            let over = chip.contains(ui.mouse);
+            draw_rectangle(chip.x, chip.y, chip.w, chip.h, palette::BUTTON);
+            draw_rectangle_lines(
+                chip.x,
+                chip.y,
+                chip.w,
+                chip.h,
+                if chosen { 2.0 } else { 1.0 },
+                if chosen || over { palette::INK } else { palette::RULE },
+            );
+
+            // How fed, as a sliver down the left edge. A bar rather than a
+            // number because the question a player asks is "is anyone about to
+            // starve", which is a shape and not a figure.
+            let food_h = (chip.h - 6.0) * fed.clamp(0.0, 1.0);
+            draw_rectangle(
+                chip.x + 3.0,
+                chip.y + 3.0 + (chip.h - 6.0 - food_h),
+                3.0,
+                food_h,
+                if fed < 0.3 { palette::ALARM } else { palette::GOOD },
+            );
+
+            draw_text(&name, chip.x + 12.0, chip.y + 12.0, 14.0, palette::INK);
+            draw_text(&what, chip.x + 12.0, chip.y + 24.0, 13.0, palette::FAINT);
+
+            // And how far through it, along the foot of the chip.
+            if let Some(p) = bar {
+                let w = (chip.w - 24.0) * p.clamp(0.0, 1.0);
+                draw_rectangle(chip.x + 12.0, chip.y + chip.h - 3.0, w, 2.0, palette::INK);
+            }
+
+            if over {
+                self.ringed = vec![id];
+                if ui.clicked {
+                    self.selected = vec![id];
+                }
+            }
+            y += 32.0;
+            shown += 1;
+        }
+        if shown < total {
+            draw_text(
+                &format!("and {} more", total - shown),
+                left,
+                y + 12.0,
+                13.0,
+                palette::FAINT,
+            );
+        }
     }
 
     /// One chip per household: who, where, how many children, and how close

@@ -49,6 +49,8 @@ BUTTONS = {
     "trade": P.propose_a_trade,
     "tab-build": lambda c=2: P.tab("build", c),
     "tab-households": lambda c=2: P.tab("households", c),
+    "tab-people": lambda c=2: P.tab("people", c),
+    **{f"person-{n}": (lambda c=2, k=n: P.person_chip(k, c)) for n in range(12)},
     **{name: (lambda c=2, n=name: P.build_button(n, c)) for name in P.BUILDS},
 }
 
