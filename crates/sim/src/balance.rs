@@ -349,6 +349,20 @@ pub const BUILDER_EFFORT: u32 = 1;
 /// How many builders can crowd onto one construction site.
 pub const BUILDER_SLOTS: usize = 4;
 
+/// How much of a dike's build time raising it by a level costs, as a percent.
+///
+/// Raising a bank is adding a course to something that is already there, not
+/// building it again — and the difference is what makes a level-two wall a
+/// thing a city of eight can have. `playtest.rs` measured the alternative: at
+/// full price a wall worth having takes six thousand builder-ticks, half the
+/// city is on it for the whole age, two or three people are left farming, and
+/// the city starves before the water arrives. Every `dike` run died in age
+/// one, which is a wall that costs you the run whether or not it works.
+///
+/// Half. A dike raised to level two is one and a half dikes' work rather than
+/// two, and the stone is unchanged — the earth is the same earth either way.
+pub const DIKE_RAISE_PERCENT: u32 = 50;
+
 /// A Dike level raises the effective ground by this much (design §3.3), and a
 /// Dike can be built up to this many levels. Two levels stops an age-1 surge
 /// of height 12 dead, which is the teaching moment in design §5.
@@ -619,27 +633,58 @@ pub const PRESSURE_SCALE: u32 = 256;
 /// the last. That is the shape design §5 wants; the exact number is M5's.
 pub const STRESS_RELIEF: u32 = 2;
 
+/// How much a dike's own footing may vary from the book figure, as a percent
+/// either way.
+///
+/// No two stretches of bank are alike, and without this they are: a hard
+/// threshold sitting in the middle of the load distribution is exactly where
+/// the fraction broken is most sensitive to the load, so the same rule gave
+/// 67% of a level-one wall gone on one seed and 93% on another —
+/// `which_dikes_break` prints the spread. Making the *wall* vary by more than
+/// the flood does between maps turns a knife-edge into a slope, which is what
+/// makes "a lot of them break and not all of them" a thing that can be aimed
+/// at rather than a coincidence.
+///
+/// Drawn once, when the segment is placed, and kept on the building — so it is
+/// in the checksum and the snapshot like everything else, and two peers cannot
+/// disagree about which wall was the weak one.
+pub const FOOTING_SPREAD: u8 = 25;
+
 /// What a dike can take before it is rubble, in scaled pressure-ticks, by
 /// level.
 ///
-/// **Provisional.** M5 of the plan measures these against the river and the
-/// target it names — most of a level-one wall gone at age one, most of a
-/// level-two wall standing — and replaces them with a table that says where
-/// the numbers came from. What is here is measured only against sustained flow
-/// on flat ground, in `dike_pressure_on_flat_ground`, and is enough to make
-/// "level one breaks, level two holds" true and testable in the meantime.
+/// **Measured against the river**, by `dikes::which_dikes_break`, which walls
+/// both banks at three distances across ten seeds with segments alternating
+/// between level one and level two and reports what the flood takes. The plan
+/// asks for a fraction rather than a rule — "a lot of level one dikes break
+/// and not all of them; many level twos hold" — so the target is a band:
+/// 60–80% of level one gone at age one, 70–90% of level two standing, and both
+/// worse by age three.
 ///
-/// A level is not a linear amount of wall: it is height, and a taller bank is
-/// both thicker at the base and holding water that has to climb further. The
-/// squares are a guess at that shape and are the first thing M5 should argue
-/// with.
-/// Measured against a sustained age-one surge on flat ground, in
-/// `dike_pressure_on_flat_ground`. A wall the water does not top takes about
-/// 26 000 from an age-one surge and about 35 000 from an age-three one, so a
-/// level two holds the first and not the third, and a level one holds
-/// neither.
+/// | from the channel | age 1: L1 gone / L2 gone | age 3: L1 gone / L2 gone |
+/// |---|---|---|
+/// | 6 cells  | 82% / 40% | 89% / 65% |
+/// | 12 cells | 73% / 16% | 83% / 34% |
+/// | 20 cells | 59% / 7%  | 75% / 18% |
+/// | all      | **71% / 21%** | 82% / 39% |
+///
+/// So at age one 71% of a level-one wall is gone and 79% of a level-two wall
+/// is standing — both in the middle of the target — and by age three it is 82%
+/// and 61%. The gradient with distance is the part worth looking at: a wall on
+/// the bank is nearly all taken and one twenty cells back is nearly all left,
+/// which is the choice the drag tool is for.
+///
+/// Seven seeds in ten hit both bands. The plan asked for eight, and the three
+/// that miss are maps whose flood is unusually weak or strong rather than
+/// walls that behave oddly — `[20_000, 55_000, …]`, `[16_000, 52_000, …]` and
+/// `[14_000, 50_000, …]` all measured seven as well, so the residual is the
+/// spread between maps and not the choice of number. Narrowing it means
+/// normalising the flood between seeds, and two attempts at that are recorded
+/// in DECISIONS.md — holding the surge's surface instead of its depth (kept,
+/// it is the better model) and capping the water on the ground (dropped, it
+/// did not move the outliers).
 pub const DIKE_STRESS_LIMIT: [u32; DIKE_MAX_LEVEL as usize] =
-    [6_000, 30_000, 45_000, 60_000];
+    [15_000, 48_000, 90_000, 145_000];
 
 /// What a dike of this level can take. Levels are 1-based.
 pub fn dike_stress_limit(level: u8) -> u32 {

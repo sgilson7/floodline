@@ -24,9 +24,9 @@ The plan is an artifact, and it is the plan of record:
 | M1 | Forester costs stone | **done** |
 | M2 | A camera over the map | **done** |
 | M3 | Dikes: 3×1, drawn, breakable | **done** |
-| M4 | The river and the wave | **built, not tuned** |
-| M5 | Tuning: which dikes break | ← **you are here** |
-| M6 | Gold, the trading hut, mules | |
+| M4 | The river and the wave | **done** |
+| M5 | Tuning: which dikes break | **measured; food balance parked before M10** |
+| M6 | Gold, the trading hut, mules | ← **you are here** |
 | M7 | Levels, and moving buildings | |
 | M8 | Job icons, and workers going indoors | |
 | M9 | Families, children, a nursery, a households tab | |

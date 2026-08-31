@@ -381,7 +381,14 @@ impl World {
     ) -> Result<BuildingId, RuleError> {
         self.can_place(owner, kind, facing, x, y)?;
         let id = BuildingId(self.buildings.len() as u16);
-        let b = Building::site(id, owner, kind, facing, x, y);
+        let mut b = Building::site(id, owner, kind, facing, x, y);
+        if kind == Kind::Dike {
+            // One draw, here, so the wall a player is looking at has the
+            // toughness it will still have in an hour. See
+            // `balance::FOOTING_SPREAD`.
+            let spread = FOOTING_SPREAD as i32;
+            b.footing = (100 + self.rng.range(-spread, spread)) as u8;
+        }
         self.occupy(&b);
         self.buildings.push(b);
         Ok(id)
@@ -402,7 +409,9 @@ impl World {
         }
         b.level += 1;
         b.state = BuildState::Site;
-        b.progress = 0;
+        // Part-built, because the bank below the new course is already there.
+        // See `balance::DIKE_RAISE_PERCENT`.
+        b.progress = Kind::Dike.build_ticks() * (100 - DIKE_RAISE_PERCENT) / 100;
         Ok(())
     }
 
@@ -1050,6 +1059,7 @@ impl World {
         let height = depth(self.disaster.height) * pulses.min(2) as u16;
         let push = surge_push(self.disaster.height) * pulses.min(2) as u16;
 
+
         let river: Vec<(i32, i32)> =
             self.map.river.iter().map(|&(x, y)| (x as i32, y as i32)).collect();
         // The whole cut, banks included, not just the floor: a source that
@@ -1058,10 +1068,29 @@ impl World {
         let wide = RIVER_HALF_WIDTH + RIVER_BANK;
 
         for (i, &(cx, cy)) in river.iter().enumerate().take(2 * SURGE_REACH as usize) {
-            let to = if (i as i32) < SURGE_REACH { height } else { push };
+            let over = if (i as i32) < SURGE_REACH { height } else { push };
+            // The surface the source holds, not the depth it holds.
+            //
+            // A river in flood rises to its banks and over them; it does not
+            // rise to a fixed number of sixteenths wherever it happens to be.
+            // Holding a depth made the flood a different flood on every map —
+            // `which_dikes_break` found level-one walls losing anywhere from
+            // 67% to 93% of their segments across five seeds — because the
+            // same depth in a deep confined channel is a river and in a
+            // shallow one is a lake. The top of the bank is the channel floor
+            // plus `RIVER_DEPTH`, and the surge stands `over` above that.
+            let bed = self.map.height_at(cx, cy) as i32;
+            let surface = (bed + RIVER_DEPTH) * DEPTH_SCALE as i32 + over as i32;
+
             for dy in -wide..=wide {
                 for dx in -wide..=wide {
-                    self.water.raise_to(cx + dx, cy + dy, to);
+                    let (x, y) = (cx + dx, cy + dy);
+                    if !Map::contains(x, y) {
+                        continue;
+                    }
+                    let ground = self.map.height_at(x, y) as i32 * DEPTH_SCALE as i32;
+                    let want = (surface - ground).clamp(0, u16::MAX as i32) as u16;
+                    self.water.raise_to(x, y, want);
                 }
             }
         }

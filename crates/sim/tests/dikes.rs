@@ -287,7 +287,10 @@ fn a_level_one_wall_gives_way_where_a_level_two_holds() {
         // about a whole map, and M5's to answer.
         let watch = ids[ids.len() / 2];
         pour(&mut w, 12, SURGE_TICKS);
-        drain(&mut w, 1000);
+        // Long enough for a level one to go. `dike_pressure_on_flat_ground`
+        // says it does so around tick 1900 at the thresholds M5 measured — it
+        // was 1100 at the provisional ones, and this window was 1300.
+        drain(&mut w, 1900);
 
         let standing =
             ids.iter().filter(|id| w.buildings[id.0 as usize].standing_now()).count();
@@ -319,7 +322,7 @@ fn a_wall_under_load_shows_it_before_it_goes() {
     let watch = ids[ids.len() / 2];
     let mut seen = Vec::new();
 
-    for _ in 0..14 {
+    for _ in 0..26 {
         pour(&mut w, 12, 50);
         drain(&mut w, 50);
         seen.push(w.buildings[watch.0 as usize].strain());
@@ -365,7 +368,7 @@ fn a_wall_that_gives_way_stops_holding_the_water_up() {
     let held = w.effective_height(bx, by);
 
     pour(&mut w, 12, SURGE_TICKS);
-    drain(&mut w, 1000);
+    drain(&mut w, 1900);
 
     assert!(!w.buildings[id.0 as usize].standing_now());
     assert!(
@@ -472,6 +475,161 @@ fn dike_pressure_on_flat_ground() {
                 },
                 clear,
             );
+        }
+    }
+}
+
+// ---- M5: which dikes break --------------------------------------------------
+
+/// Wall one bank of the river, `out` cells from the centreline, in segments
+/// alternating between level 1 and level 2.
+///
+/// Built by fiat rather than hauled and paid for. Whether a city can *afford*
+/// a wall is `playtest.rs`'s question and depends on eight people and a day's
+/// work; this one is only about whether the water takes it down, and mixing
+/// the two questions is how a threshold ends up tuned against a shortage of
+/// stone.
+///
+/// Returns one entry per segment: its id, its level, and how far it stands
+/// from the channel.
+fn wall_the_bank(w: &mut World, out: i32, side: i32) -> Vec<(BuildingId, u8, i32)> {
+    let river: Vec<(i32, i32)> =
+        w.map.river.iter().map(|&(x, y)| (x as i32, y as i32)).collect();
+    let n = river.len() as i32;
+    let mut built = Vec::new();
+
+    let mut at = 0;
+    while at < n {
+        let (rx, ry) = river[at as usize];
+        let a = river[(at - 4).clamp(0, n - 1) as usize];
+        let b = river[(at + 4).clamp(0, n - 1) as usize];
+        let (tx, ty) = (b.0 - a.0, b.1 - a.1);
+        let (px, py) = ((-ty).signum() * side, tx.signum() * side);
+        let (x, y) = (rx + px * out, ry + py * out);
+
+        // Alternating, so both levels meet the same water in the same run and
+        // a difference between them cannot be a difference between two places.
+        let level = if built.len() % 2 == 0 { 1u8 } else { 2u8 };
+        let facing = Facing::of_run((0, 0), (tx, ty));
+
+        if w.can_place(ME, Kind::Dike, facing, x, y).is_ok() {
+            let id = w.place(ME, Kind::Dike, facing, x, y).unwrap();
+            for _ in 0..level {
+                let owed = w.buildings[id.0 as usize].outstanding().stone;
+                w.deliver_to(id, Good::Stone, owed);
+                w.build_at(id, Kind::Dike.build_ticks());
+                if w.buildings[id.0 as usize].level < level {
+                    w.raise_dike(ME, id).unwrap();
+                }
+            }
+            if w.buildings[id.0 as usize].standing_now() {
+                built.push((id, level, out));
+            }
+        }
+        at += DIKE_LENGTH;
+    }
+    built
+}
+
+/// Run the impact day and let the water drain, without anybody in the way.
+///
+/// `World::tick` is not used: a citizen in a flood re-paths every tick against
+/// an effective height the water is changing under it, and this is a question
+/// about walls.
+fn flood_it(w: &mut World, height: u16) {
+    w.disaster.height = height;
+    w.tick = (World::IMPACT_DAY - 1) * TICKS_PER_DAY;
+    for _ in 0..(SURGE_TICKS + 2 * TICKS_PER_DAY) {
+        w.step_water();
+        w.flood_bodies();
+        w.tick += 1;
+    }
+}
+
+/// M5's measurement: how much of a wall along the river the flood takes.
+///
+/// The plan's target is a fraction, not a rule — "a lot of level one dikes
+/// break and not all of them; many level twos hold" — so it has to be counted
+/// across seeds and ages rather than asserted on one. `DIKE_STRESS_LIMIT` is
+/// set from what this prints.
+#[test]
+#[ignore]
+fn which_dikes_break() {
+    const SEEDS: [u64; 10] = [
+        31, 97, 1_000_003, 4_043_362_590, 12_345, 3, 7, 88_888, 555, 20_260_830,
+    ];
+    const OUT: [i32; 3] = [6, 12, 20];
+
+    for height in [12u16, 18] {
+        println!();
+        println!("  a surge of {height} (age {})", if height == 12 { "1-2" } else { "3" });
+        println!("  from the channel   level 1 broken   level 2 broken   segments");
+
+        let mut totals = [(0usize, 0usize), (0usize, 0usize)];
+        let mut per_seed: Vec<(u64, [(usize, usize); 2])> =
+            SEEDS.iter().map(|&s| (s, [(0, 0), (0, 0)])).collect();
+        for out in OUT {
+            let mut counts = [(0usize, 0usize), (0usize, 0usize)];
+            for (si, seed) in SEEDS.into_iter().enumerate() {
+                let mut w = World::new(seed, 2);
+                let mut built = wall_the_bank(&mut w, out, 1);
+                built.extend(wall_the_bank(&mut w, out, -1));
+                flood_it(&mut w, height);
+
+                for (id, level, _) in built {
+                    let gone = !w.buildings[id.0 as usize].standing_now();
+                    let slot = &mut counts[level as usize - 1];
+                    slot.1 += 1;
+                    if gone {
+                        slot.0 += 1;
+                    }
+                    let seat = &mut per_seed[si].1[level as usize - 1];
+                    seat.1 += 1;
+                    if gone {
+                        seat.0 += 1;
+                    }
+                }
+            }
+            let pct = |(broken, all): (usize, usize)| {
+                if all == 0 { 0 } else { broken * 100 / all }
+            };
+            println!(
+                "  {out:>13} cells   {:>13}%   {:>13}%   {:>8}",
+                pct(counts[0]),
+                pct(counts[1]),
+                counts[0].1 + counts[1].1
+            );
+            for i in 0..2 {
+                totals[i].0 += counts[i].0;
+                totals[i].1 += counts[i].1;
+            }
+        }
+        let pct = |(broken, all): (usize, usize)| {
+            if all == 0 { 0 } else { broken * 100 / all }
+        };
+        println!(
+            "  all distances       {:>13}%   {:>13}%   {:>8}",
+            pct(totals[0]),
+            pct(totals[1]),
+            totals[0].1 + totals[1].1
+        );
+        println!(
+            "  the target is 60-80% of level one gone and 70-90% of level two standing"
+        );
+        if height == 12 {
+            println!("  by seed:");
+            let mut hit = 0;
+            for (seed, counts) in &per_seed {
+                let one = pct(counts[0]);
+                let two = 100 - pct(counts[1]);
+                let ok = (60..=80).contains(&one) && (70..=90).contains(&two);
+                hit += usize::from(ok);
+                println!(
+                    "    {seed:>12}   level 1 {one:>3}% gone   level 2 {two:>3}% standing   {}",
+                    if ok { "on target" } else { "off" }
+                );
+            }
+            println!("  {hit} of {} seeds on target", SEEDS.len());
         }
     }
 }

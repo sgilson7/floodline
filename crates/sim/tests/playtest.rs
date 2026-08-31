@@ -21,7 +21,7 @@
 //!     cargo test -p sim --release --test playtest -- --ignored --nocapture
 
 use sim::balance::*;
-use sim::building::{Facing, Kind};
+use sim::building::{BuildState, Facing, Kind};
 use sim::citizen::{CitizenId, PlayerId};
 use sim::command::Command;
 use sim::map::{Map, MAP_H, MAP_W};
@@ -146,7 +146,6 @@ fn play(seed: u64, play: Play) -> Report {
     let mut placed = 0usize;
     let mut last_day = u32::MAX;
     let mut diked = false;
-    let mut raised = false;
     let mut fled = false;
     let mut returned = false;
     let mut deepest_this_age = 0u16;
@@ -174,18 +173,41 @@ fn play(seed: u64, play: Play) -> Report {
                     }
                 }
             }
+            // Farms first, wall second. The other way round was tried and
+            // measured: builders got first pick, the fields went short, and on
+            // two seeds in three the city starved before the water arrived
+            // with no food at the hearth at all. A player builds a wall out of
+            // the hands the harvest can spare, not the other way about.
             assign_to_farms(&mut w);
+            if play == Play::Dike || play == Play::Both {
+                man_the_wall(&mut w);
+            }
         }
 
         // The wall is ordered on the second day, after the farm and the
-        // granary, and raised a level on the fourth if there is stone left.
-        if (play == Play::Dike || play == Play::Both) && !diked && day >= 2 {
+        // granary, and raised on the third — early enough that the second
+        // level is standing before the water comes rather than half-built
+        // when it does.
+        // "After the farm and the granary" was what the comment said and not
+        // what the code did: the wall went down on the second day whatever
+        // else was half-built, and the builders it took were the ones that
+        // would have finished the farm. Two seeds in three then had no food at
+        // the hearth in any age and the city starved before the water came.
+        let fed = |w: &World| {
+            let up = |k: Kind| {
+                w.buildings.iter().any(|b| b.owner == ME && b.kind == k && b.standing_now())
+            };
+            up(Kind::Farm) && up(Kind::Granary)
+        };
+        if (play == Play::Dike || play == Play::Both) && !diked && day >= 2 && fed(&w) {
             diked = true;
             report.wall = order_a_wall(&mut w, hx, hy);
         }
-        if (play == Play::Dike || play == Play::Both) && diked && day == 4 && !raised {
-            raised = true;
-            raise_the_wall(&mut w);
+        if (play == Play::Dike || play == Play::Both) && diked && day >= 3 {
+            // Two, and no higher: `which_dikes_break` says level two is where
+            // a wall starts holding, and stone spent on a third level is stone
+            // not spent on more wall.
+            raise_the_wall(&mut w, 2);
         }
 
         // Uphill, on the omen. It arrives a day before the water (design §4)
@@ -233,6 +255,10 @@ fn play(seed: u64, play: Play) -> Report {
         w.tick(&mut nav, &[]);
         deepest_this_age = deepest_this_age.max(deepest_near(&w, hx, hy));
         at_the_fire = at_the_fire.max(w.water.depth_at(hx, hy));
+        // Recorded once, on the first flood. It used to be assigned on every
+        // impact day, so what the table called "the wall at the age-one flood"
+        // was actually the wall left standing after the age-three one — which
+        // on a level-one wall is nothing at all.
         if w.day_of_age() == World::IMPACT_DAY && report.stone_on_the_day.len() < w.age() as usize {
             report.stone_on_the_day.push(w.treasury(ME).stone);
             report.wall_cost = w
@@ -251,8 +277,6 @@ fn play(seed: u64, play: Play) -> Report {
                 w.buildings.iter().filter(|b| b.owner == ME && b.standing_now()).count(),
             );
             deepest_this_age = 0;
-            // A new age, a new chance to raise what is standing.
-            raised = false;
             fled = false;
         }
     }
@@ -263,6 +287,43 @@ fn play(seed: u64, play: Play) -> Report {
 /// Fill every farm's slots from whoever has no job, which is what a player
 /// does after each farm goes up. Nothing else needs assigning: a city finishes
 /// its own building sites, and hauling is what an unassigned citizen does.
+/// Put half the city on the wall while any of it is unfinished.
+///
+/// **Ordering a wall is not building one.** The first version of this strategy
+/// placed eleven segments and then sent everybody back to the fields, and on
+/// the impact day one segment in seven was standing and the rest were heaps of
+/// delivered stone — so what the playtest was actually measuring was a city
+/// that had paid for a wall and did not have one. A player who has decided to
+/// build a wall puts people on it, and half the city is the trade: the other
+/// half still has to feed everybody, which is the cost the decision is
+/// supposed to have.
+fn man_the_wall(w: &mut World) {
+    let sites: Vec<sim::BuildingId> = w
+        .buildings
+        .iter()
+        .filter(|b| b.owner == ME && b.kind == Kind::Dike && b.state == BuildState::Site)
+        .map(|b| b.id)
+        .collect();
+    let mut hands = FOUNDING_CITIZENS / 2;
+    for site in sites {
+        if hands == 0 {
+            return;
+        }
+        let free: Vec<CitizenId> = w
+            .citizens
+            .iter()
+            .filter(|c| c.owner == ME && c.alive() && c.job.is_none())
+            .map(|c| c.id)
+            .take(hands.min(BUILDER_SLOTS as u32) as usize)
+            .collect();
+        if free.is_empty() {
+            return;
+        }
+        hands -= free.len() as u32;
+        let _ = w.apply(ME, &Command::Assign { citizens: free, building: site });
+    }
+}
+
 fn assign_to_farms(w: &mut World) {
     let farms: Vec<sim::BuildingId> = w
         .buildings
@@ -334,6 +395,15 @@ fn order_a_wall(w: &mut World, hx: i32, hy: i32) -> usize {
     // water.
     let out = ((hx - rx).abs().max((hy - ry).abs()) / 3).max(3);
     let (cx, cy) = (rx + ox * out, ry + oy * out);
+    // **Short, and then raised**, which is not what this used to do.
+    //
+    // A forty-cell wall at level one is what the first version ordered, and
+    // `which_dikes_break` is the reason it stopped: at level one the water
+    // takes four segments in five, so a long low wall is a whole city's labour
+    // spent on something that will not be there when it is wanted. Half the
+    // length costs half the builder-ticks and leaves stone for the second
+    // level, which is the one that holds. The wall is the decision; how to
+    // spend on it is the decision inside the decision.
     let half = 20;
     let from = (
         (cx - tx * half).clamp(0, MAP_W - 1) as u8,
@@ -348,12 +418,20 @@ fn order_a_wall(w: &mut World, hx: i32, hy: i32) -> usize {
     dikes(w) - before
 }
 
-/// Raise every finished dike a level, while there is stone for it.
-fn raise_the_wall(w: &mut World) {
+/// Raise every finished dike toward `want`, while there is stone for it.
+///
+/// Called every day rather than once, because raising a dike puts it back to a
+/// site and a dike ordered on the second day is not standing on the third. The
+/// first version raised once, on the fourth, and measured a wall that was
+/// still level one when the water came — which `which_dikes_break` says is a
+/// wall the water takes four segments in five of.
+fn raise_the_wall(w: &mut World, want: u8) {
     let standing: Vec<sim::BuildingId> = w
         .buildings
         .iter()
-        .filter(|b| b.owner == ME && b.kind == Kind::Dike && b.standing_now())
+        .filter(|b| {
+            b.owner == ME && b.kind == Kind::Dike && b.standing_now() && b.level < want
+        })
         .map(|b| b.id)
         .collect();
     for dike in standing {

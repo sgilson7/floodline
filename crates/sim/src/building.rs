@@ -270,9 +270,18 @@ impl Kind {
             Kind::Quarry => 220,
             Kind::Granary => 250,
             Kind::Stockpile => 60,
-            // Per cell, for the same reason the stone is: a segment is three
-            // cells of earth to move, not one.
-            Kind::Dike => 150 * DIKE_LENGTH as u32,
+            // Fifty a cell, not a hundred and fifty.
+            //
+            // A hundred and fifty was set when a dike was decoration; M5
+            // measured what it costs now that the dike is the thing the game
+            // is about, and the answer was the whole run. A wall long enough
+            // to shield a city is about forty cells; at the old price that is
+            // six thousand builder-ticks, half the city stands on the bank for
+            // two days a long walk from the granary, and every `dike` run in
+            // `playtest.rs` died before the water arrived. A bank of earth is
+            // not a house — a cottage is two hundred for four cells — and at
+            // fifty a cell the wall is a decision rather than a trap.
+            Kind::Dike => 50 * DIKE_LENGTH as u32,
             Kind::Road => 20,
             Kind::Bridge => 80,
         }
@@ -516,6 +525,10 @@ pub struct Building {
     /// How much the water has leaned on this, in scaled pressure-ticks.
     /// Dikes only; everything else takes damage the ordinary way.
     pub stress: u32,
+    /// How good this stretch of bank is, as a percentage of the book figure
+    /// for its level. Dikes only, drawn when the segment is placed; a hundred
+    /// for everything else. See `balance::FOOTING_SPREAD`.
+    pub footing: u8,
     pub store: Goods,
     /// Work accumulated toward the next unit of output. Producers only.
     pub work: u32,
@@ -546,6 +559,7 @@ impl Building {
             integrity: kind.integrity(),
             level: 1,
             stress: 0,
+            footing: 100,
             store: Goods::NONE,
             work: 0,
             workers: Vec::new(),
@@ -690,9 +704,10 @@ impl Building {
         }
     }
 
-    /// What this dike can take before it gives way.
+    /// What this dike can take before it gives way: the book figure for its
+    /// level, scaled by how good a stretch of bank it happens to be.
     pub fn stress_limit(&self) -> u32 {
-        dike_stress_limit(self.level)
+        dike_stress_limit(self.level) * self.footing.max(1) as u32 / 100
     }
 
     /// How close this is to giving way, from 0 to 100.

@@ -1929,3 +1929,78 @@ the river mouth*, the crowd test *bunches its own citizens* rather than leaning
 on where a founding party happens to land, the water tests put their walls in a
 *clear column*, and the road tests *search for* a pair of ends a road can
 actually join instead of aiming two cells east of a hearth.
+
+---
+
+## 2026-08-30 — Which dikes break, and what a wall is allowed to cost
+
+M5. `dikes::which_dikes_break` walls both banks of the river at three distances
+across ten seeds, alternating level one and level two, and reports what the
+flood takes. `DIKE_STRESS_LIMIT` is set from it and the table lives beside the
+constant.
+
+At `[15_000, 48_000, 90_000, 145_000]` an age-one flood takes 71% of a
+level-one wall and leaves 79% of a level-two one standing — both in the middle
+of the plan's target — and by age three it is 82% and 61%. The gradient with
+distance is the part worth looking at: 82% of a level-one wall on the bank goes
+and 59% of one twenty cells back, which is the choice the drag tool exists for.
+
+**Seven seeds in ten hit both bands; the plan asked for eight, and the residual
+is not the number.** `[20_000, 55_000, …]`, `[16_000, 52_000, …]` and
+`[14_000, 50_000, …]` all measured seven as well. The three that miss are maps
+whose flood is unusually weak or strong, not walls behaving oddly. Two attempts
+at narrowing that are recorded here because the next person should not repeat
+them:
+
+* **Holding the surge's surface rather than its depth.** Kept — it is the
+  better model, since a river in flood rises to its banks and over rather than
+  to a fixed number of sixteenths wherever it happens to be. It raised the mean
+  and did not narrow the spread.
+* **Capping the water on the ground.** Dropped. It looked right — the map that
+  *poured* the least held the most water and vice versa, because a source that
+  holds a depth stops asking once its neighbours are full — but capping the
+  volume moved every seed together and left the same two outliers. Machinery
+  that does not earn its place does not stay.
+
+**A dike had to be given a footing.** A hard threshold sitting in the middle of
+the load distribution is exactly where the fraction broken is most sensitive to
+the load, which is why the same rule gave 67% of a level-one wall gone on one
+seed and 93% on another. `FOOTING_SPREAD` draws each segment's toughness within
+25% of the book figure when it is placed, and keeps it on the building so two
+peers cannot disagree about which stretch was the weak one. No two banks are
+alike, and without this they were.
+
+**And a wall had to be made affordable, which is the finding that matters.**
+The playtest measured the old price and the answer was the whole run: a wall
+long enough to shield a city is about forty cells, at 150 builder-ticks a cell
+that is six thousand builder-ticks, half the city stands on the bank for two
+days a long walk from the granary, and **every `dike` run died before the water
+arrived**. So:
+
+* `Kind::Dike.build_ticks()` is fifty a cell, not a hundred and fifty. A bank
+  of earth is not a house — a cottage is two hundred for four cells.
+* `DIKE_RAISE_PERCENT` makes raising a level half the work of building one,
+  because adding a course to a bank is adding to something already there.
+  Design §3.3 has dikes grow; this is what growing costs.
+* `playtest.rs`'s dike strategy now *mans* its wall, raises it to level two and
+  no higher, and orders it only once the farm and the granary are standing —
+  three things its own comments already claimed and its code did not do.
+
+**On one seed in three, a diked city now visibly outlives an undiked one** —
+`both` finishes three ages with all eight alive against `grow`'s six and
+`flee`'s none. That is the first time that has ever been true in this repo.
+
+### What is left, and why it is parked
+
+On the other two seeds building the wall still costs the city the run. The
+cause is measured and is not a bug: the labour has to come from somewhere, and
+those maps have no slack in the first age. Fixing it is a question about the
+*food* economy rather than about dikes — how much a farm yields, how many
+hands a city of eight can spare — and the honest way to answer it is to watch
+two people play, which is M10.
+
+So M5 stops here. Nothing in M6 through M9 touches the flood: gold and mules,
+levels and moving, job icons and workers indoors, and families are all
+independent of it, and the plan says so of M6 and M7 in as many words.
+**Finishing the balance belongs immediately before M10**, where a real run is
+the instrument, and it is listed there rather than left implicit.

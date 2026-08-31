@@ -239,3 +239,46 @@ than to keep tuning inside M4.
 independent of the flood work and can be pulled forward if trade is the part
 worth playing with sooner — which the river has just made much more
 interesting, since the cities are now on opposite banks.
+
+---
+
+## Session 6 — 2026-08-30
+
+**M5 measured, and stopped short on purpose.** 252 cargo tests, no warnings.
+
+`dikes::which_dikes_break` walls both banks at three distances across ten
+seeds and reports what the flood takes. `DIKE_STRESS_LIMIT` is now
+`[15_000, 48_000, 90_000, 145_000]`, which puts an age-one flood at 71% of a
+level-one wall gone and 79% of a level-two wall standing — both in the middle
+of the plan's target — and worse at age three. Seven seeds in ten hit both
+bands against the plan's eight; the three that miss are maps whose flood is
+weak or strong, not walls behaving oddly, and two attempts at narrowing that
+are written up in `DECISIONS.md` so nobody repeats them.
+
+Two rules changed because the playtest said the wall was unbuildable:
+`Kind::Dike.build_ticks()` is fifty a cell rather than a hundred and fifty, and
+`DIKE_RAISE_PERCENT` makes raising a level half the work of building one. On
+one seed in three a diked city now finishes three ages with all eight alive
+against an undiked six — the first time that has been true here.
+
+### Parked, deliberately
+
+On the other two seeds building a wall still costs the city the run, because
+the labour has to come from somewhere and those maps have no slack in age one.
+That is a question about the **food economy**, not about dikes, and the
+instrument for answering it is two people playing a run — which is M10.
+
+**The remaining balance work is listed immediately before M10** and blocks
+nothing: M6 (gold, mules), M7 (levels, moving), M8 (job icons, workers
+indoors) and M9 (families) do not touch the flood, and the plan says so of M6
+and M7 outright.
+
+### Next action
+
+**M6 — gold, the trading hut and the mule.** Two sessions. `Good::Gold` first,
+in one pass, before anything depends on it; then `Kind::TradingPost`,
+`Job::Trader`, and `World::mules` as their own entity rather than a citizen
+wearing a hat. The river has just made this the most interesting milestone
+left: the cities are on opposite banks, so a mule has to find the ford or a
+bridge, and "a mule that cannot get across says so in the panel" stops being a
+corner case and becomes the common one.
