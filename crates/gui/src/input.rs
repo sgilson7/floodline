@@ -632,9 +632,50 @@ impl Input {
         }
         y += 42.0 * ((BUILDABLE.len() as f32 + 1.0) / 2.0).floor() + 8.0;
 
+        // The dike is picked from the build menu above like anything else; it
+        // is the gesture that differs, not the shopping.
+        let road = Rect::new(left, y, half, 36.0);
+        let ping = Rect::new(left + half + 8.0, y, half, 36.0);
+        if ui.button(road, "r road", true) {
+            self.tool = Tool::Road { from: None };
+        }
+        if matches!(self.tool, Tool::Road { .. }) {
+            draw_rectangle_lines(road.x, road.y, road.w, road.h, 2.0, palette::INK);
+        }
+        if ui.button(ping, "p point", true) {
+            self.tool = Tool::Ping;
+        }
+        if self.tool == Tool::Ping {
+            draw_rectangle_lines(ping.x, ping.y, ping.w, ping.h, 2.0, palette::INK);
+        }
+        y += 48.0;
+
+        draw_text(
+            match self.tool {
+                Tool::Select => "drag to choose. right-click to send them",
+                Tool::Build(_) => "click the ground. right-click to stop",
+                Tool::Moving { .. } => "click where it should stand. right-click to stop",
+                Tool::Wall { from: None } => "drag to draw a wall. click one to raise it",
+                Tool::Wall { from: Some(_) } => "let go where the wall should end",
+                Tool::Road { from: None } => "click where the road starts",
+                Tool::Road { from: Some(_) } => "click where it ends",
+                Tool::Ping => "click what you want them to look at",
+            },
+            left,
+            y,
+            14.0,
+            palette::FAINT,
+        );
+        y += 22.0;
         // What you have chosen, and the two things you can do to it. Only
         // drawn when there is something to do: a row of dead buttons is a row
         // a player learns to stop reading.
+        //
+        // **Below everything fixed, and that is not a layout preference.**
+        // This row appears and disappears as a player clicks about, so
+        // anything under it would move under the cursor — and every browser
+        // check clicks the panel at a written-down coordinate. The panel has
+        // shifted five times now and each time it silently broke two of them.
         if let Some(id) = self.chosen {
             let w = session.world();
             if let Some(b) = w.buildings.get(id.0 as usize).filter(|b| b.owner == me) {
@@ -669,41 +710,6 @@ impl Input {
             }
         }
 
-        let road = Rect::new(left, y, half, 36.0);
-        let ping = Rect::new(left + half + 8.0, y, half, 36.0);
-        // The dike is picked from the build menu above like anything else; it
-        // is the gesture that differs, not the shopping.
-        if ui.button(road, "r road", true) {
-            self.tool = Tool::Road { from: None };
-        }
-        if matches!(self.tool, Tool::Road { .. }) {
-            draw_rectangle_lines(road.x, road.y, road.w, road.h, 2.0, palette::INK);
-        }
-        if ui.button(ping, "p point", true) {
-            self.tool = Tool::Ping;
-        }
-        if self.tool == Tool::Ping {
-            draw_rectangle_lines(ping.x, ping.y, ping.w, ping.h, 2.0, palette::INK);
-        }
-        y += 48.0;
-
-        draw_text(
-            match self.tool {
-                Tool::Select => "drag to choose. right-click to send them",
-                Tool::Build(_) => "click the ground. right-click to stop",
-                Tool::Moving { .. } => "click where it should stand. right-click to stop",
-                Tool::Wall { from: None } => "drag to draw a wall. click one to raise it",
-                Tool::Wall { from: Some(_) } => "let go where the wall should end",
-                Tool::Road { from: None } => "click where the road starts",
-                Tool::Road { from: Some(_) } => "click where it ends",
-                Tool::Ping => "click what you want them to look at",
-            },
-            left,
-            y,
-            14.0,
-            palette::FAINT,
-        );
-        y += 22.0;
         // What the cursor is over, so a farm's three slots are visible before
         // the click rather than as a refusal after it. Its own line, kept
         // clear whether or not there is anything under the mouse, so nothing
