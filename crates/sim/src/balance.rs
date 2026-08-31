@@ -12,9 +12,44 @@ use crate::fx::Fx;
 // ---- time ------------------------------------------------------------------
 
 /// Simulation ticks per second (design §3.1).
-pub const TICKS_PER_SECOND: u32 = 10;
+///
+/// **A wall-clock knob and nothing else.** It appears in no rule in this crate:
+/// only in `gui`'s `Clock`, in two `net` timeouts that are genuinely counted in
+/// seconds, and in `PING_LIFETIME`. Everything the simulation balances is
+/// counted in *ticks* against `TICKS_PER_DAY`, so changing this changes how
+/// fast the same game is watched and nothing about the game.
+///
+/// That is only true because `SURGE_TICKS` and `DROWN_TICKS` are pinned in
+/// ticks — see their comments. They were written as seconds, and they are
+/// balance.
+///
+/// Twenty rather than ten, so a day is one minute and a three-age run is
+/// eighteen rather than thirty-six. Design §11 has suspected since phase 1 that
+/// an age is too long, and both accounts of the M10 run read like people who
+/// had been at it a while. `playtest::three_full_runs_of_each_strategy` is the
+/// measurement that says the game is unchanged:
+///
+/// ```text
+///                    survivors                    tallest wall by flood 1
+///   10/s   idle 0  grow 8  dike 8  flee 4  both 0        60 stone
+///   20/s   idle 0  grow 8  dike 8  flee 4  both 0        60 stone
+/// ```
+///
+/// **Not `WALK_SPEED`.** Doubling that is the obvious way to make people move
+/// faster and it is a different thing entirely: the same table takes the
+/// tallest wall a city can raise before the first flood from 60 stone to 540,
+/// because haulers carry nine times better, and drops `flee` from four
+/// survivors to one. It is also only safe as far as 128 — a road doubles it,
+/// and 256 is a whole cell a tick, which is where a citizen starts stepping
+/// over walls the per-cell passability check never sees.
+pub const TICKS_PER_SECOND: u32 = 20;
 
-/// Ticks in an in-game day: two minutes of wall clock.
+/// Ticks in an in-game day: one minute of wall clock at the current rate.
+///
+/// A number of *ticks*, and deliberately not a number of minutes: how long a
+/// day feels is `TICKS_PER_DAY / TICKS_PER_SECOND` and M11.1 halved it by
+/// moving the second of those, not this one. Everything below is the original
+/// reasoning for twelve hundred, which stands.
 ///
 /// Design §4 says "6 days, about 12 real minutes at 10 ticks/s with 200 ticks
 /// per day", and those numbers contradict each other — six days of two hundred
@@ -592,7 +627,18 @@ pub const MAX_AGE: u32 = 3;
 /// How long the source corner keeps pouring water in, in ticks. Design §5:
 /// about thirty seconds. The surge is not a scripted wave — it is a source
 /// strong enough that the automaton produces a front.
-pub const SURGE_TICKS: u32 = 30 * TICKS_PER_SECOND;
+///
+/// **In ticks, and no longer written as a number of seconds.** It used to be
+/// `30 * TICKS_PER_SECOND`, which reads like a wall-clock number and is not
+/// one: what decides the flood is how much of the *day* the source pours for,
+/// and a day is `TICKS_PER_DAY` whatever the clock is doing. Left as seconds,
+/// doubling the clock in M11.1 would have poured for six hundred ticks instead
+/// of three hundred — half a day rather than a quarter, and twice the water —
+/// while looking like a change to nothing but the frame rate.
+///
+/// Three hundred is what thirty seconds meant at the original ten ticks a
+/// second, so this pinning changed no behaviour on the day it was made.
+pub const SURGE_TICKS: u32 = 300;
 
 // ---- water -----------------------------------------------------------------
 
@@ -642,7 +688,11 @@ pub const PUDDLE: u16 = 1;
 /// under drowns it (design §3.4).
 pub const WADE_DEPTH: u16 = depth(2);
 pub const SWIM_DEPTH: u16 = depth(6);
-pub const DROWN_TICKS: u32 = 5 * TICKS_PER_SECOND;
+/// Pinned in ticks for the same reason as `SURGE_TICKS`, and it has to be
+/// pinned *with* it: what matters is that a body lasts a sixth of a surge, and
+/// scaling one without the other would quietly change that ratio. Fifty is
+/// what five seconds meant at ten ticks a second.
+pub const DROWN_TICKS: u32 = 50;
 
 /// How much of a cell's flow a citizen picks up each tick, in 256ths. A body
 /// is not a boat: it takes a fraction of the water's movement, and a strong

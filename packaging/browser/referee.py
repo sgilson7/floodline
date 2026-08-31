@@ -19,10 +19,10 @@ What it can answer without reading a single digit:
   matches the one before it means that page drew no tick in the gap between
   them. Thirty seconds of that and the other peer gives up on it
   (`DROP_AFTER_TICKS`), which is the failure that ends a run without warning.
-* **Is the clock right?** `day N of 6` turns over every 1 200 ticks, which at
-  ten ticks a second is two minutes. Counting day changes over a soak measures
-  the rate to within a few percent and needs no arithmetic on a screenshot —
-  a ten-minute soak should see five.
+* **Is the clock right?** `day N of 6` turns over every `TICKS_PER_DAY` ticks,
+  so its wall-clock length is `TICKS_PER_DAY / TICKS_PER_SECOND` — see
+  `DAY_SECONDS`. Counting day changes over a soak measures the rate to within a
+  few percent and needs no arithmetic on a screenshot.
 * **Or has the run simply ended?** An ended game and a stopped page look
   identical at the tick row, and the first soak reported twenty-six failures
   for a game that had finished normally. `still_playing` tells them apart at
@@ -48,6 +48,13 @@ OUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/floodline-referee"
 
 SAMPLE = 5.0        # how often to look: well inside the thirty-second window
 FILMSTRIP = 15.0    # how often to keep the picture
+
+# How long an in-game day lasts, in seconds of wall clock.
+#
+# `balance::TICKS_PER_DAY / balance::TICKS_PER_SECOND`, and the one number here
+# that has to move when the clock does. It was two minutes until M11.1 doubled
+# the rate; a soak that still expected two would call every healthy run late.
+DAY_SECONDS = 60.0
 
 
 def rows_box(which):
@@ -184,10 +191,9 @@ def main():
             say(f"{who[i]}: {days[i]} days in {mins:.1f} min, "
                 f"{stalls[i]} samples with no tick, {alarms[i]} red"
                 + (", ended" if over[i] else ""))
-        # A day is 1 200 ticks and the clock is ten a second, so two minutes.
         # Measured against the time actually spent playing: a run that ended
         # halfway through cannot have turned days after it.
-        want = mins / 2.0
+        want = mins * 60.0 / DAY_SECONDS
         near = all(abs(d - want) <= max(1.0, want * 0.3) for d in days)
         ok = not any(stalls) and not any(alarms) and (near or any(over))
         say(f"expected about {want:.1f} days each over {mins:.1f} min")

@@ -3,7 +3,7 @@
 `play.py` proves the mouse reaches the simulation. This proves the same thing
 through `driver.py`, which is the only way an agent will ever touch the game —
 a verb that is missing or wrong is a bug found late otherwise, halfway through
-thirty-six minutes that cannot be repeated cheaply.
+a run that cannot be repeated cheaply.
 
 Every assertion is made by looking at the picture, because that is what an
 agent has.

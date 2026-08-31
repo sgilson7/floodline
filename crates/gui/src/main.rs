@@ -56,7 +56,7 @@ fn camera_controls(ui: &ui::Ui, map: &mut screen::MapView) {
 ///
 /// The simulation used to advance one tick per rendered frame, which made a
 /// day twenty seconds on one machine and fifty on another: measured at 24
-/// ticks a second in a headless browser against design §3.1's ten, and about
+/// ticks a second in a headless browser against the fixed rate, and about
 /// sixty on an ordinary display. Everything counted in ticks went with it —
 /// design §8's "thirty seconds of silence before a player is dropped" was
 /// really five, because it counts the host's own ticks.
@@ -77,7 +77,15 @@ impl Clock {
     /// seconds and then does it again. Dropping the backlog is the right
     /// answer for the peer that fell behind: lockstep will not let it get
     /// ahead of anybody, and the host is waiting for its turns either way.
-    const MOST_PER_FRAME: u32 = 8;
+    ///
+    /// Sixteen rather than eight because the clock doubled in M11.1. What this
+    /// caps is how much *wall clock* one stalled frame may make up, so it moves
+    /// with `TICKS_PER_SECOND` even though it is counted in ticks. The number
+    /// that matters is the floor it implies — a page must render at least
+    /// `TICKS_PER_SECOND / MOST_PER_FRAME` frames a second to hold the rate at
+    /// all, which is 1.25 either way — and `DECISIONS.md` quotes that floor in
+    /// the entry explaining why an agent gets a browser to itself.
+    const MOST_PER_FRAME: u32 = 16;
 
     fn reset(&mut self) {
         self.owed = 0.0;

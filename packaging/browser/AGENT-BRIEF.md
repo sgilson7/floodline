@@ -21,8 +21,9 @@ You are one of two cities on a river. Both banks, one city each, and there is
 one ford — water shallow enough to wade, slowly. It is the only crossing until
 somebody builds a bridge, and **it closes when the water comes**.
 
-There are three ages. Each age is six days. **On day six the river floods**,
-and the panel warns you the day before. Survive three of them.
+There are three ages. Each age is six days, and a day is a minute. **On day six
+the river floods**, and the panel warns you the day before. Survive three of
+them.
 
 Your people starve on day four if they cannot eat, so the first flood is not
 the first thing that can kill you.
@@ -136,11 +137,12 @@ was a mistake, say so — that is a finding, not a failure.
 
 ## How to play this run
 
-* **Look every twenty to thirty seconds** through a quiet day. Most ticks want
-  no decision at all. Tighten to every five or ten on day six of each age,
-  when the water is coming.
-* A day is two minutes of real time. A whole run is thirty-six minutes. You
-  cannot pause it and you cannot speed it up.
+* **Look every ten to fifteen seconds** through a quiet day. Most looks want no
+  decision at all, and that is normal. Tighten to every five on day six of each
+  age, when the water is coming.
+* **A day is one minute of real time. A whole run is eighteen minutes.** You
+  cannot pause it and you cannot speed it up, and a day goes past faster than
+  you expect — four looks is a whole day gone.
 * Do not spend the run reading. `panel` is cheaper than `shot`; use `shot` when
   you need to see the ground.
 

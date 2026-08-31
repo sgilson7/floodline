@@ -77,8 +77,8 @@ impl World {
     /// standing in a wall back outside it.
     pub(crate) fn settle_crowd(&mut self) {
         // Built fresh each tick rather than threaded through `tick` beside
-        // `Nav`: it is thirty-two kilobytes of `u16` and a memset, which at ten
-        // ticks a second is nothing, and it keeps the signature of the one door
+        // `Nav`: it is thirty-two kilobytes of `u16` and a memset, which at any
+        // tick rate this game runs at is nothing, and it keeps the one door
         // into the world from growing a second cache.
         let mut crowd = Crowd::new();
         crowd.fill(self);

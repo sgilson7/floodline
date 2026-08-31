@@ -185,7 +185,7 @@ pub struct World {
     /// checksum, because it counts something the world did: two peers whose
     /// generations differ have placed different numbers of buildings, and
     /// that is worth catching directly rather than inferring from the
-    /// wreckage two minutes later.
+    /// wreckage a day later.
     pub nav_generation: u32,
     pub players: Vec<PlayerId>,
 }

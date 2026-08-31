@@ -516,5 +516,11 @@ ended smaller than they started, so families, children and the nursery have
 never been played on purpose by anybody. `AGENT-BRIEF.md` already carries the
 growth objective.
 
-The single next action is M11.1: pin the two constants, set the rate to 20, and
-re-run `three_full_runs_of_each_strategy` to confirm the table has not moved.
+**M11.1 is done.** The rate is 20, the two constants are pinned, and the
+strategy table is identical either side — the game is unchanged and a run is
+eighteen minutes. 282 cargo tests and 17 browser checks green.
+
+The single next action is **M11.2 — a panel that tells the truth**: decide how
+the foot of the panel stops being overdrawn by a pending trade offer, write the
+decision down, and get `panel_rows.py` failing on today's build with an offer
+pending and a building selected.

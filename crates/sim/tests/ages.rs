@@ -327,3 +327,34 @@ fn a_surviving_city_is_scored_alongside_a_fallen_one() {
     assert!(!s.cities[1].survived);
     assert_eq!(w.finished(), None);
 }
+
+/// The clock is a wall-clock knob, and two constants must not move with it.
+///
+/// `SURGE_TICKS` and `DROWN_TICKS` were both written as a number of seconds,
+/// which reads like wall clock and is not: what decides the flood is how much
+/// of the *day* the source pours for, and a day is `TICKS_PER_DAY` whatever
+/// the clock does. Left as seconds, M11.1's doubling would have poured for half
+/// a day instead of a quarter — twice the water — while looking like a change
+/// to nothing but the frame rate.
+///
+/// So this is not really an assertion about two numbers. It is the statement
+/// that changing `TICKS_PER_SECOND` is safe, written where it will fail if
+/// somebody ties one of them back to the clock.
+#[test]
+fn the_clock_can_change_without_changing_the_game() {
+    // Pinned: balance, in ticks, against the day.
+    assert_eq!(SURGE_TICKS, 300, "the surge is a quarter of a day, not 30 seconds");
+    assert_eq!(SURGE_TICKS, TICKS_PER_DAY / 4);
+    assert_eq!(DROWN_TICKS, 50, "a body lasts a sixth of a surge");
+    assert_eq!(SURGE_TICKS / DROWN_TICKS, 6);
+
+    // Not pinned: these are genuinely counted in seconds a person waits, and
+    // they *should* follow the clock. `net`'s two timeouts are the same kind
+    // of thing and are asserted in `net/tests/lockstep.rs`.
+    assert_eq!(PING_LIFETIME, 3 * TICKS_PER_SECOND);
+
+    // And the shape of a run, which is the thing M11.1 set out to halve.
+    assert_eq!(TICKS_PER_DAY / TICKS_PER_SECOND, 60, "a day is a minute");
+    let run_seconds = MAX_AGE * DAYS_PER_AGE * TICKS_PER_DAY / TICKS_PER_SECOND;
+    assert_eq!(run_seconds / 60, 18, "a three-age run is eighteen minutes");
+}

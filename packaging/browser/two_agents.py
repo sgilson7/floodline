@@ -3,12 +3,14 @@
 `game_two_tabs.py` reaches the same world with two pages in one context, which
 is right for a transport check and wrong for a playtest. Two agents must not
 share a clipboard, a `localStorage` or a permission grant — and, over
-thirty-six minutes, must not share a renderer scheduler either:
+a whole run, must not share a renderer scheduler either:
 
-    Lockstep::DROP_AFTER_TICKS is 300 ticks, which is thirty seconds, and
-    Clock::MOST_PER_FRAME is 8. So a page has to render at least 1.25 frames a
-    second to hold ten ticks a second, and a page that stops for thirty seconds
-    is dropped from the game by the other peer.
+    Lockstep::DROP_AFTER_TICKS is thirty seconds, counted in the waiting
+    peer's own ticks, and Clock::MOST_PER_FRAME is a whole second's worth of
+    catch-up. So a page has to render at least 1.25 frames a second to hold the
+    tick rate — both numbers moved when the clock doubled and that floor did
+    not — and a page that stops for thirty seconds is dropped by the other
+    peer.
 
 The dance itself is `table.py`, which is also what starts a real run. This is
 the check that it still works.

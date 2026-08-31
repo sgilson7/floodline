@@ -8,8 +8,9 @@
 //! ```
 //!
 //! The target is under 20 ms a tick on native, so there is headroom for wasm,
-//! which is slower. Ten ticks a second means a tick has 100 ms to play with;
-//! 20 ms leaves rendering and networking the rest.
+//! which is slower. At `TICKS_PER_SECOND` a tick has `1000 / rate` ms to play
+//! with — 50 ms since M11.1 doubled the clock, where it was 100 — and a 20 ms
+//! budget still leaves rendering and networking the greater part of it.
 
 use sim::balance::*;
 use sim::building::{Facing, Good, Kind};

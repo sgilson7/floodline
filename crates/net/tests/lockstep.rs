@@ -16,6 +16,17 @@ use std::collections::BTreeMap;
 
 const BUILD: &str = "test-build";
 
+/// Both of these are counted in seconds a person waits, so they follow the
+/// clock rather than being pinned to a number of ticks. `sim`'s
+/// `the_clock_can_change_without_changing_the_game` is the other half of this:
+/// there, two constants that look like seconds are balance and must *not*
+/// move. Here, two that look like ticks are wall clock and must.
+#[test]
+fn the_timeouts_are_counted_in_seconds_not_ticks() {
+    assert_eq!(DROP_AFTER_TICKS, 30 * sim::balance::TICKS_PER_SECOND);
+    assert_eq!(WAIT_WARN_TICKS, 5 * sim::balance::TICKS_PER_SECOND);
+}
+
 /// How often the test records a peer's checksum for its own comparison.
 const HISTORY_EVERY: u32 = 20;
 

@@ -2513,3 +2513,68 @@ second flood at its peak and noting which pixels stayed green — "that is
 reading the renderer, not playing the game". **The wall is not underpowered; it
 is unreadable.** M5's balance work stands; what M10 found is that the decision
 it balanced is one the player is asked to make blind.
+
+---
+
+## 2026-08-31 — The clock doubles, and two constants stop being written in seconds
+
+M11.1. `TICKS_PER_SECOND` is 20. A day is a minute, an age six minutes, and a
+three-age run eighteen rather than thirty-six.
+
+**It is a wall-clock knob and nothing else** — it appears in no rule in `sim`.
+Everything the simulation balances is counted in ticks against
+`TICKS_PER_DAY`, so at twice the rate the same game is watched twice as fast
+and nothing about the game changes. That is measured, not asserted:
+`three_full_runs_of_each_strategy` is identical either side of the change.
+
+```text
+                 survivors                        tallest wall by flood 1
+  10/s   idle 0  grow 8  dike 8  flee 4  both 0          60 stone
+  20/s   idle 0  grow 8  dike 8  flee 4  both 0          60 stone
+```
+
+**Two constants had to be pinned first, and finding them is the whole of this
+entry.** `SURGE_TICKS` was `30 * TICKS_PER_SECOND` and `DROWN_TICKS` was
+`5 * TICKS_PER_SECOND`. Both *read* like wall clock and neither is: what
+decides a flood is how much of the **day** the source pours for, and a day is
+`TICKS_PER_DAY` whatever the clock does. Left alone, doubling the rate would
+have poured for six hundred ticks instead of three hundred — half a day rather
+than a quarter, twice the water — while looking like a change to nothing but
+the frame rate. They are 300 and 50 now, which is exactly what they meant at
+ten a second, so the pinning itself changed nothing on the day it was made.
+
+They had to be pinned *together*. A body lasting a sixth of a surge is the
+relationship that matters, and scaling one without the other would have moved
+it quietly. `ages::the_clock_can_change_without_changing_the_game` asserts both,
+and asserts the ratio, so the next person to tie one back to the clock finds
+out from a test rather than from a playtest.
+
+**Three others are genuinely counted in seconds a person waits and still scale
+with the clock**: `DROP_AFTER_TICKS` is thirty real seconds, `WAIT_WARN_TICKS`
+five, `PING_LIFETIME` three. `lockstep::the_timeouts_are_counted_in_seconds_not_ticks`
+is the other half of the same statement, in the crate that owns them.
+
+**And one number in `gui` moved with it.** `Clock::MOST_PER_FRAME` is 16 rather
+than 8. It is counted in ticks but what it caps is *wall clock* — how much a
+stalled frame may make up — so it doubles with the rate. The floor it implies
+is the number that matters and is unchanged: a page must render at least 1.25
+frames a second to hold the tick rate, which is the figure the "two browsers"
+entry above quotes as the reason an agent gets a browser to itself.
+
+**Numbers in earlier entries that have moved.** `DROP_AFTER_TICKS` is 600 ticks
+now, not 300; it is still thirty seconds, which is what those entries were
+actually claiming. `referee.py` gained a `DAY_SECONDS` constant because it
+computed expected day-turns as `minutes / 2` and would have called every
+healthy run late. `AGENT-BRIEF.md`'s "a day is two minutes, a run is thirty-six
+minutes" and its polling cadence moved too — an agent told to look every
+twenty-five seconds is looking half as often once a day is half as long.
+
+**What was not done, and why it is written down.** Doubling `WALK_SPEED` is the
+obvious way to make people move faster. It is safe as far as 128 — a road
+doubles it and 256 is a whole cell a tick, which is where a citizen starts
+stepping over walls that `nav::passable` never gets asked about — and all 280
+tests passed at it. But the same five-strategy table takes the tallest wall a
+city can raise before the first flood from 60 stone to **540**, because haulers
+carry stone nine times better, and drops `flee` from four survivors to one.
+That is not a frame-rate change, it is M5 undone, and the measurement is here so
+nobody has to rediscover it.

@@ -83,7 +83,7 @@ for mode in room code; do
 done
 
 # The same world reached by two browsers that share nothing - the ground a
-# playtest is run on, and the one that has to hold for thirty-six minutes.
+# playtest is run on, and the one that has to hold for a whole run.
 say "two_agents.py"
 "$VENV/bin/python" "$ROOT/packaging/browser/two_agents.py" \
   "http://localhost:$PORT/index.html" || fail=1

@@ -13,7 +13,7 @@ is the file that changes with it.
 `play.py` and `assign.py` deliberately keep their own literals: their job is to
 notice when the panel moves, and a shared module would rob them of it. Anything
 written for M10 imports this instead, because an agent that mis-clicks for
-thirty-six minutes has no way to tell.
+a whole run has no way to tell.
 """
 
 from view import LOGICAL_W, LOGICAL_H, PANEL_W
