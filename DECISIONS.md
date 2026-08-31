@@ -2836,3 +2836,63 @@ exactly the table M9 wanted.
 it plays rather than feeds. `what_a_fed_household_actually_manages` is the
 probe that found it and is kept, because the number it prints is the one that
 matters if anybody moves this constant again.
+
+---
+
+## 2026-08-31 — A joiner greets everybody in the room, not the first peer it meets
+
+The fault that made the game unplayable a second time. Reported first-hand,
+laptop to desktop: one game was played to the end, and after that no attempt to
+get two machines into a lobby worked — the joiner sat for ever on *"found the
+host, asking for a city..."*.
+
+The handover's first suspect was a stale peer in a reused room. It was right
+about the room and wrong about the mechanism, and the difference matters. The
+handshake against a *finished host* is fine: it answers "this game is full",
+which is an answer, and `a_host_that_finished_a_game_tells_a_new_joiner_something`
+records that. The fault is one line above the handshake.
+
+**`greet` was a `bool`.** `Lockstep::join` set it true, `greet()` spent it on
+the first `Event::Peer`, and only `peer_left` for that same peer ever set it
+back. So a joiner said `Hello` to whoever it met first and to nobody else,
+ever. In a star that is correct — a joiner has exactly one peer. **A room is
+not a star.** The room name is the typed code plus the build hash, so typing
+the same code again puts you in with every tab that has ever used it: another
+joiner waiting for the same host, a tab left open on a score screen, a
+connection that has not timed out. And a non-host that receives a `Hello` does
+nothing with it at all — the handler is guarded `if self.host` and falls
+through to `_ => {}`. Nothing on the wire has ever said *"I am not the one you
+want"*.
+
+So the joiner asked a peer that was never going to answer, and then sat through
+the real host arriving without a word to it.
+
+`greeted: BTreeSet<PeerId>` — ask everybody, once each, until somebody
+welcomes you. **We considered making a non-host answer a `Hello` and rejected
+it**: the only message that fits is `Bye`, and `Bye` is what ends a joiner's
+run, so a bystander replying would end the game of a joiner that has done
+nothing wrong. A new message type would change the wire format and therefore
+the build hash, for a sentence. Greeting everybody makes the silence harmless,
+and the change below makes it audible.
+
+`host_peer` is now set only by `Welcome`. Before, it was set by greeting, so
+the peer whose departure ended your game was whoever you happened to have met
+first — a bystander could end a game that was perfectly alive. And a peer that
+drops and reconnects is now greeted again, because from inside a room a host on
+a fresh connection and a stranger are the same event.
+
+**And the reason nobody was ever told.** `mind_the_silence` exists for exactly
+this hang. `peer_left` set `unanswered = 0` on every departure of the greeted
+peer, and `mind_the_silence` only counted while `host_peer` was set, so in a
+room with any churn the counter never reached `SILENCE_FRAMES`: greet, wait,
+reset, greet again, and never a word. It is `waiting_since` now, counted off
+`greeted`, and nothing resets it. The message widened to cover a room with
+nobody hosting in it, because from the joiner's side that and an absent host
+are indistinguishable and the advice is the same.
+
+**What nothing tested, and now does.** Not "a run played to its end" — that was
+the handover's guess and it is covered in `cargo` in under a second. The real
+gap is that **no test anywhere put a joiner in a room with more than one peer
+in it.** Every test was a star with one edge, which is the shape this hides
+behind. `rejoin.py` now has a room where two joiners meet before the host
+arrives, which is the browser form of the same thing.

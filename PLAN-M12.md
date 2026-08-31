@@ -13,6 +13,13 @@ questions — and above all of them sits one thing the playtest did not find:
 **two machines can no longer get into a lobby together after a game has been
 played.** That orders this plan.
 
+**Milestones with letters arrived after the plan was drawn**, asked for
+directly rather than derived from the run. They are Part I-A below, and they
+are numbered apart from the rest so that the ordering above stays readable as
+what the M11 run asked for. One of them — ground that absorbs water — is not a
+new milestone at all: it is the answer to a question M12.8 was going to ask, so
+it is folded into M12.8 rather than repeated here.
+
 ---
 
 ## The one sentence this plan comes from
@@ -176,6 +183,135 @@ the room code or restarting a browser.
 
 ---
 
+# Part I-A — asked for directly
+
+Four changes that did not come out of the M11 run. They are not faults, and the
+distinction is load-bearing: **a measurement here says what the change did, it
+does not say the change was right.** Each still ships the repo's way — a `sim`
+change with its test in the same commit, a `gui` change with its browser check,
+a balance constant with its table either side.
+
+They sit here, before Part II, for one reason: **M12.8, M12.9 and M12.10 are
+measurements, and a measurement taken before these is a measurement of a game
+that will not ship.**
+
+## M12.A — A farm feeds a city rather than a household — **done**
+
+`FARM_TICKS_PER_UNIT` 32 → 11: a farmer makes 109 units a day instead of 37, so
+a three-slot farm keeps 26 people instead of nine.
+
+Three playtests all found the same shape — food was the only clock, and
+walling, growing, trading and getting uphill were paid for in days nobody had.
+M11.9 put it plainest: *"for a day and a half nobody farmed and nobody finished
+the cottages, which is very likely why the births never came."*
+
+**Delivered.**
+
+* The constant, with the reasoning and the provenance in its doc comment.
+* `three_full_runs_of_each_strategy` either side. Survivors across all seeds:
+  `idle` 0→0, `grow` 8→9, `dike` 8→7, `flee` 4→12, **`both` 0→8**. The two
+  single-verb strategies did not move; what lifted is the ceiling on doing more
+  than one thing, which is precisely the complaint. `idle` still dies
+  everywhere and two seeds still kill every walling strategy, so the flood is
+  still what kills you.
+* `a_farm_feeds_a_founding_party_several_times_over` — a farm had no test at
+  all, and a 3× change to its output moved none of the 289 in the suite.
+* The full table and six second-order effects in `SECOND-ORDER-M12.md`,
+  including one that is now candidate work: **`FARM_BUFFER`, not this constant,
+  caps a farm until a granary is standing**, because a Hearth holds no food.
+
+## M12.B — The builder's hut
+
+A free building. Any citizen assigned to it builds first and hauls when there
+is nothing to build.
+
+Why it is worth having: `Job::Builder` is the one job in the game with **no
+building behind it**. `Job::at` returns a job for a Farm, a Forester, a Quarry
+and a Trading Post, and `None` for everything else, so builders "pick their
+work as they go" and a player has no way to say *these four are my builders*.
+M11.9's account of the dike is what that costs — the only way to get a wall
+built quickly was to unassign the whole city, and then nobody farmed.
+
+**Deliverables**
+
+* `Kind::BuildersHut` in `sim`: no material cost, its own slots, and
+  `Job::at(BuildersHut) == Some(Job::Builder)`.
+* The priority, in `jobs.rs`: a citizen stationed here takes a build site if
+  there is one and hauls if there is not. **Hauling is the fallback, not a
+  second job** — an unassigned citizen is already a hauler, so what this buys
+  is the *ordering*, and the ordering is the whole feature.
+* Tests: that a hut's workers finish a site faster than the same number of
+  unassigned citizens; and that when every site is finished they are carrying
+  goods rather than standing still.
+* What "free" means, decided and written in `DECISIONS.md`: no materials, but
+  still a site that has to be built, because a building that appears on click
+  is a different verb from every other building and the placement flow assumes
+  a site.
+* A browser check that it can be placed and staffed, and `AGENT-BRIEF.md`.
+
+**Done when** a player can name four builders, watch them finish the dike, and
+watch them pick up sacks when it is done.
+
+## M12.C — The cookery
+
+A building that must be worked, and that turns food into food worth twice as
+much: one unit feeds a citizen for two.
+
+**Deliverables**
+
+* A new good. `Good::Meal`: the cookery consumes `Food` and produces `Meal`,
+  and eating a `Meal` fills `2 * FOOD_PER_UNIT` of need. The alternative
+  reading — a cookery that outputs two `Food` for one — needs no new good and
+  was rejected: it makes the cookery a food *multiplier* with no ceiling, where
+  a separate good is a thing a player hauls, stores and can run out of.
+* **The snapshot, measured.** `Goods` gains a field, so every building's
+  `store` and `delivered` and every citizen's `carrying` grows by two bytes.
+  Against 47 KB of headroom that is a few hundred bytes, and
+  `wire::a_snapshot_is_a_sendable_size` prints the number and stays under
+  150 KB. It also changes the **build hash**, so two machines must both
+  reload — say so.
+* Where a `Meal` is stored, and the honest answer to the fault M12.A turned
+  up: if a cookery's output has nowhere to go it stops, exactly as a farm does.
+* Tests: the conversion rate; that a citizen eating a meal is fed twice as far;
+  and that a city with a cookery and half the farms feeds itself.
+* A browser check, and `AGENT-BRIEF.md`.
+
+**Done when** a city can trade a worker for a farm, and the panel says which
+of the two things in its granary is which.
+
+## M12.D — Your people, one at a time
+
+A `citizens` tab: one chip per citizen saying what they are working on and how
+fed they are, and clicking a chip selects them. And a bar over each citizen on
+the map showing progress toward whatever they are doing.
+
+Both come out of the same complaint, which every run has made in some form:
+**the game has eight people in it and shows you a count.** M11.5 added the
+households roster and both players used it; this is the same idea pointed at
+individuals, and it is what makes M12.B's builders visible.
+
+**Deliverables**
+
+* The tab, beside `build` and `households`. A chip is a name, a job, a food
+  bar, and a click that selects.
+* The progress bar, drawn on the map over anyone doing something. **Derived
+  entirely from state that already exists** — `Building::work` against
+  `ticks_per_unit` for a stationed worker, `Building::progress` against
+  `build_ticks` for a builder, distance remaining for a walker, `food` for
+  somebody eating. **No new field in `sim` and no snapshot cost**, and that is
+  a constraint on the design rather than a happy accident.
+* The panel budget. A third tab and a roster of chips is the largest thing
+  added to the panel since it was built, and nothing may be drawn below
+  `input::VARIABLE_FLOOR`. Say where the pixels come from before drawing them,
+  and extend `panel_rows.py`.
+* Browser checks: that a chip selects, and that a working citizen has a bar
+  that moves. `AGENT-BRIEF.md` — this is the largest visible change in M12.
+
+**Done when** a player can point at one person, say what they are doing and
+how close they are to finishing it, and click them.
+
+---
+
 # Part II — what fails silently, and what killed people
 
 The handover calls this "about a session's work" and it is all certain except
@@ -332,15 +468,32 @@ still read `wading`, and lost two souls to standing water on nominally quiet
 days. Fixing the colour without the drainage leaves the mark useless; fixing
 the drainage changes the flood model.
 
+**The model is decided rather than open**, and it arrived with the lettered
+milestones: **ground absorbs water at a rate that depends on what the ground is
+made of, and separately disperses it into deeper aquifers, which deletes it.**
+A cell can therefore *saturate* — stop taking water in — while still getting rid
+of what it holds. Sand drinks fast and fills fast; rock barely takes any; grass
+sits between them. That is a better answer than the candidate list it replaces,
+because it makes the map's ground types mean something *during* a flood instead
+of only at build time, and because saturation makes standing water a
+consequence rather than a bug.
+
 **Deliverables**
 
-* The measurement first, on today's build:
+* The measurement first, on today's build **and after M12.A**:
   `playtest::how_far_the_water_reaches` and
   `three_full_runs_of_each_strategy`, pasted into the doc comment, each
-  stating what it arranges.
-* The decision, in `DECISIONS.md`. Candidates: drainage continues between
-  surges at a higher rate; the age boundary drains what is left; or nothing
-  changes in the model and the panel stops calling those days quiet.
+  stating what it arranges. The pre-M12.A table is a different game.
+* An absorption rate per `Ground`, a saturation level per cell, and a
+  dispersion rate that removes water from the world. `Water::drained` already
+  exists as the bottomless drain and is where dispersion belongs.
+* **The snapshot, measured before it is written.** Saturation is per-cell state
+  over sixteen thousand cells: a `u8` a cell is 16 KB against 47 KB of
+  headroom, and a `u16` a cell would not fit at all. The high-water mark cost
+  2 KB by being one bit a cell. Take the width from the budget, not from taste.
+* The decision, in `DECISIONS.md`, including what saturated ground does to what
+  stands on it. If saturation is merely wet it is a colour; if it costs
+  something it is a rule; it should be one or the other on purpose.
 * The mark gets a colour water is not. M11.8's lesson was that a blue city
   vanished into the flood; a blue mark on blue water is the same mistake.
 * The same two probes after, in the same doc comment. **If the strategy table
@@ -453,9 +606,13 @@ run ended with a second game started out of the first one's lobby.
 
 | | | why here |
 |---|---|---|
-| M12.1 | Reproduce the lobby failure | the game cannot be played twice; and reproduce before fixing |
-| M12.2 | A joiner is never left in silence | worth doing whatever the cause — it turns a silent hang into a sentence |
-| M12.3 | Fix the lobby, and guard it | and add the end-to-end check that has never existed |
+| M12.1 | Reproduce the lobby failure | **done** — the game cannot be played twice; and reproduce before fixing |
+| M12.2 | A joiner is never left in silence | **done** — it turns a silent hang into a sentence |
+| M12.3 | Fix the lobby, and guard it | **done** — and the check that has never existed |
+| M12.A | A farm feeds a city | **done** — asked for; and every later measurement is taken against it |
+| M12.B | The builder's hut | asked for; the one job with no building behind it |
+| M12.C | The cookery | asked for; a new good, so the snapshot and the build hash move |
+| M12.D | Your people, one at a time | asked for; the largest visible change in M12 |
 | M12.4 | The silent right-click | the most common gesture in the game, failing without a word |
 | M12.5 | Deaths, and how deep the water is | the two readouts that cost people their lives |
 | M12.6 | Small honesties | cheap, certain, and a lot of the confusion |
@@ -465,8 +622,12 @@ run ended with a second game started out of the first one's lobby.
 | M12.10 | Whether growing is worth doing | decide before a run is spent asking |
 | M12.11 | The third run | the only thing that can say whether any of it worked |
 
-Roughly five sessions: Part I, Part II, M12.7 with M12.8, Part IV's other two,
-then the run.
+Roughly seven sessions: Part I (done), Part I-A's three remaining, Part II,
+M12.7 with M12.8, Part IV's other two, then the run.
+
+**Part I-A must land before Part IV starts.** M12.8, M12.9 and M12.10 are
+measurements, and M12.A has already moved the table they would have been taken
+against.
 
 **If only three get done, they are M12.1 to M12.3.** Everything else in this
 document assumes two people can get into a room.
@@ -485,9 +646,11 @@ And the one M11 added: **when you write a probe, write down what it arranges.**
 
 ## The single next action
 
-`crates/net/tests/lockstep.rs`: stand up the loopback star, put the world past
-`age() > 1`, run the game to finished, then `Lockstep::join` against the same
-host and drive frames until something is decided. **Get it failing before
-changing a line of `net`.** If it will not fail there, the fault is in the room
-rather than the handshake, and `rejoin.py`'s three-tab machinery is where it
-goes next.
+**M12.B, the builder's hut.** Part I is done and its fault written up, and
+M12.A is done and has moved the baseline every later measurement uses. The hut
+is next because it is the smallest of the three remaining lettered milestones,
+and because M12.D — the citizens tab — is what makes it visible: built in that
+order, the second one has something to show.
+
+Start at `Job::at`. It is the one place that says which buildings have a job
+behind them, and `Job::Builder` is not in it.

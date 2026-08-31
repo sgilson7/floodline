@@ -114,6 +114,35 @@ with sync_playwright() as p:
     time.sleep(10)
     check(welcomed(d), "and somebody can join it")
 
+    # ---- a room with somebody already in it -------------------------------
+    # The fault that made the game unplayable a second time, in a real room.
+    #
+    # A joiner used to have one `Hello` and spend it on the first peer it met.
+    # Two joiners that find each other before the host arrives therefore greet
+    # each other, get nothing back - a non-host does nothing at all with a
+    # `Hello` - and then sit through the host turning up without a word to it.
+    # Both screens read "found the host, asking for a city..." for ever, which
+    # is what was reported laptop-to-desktop after one game had been played.
+    #
+    # Every other check in this file, and every lockstep test before M12.1, put
+    # a joiner in a room with exactly one other peer in it. That is the shape
+    # the fault hides behind, and it is why this survived M10 and M11.
+    #
+    # Two seats, so exactly one of X and Y gets a city and the other is told
+    # the game is full. Both of those are answers. Neither of them is silence,
+    # and before M12.2 both of these screens were silence.
+    busy = "busy-" + str(random.randint(100000, 999999))
+    x = page("X"); room_field(x, busy); x.mouse.click(*css(970.0, 574.0))
+    time.sleep(4)
+    y = page("Y"); room_field(y, busy); y.mouse.click(*css(970.0, 574.0))
+    time.sleep(8)                                 # long enough for X to meet Y
+    h = page("H"); room_field(h, busy); h.mouse.click(*css(630.0, 574.0))
+    time.sleep(14)
+    check(
+        welcomed(x) or welcomed(y),
+        "a joiner that met another joiner first is still welcomed when the host arrives",
+    )
+
     br.close()
 
 for e in errors:
