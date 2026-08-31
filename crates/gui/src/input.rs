@@ -95,6 +95,25 @@ pub struct Input {
     /// Whoever the cursor is over in the households list, rung on the map.
     /// The first thing in this game that connects a list to the world.
     ringed: Vec<CitizenId>,
+    /// Whether to shade the ground a citizen could climb to.
+    ///
+    /// M12.9. Both M11.9 players said every cell they could reach read 16 to
+    /// 25, so the height readout had nothing to say and design §3.2's "get
+    /// uphill" was an order neither could obey. **The measurement says they
+    /// were wrong about the map and right about the game.**
+    /// `map::probe::how_much_higher_a_citizen_can_get` reads ten seeds: the
+    /// climb available within a citizen's walking radius of a hearth is a
+    /// median of *eleven* terrain units - against a surge that stands twelve
+    /// deep at the bank - and the worst seed still offers two, with hundreds
+    /// of cells at or above it.
+    ///
+    /// The ground is not flat. It is *invisible*: height lives under the
+    /// cursor, one cell at a time, and nobody hovers four hundred cells to
+    /// find out whether there is a hill. So this is a legibility fix and not a
+    /// generator change - which is as well, because changing `terrain` would
+    /// have re-opened M5's dike balance in the same session M12.8 already
+    /// leaned on it.
+    show_high: bool,
     /// How many segments the wall under the cursor would be, and what they
     /// would cost. Worked out with the ghost, drawn with the panel.
     wall_hint: Option<(usize, u16)>,
@@ -176,7 +195,7 @@ impl Default for Input {
                 notice: None, wall_hint: None, chosen: None,
                 tab: Tab::Tools, ringed: Vec::new(), overflowed: 0, ruins: 0,
                 buried: None, toll: None, report: None, wading: 0,
-                households_count: 0 }
+                households_count: 0, show_high: false }
     }
 }
 
@@ -482,6 +501,9 @@ impl Input {
         }
         if is_key_pressed(KeyCode::P) {
             self.tool = Tool::Ping;
+        }
+        if is_key_pressed(KeyCode::H) {
+            self.show_high = !self.show_high;
         }
         if is_key_pressed(KeyCode::M) {
             if let Some(building) = self.chosen {
@@ -1260,7 +1282,8 @@ impl Input {
 
         draw_text(
             match self.tool {
-                Tool::Select => "drag to choose. right-click to send them",
+                Tool::Select if self.show_high => "green is higher than your hearth. h to hide",
+                Tool::Select => "drag to choose. right-click to send them. h for high ground",
                 Tool::Build(_) => "click the ground. right-click to stop",
                 Tool::Moving { .. } => "click where it should stand. right-click to stop",
                 Tool::Wall { from: None } => "drag to draw a wall. click one to raise it",
@@ -1891,6 +1914,11 @@ pub fn selected(input: &Input) -> &[CitizenId] {
 }
 
 /// Whoever the households list is pointing at.
+/// Whether the player has asked to see the ground they could climb to.
+pub fn showing_high_ground(input: &Input) -> bool {
+    input.show_high
+}
+
 pub fn ringed(input: &Input) -> &[CitizenId] {
     &input.ringed
 }

@@ -3061,3 +3061,50 @@ rather than what it is made of.
 Both halves were needed and neither would have worked alone. A mark in a new
 colour under a map that stays blue for two ages is still a mark nobody can
 read.
+
+---
+
+## 2026-08-31 — The ground is not flat. It is invisible.
+
+M12.9, and the measurement says the opposite of what the run concluded.
+
+Both M11.9 players reported that every cell they could reach read 16 to 25, so
+the height readout M11.3 added had nothing to say and design §3.2's *"get
+uphill"* was an order neither could obey. The handover took that at face value
+and called it *"a finding about `map::terrain` and `SITE_HEADROOM`, not about
+the readout"*, and this plan agreed with it.
+
+**"16 to 25" was a claim from two runs, not a measurement.**
+`map::probe::how_much_higher_a_citizen_can_get` reads ten seeds and asks, for
+each hearth, how much higher a citizen could get within `QUARRY_REACH` — the
+furthest this game ever asks anybody to walk for anything:
+
+    climb available: worst 2, median 11, best 24
+
+Against a surge that stands twelve terrain units deep at the bank. Nineteen of
+twenty cities have real high ground within walking distance, most of them with
+several hundred cells at or above two units up. **The generator was never the
+problem.**
+
+What is true is the rest of what the players said: they could not *find* it.
+Height lives under the cursor, one cell at a time, and nobody hovers four
+hundred cells to learn whether there is a hill. So the fix is a legibility one
+— `h` shades every cell higher than your own hearth, in two bands — and not a
+generator change.
+
+Which is as well. Moving `NOISE_AMPLITUDE` or `SLOPE_SPAN` changes every map
+and re-opens M5's dike balance, and M12.8 had already leaned on that balance in
+the same session. Two changes to the same measured table, one of them
+unnecessary, is how a game stops being measurable.
+
+**Relative to your own hearth, not to sea level.** The question is "is that
+higher than where I am standing", and a player whose city sits at 30 does not
+care that 25 is above the waterline.
+
+**And the wall question that came with it.** City 1's *"a line is the wrong
+shape for this terrain; you would need a ring"* was offered as the same finding
+as the flat ground. It is not, and it is not answered here: on ground with a
+median eleven units of relief, a wall across a saddle is a different purchase
+from a ring around a city, and nobody has played a run that could see the
+saddle. **That is a question for the next run**, and the overlay is what makes
+it askable.

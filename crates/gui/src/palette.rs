@@ -34,6 +34,14 @@ pub const ALARM: Color = Color::new(0.90, 0.33, 0.28, 1.0);
 /// A silt ochre: what a flood leaves behind rather than what it is made of.
 pub const HIGH_WATER: Color = Color::new(0.62, 0.50, 0.28, 0.20);
 
+/// Ground a citizen could climb to, shown only when the player asks (`h`).
+///
+/// Two bands: higher than your hearth, and well above it. A green, because it
+/// is the one overlay in the game that means *good news* - everything else
+/// drawn over the map is a flood, a mark of a flood, or a warning.
+pub const HIGH_GROUND: Color = Color::new(0.42, 0.72, 0.45, 0.16);
+pub const HIGH_GROUND_FAR: Color = Color::new(0.42, 0.78, 0.45, 0.30);
+
 /// Ground, shaded by height so the lie of the land reads without contours.
 ///
 /// The ramp runs from a drab olive in the lowlands to a pale grey on the

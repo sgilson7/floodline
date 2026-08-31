@@ -38,7 +38,7 @@ the first thing that can kill you.
     panel                     read your side panel - do this most often
     shot                      the whole window, map included
     rows                      the status line and the three rows at the foot
-    key <Name>                Digit0..Digit9, KeyC, KeyR, KeyP, KeyM, Escape
+    key <Name>                Digit0..Digit9, KeyC, KeyH, KeyR, KeyP, KeyM, Escape
     button <name>             a panel button by name
     click-cell <x> <y>        the map, 0..127 both ways
     right-click-cell <x> <y>  give an order, or put the current tool down
@@ -155,6 +155,14 @@ the panel:
   land or farmhands are the shortage and worth nothing when neither is.
 * **r road** — click where it starts, click where it ends.
 * **p point** — a marker, for looking at.
+* **h high ground** — a toggle, not a tool. Shades every cell **higher than
+  your own hearth** in green: faint for two or more terrain units above it,
+  solid for six or more. Design §3.2 makes *get uphill* the order that matters
+  in a flood, and until now the only way to find out where uphill was was to
+  hover cells one at a time. There is more of it than the last run believed —
+  measured over ten seeds, the climb available within walking distance of a
+  hearth is a median of eleven terrain units, against a surge that stands
+  twelve deep at the bank.
 
 ### The people tab
 

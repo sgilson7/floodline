@@ -1319,6 +1319,74 @@ mod tests {
 mod probe {
     use super::*;
 
+    /// Is there anywhere higher a citizen could actually walk to?
+    ///
+    /// M12.9. Both M11.9 players said the same thing in different words: every
+    /// cell either of them could reach read 16 to 25, so the height readout
+    /// M11.3 added had nothing to say, and design §3.2's *"get uphill"* is an
+    /// order neither could obey. City 1: *"my whole reachable world is 16-18.
+    /// On terrain with relief this would be the best verb in the game. Here it
+    /// only told me I had no options."*
+    ///
+    /// **"16 to 25" is a claim from two runs, not a measurement.** This is the
+    /// measurement, and it is the point of the milestone: for each hearth on
+    /// ten seeds, the spread of terrain height within `QUARRY_REACH` cells -
+    /// which is the furthest this game ever asks anybody to walk for anything.
+    ///
+    /// **What it arranges**: nothing. It reads generated maps and adds up.
+    #[test]
+    #[ignore]
+    fn how_much_higher_a_citizen_can_get() {
+        println!();
+        println!("  seed          city   at the hearth   highest within reach   climb   cells above +2");
+        let mut climbs: Vec<i32> = Vec::new();
+        for seed in [31u64, 1_000_003, 0xF100_D11E, 7, 99, 12345, 2024, 555_555, 8_675_309, 42] {
+            let m = Map::generate(&mut Rng::new(seed), 2);
+            for (n, &(hx, hy)) in m.hearth_sites.iter().enumerate() {
+                let base = m.height_at(hx, hy) as i32;
+                let mut highest = base;
+                let mut above = 0;
+                for dy in -QUARRY_REACH..=QUARRY_REACH {
+                    for dx in -QUARRY_REACH..=QUARRY_REACH {
+                        if dx * dx + dy * dy > QUARRY_REACH * QUARRY_REACH {
+                            continue;
+                        }
+                        let (x, y) = (hx + dx, hy + dy);
+                        if !Map::contains(x, y) {
+                            continue;
+                        }
+                        // Rock cannot be built on, but it can be stood on, and
+                        // standing on it is the whole of "get uphill".
+                        let h = m.height_at(x, y) as i32;
+                        highest = highest.max(h);
+                        if h >= base + 2 {
+                            above += 1;
+                        }
+                    }
+                }
+                let climb = highest - base;
+                climbs.push(climb);
+                println!(
+                    "  {seed:<12}  {n:>4}   {base:>13}   {highest:>20}   {climb:>5}   {above:>14}"
+                );
+            }
+        }
+        climbs.sort_unstable();
+        let med = climbs[climbs.len() / 2];
+        println!();
+        println!(
+            "  climb available: worst {}, median {}, best {}",
+            climbs[0],
+            med,
+            climbs[climbs.len() - 1]
+        );
+        println!(
+            "  a surge of 12 stands {} terrain units deep at the bank; SWIM_DEPTH is {} sixteenths",
+            12,
+            crate::balance::SWIM_DEPTH
+        );
+    }
+
     /// Where the cities end up relative to the channel, and how far apart.
     #[test]
     #[ignore]

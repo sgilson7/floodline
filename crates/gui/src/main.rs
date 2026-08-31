@@ -215,6 +215,7 @@ async fn main() {
                 input::selected(&input),
                 input::ringed(&input),
                 &map,
+                input::showing_high_ground(&input),
             );
             if !busy {
                 input.map_layer(&ui, s, &map);

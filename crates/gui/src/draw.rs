@@ -19,9 +19,13 @@ pub fn world(
     selected: &[sim::CitizenId],
     ringed: &[sim::CitizenId],
     view: &MapView,
+    show_high: bool,
 ) {
     let seen = view.visible();
     ground(w, seen);
+    if show_high {
+        high_ground(w, me, seen);
+    }
     high_water(w, seen);
     water(w, seen);
     buildings(w, seen);
@@ -75,6 +79,49 @@ fn high_water(w: &World, seen: (i32, i32, i32, i32)) {
                 CELL,
                 CELL,
                 palette::HIGH_WATER,
+            );
+        }
+    }
+}
+
+/// The ground a citizen could climb to, when the player asks for it.
+///
+/// Design §3.2 makes "get uphill" the one order that matters in a flood, and
+/// until now a player could only find out where uphill *was* by hovering cells
+/// one at a time. Both M11.9 players concluded their whole reachable world was
+/// flat; `map::probe::how_much_higher_a_citizen_can_get` says the median climb
+/// within walking distance of a hearth is eleven terrain units against a surge
+/// twelve deep. The hill was there and nothing on the screen said so.
+///
+/// Relative to your own hearth, not to sea level: the question is "is that
+/// higher than where I am standing", and a player whose city sits at 30 does
+/// not care that 25 is above the waterline.
+fn high_ground(w: &World, me: sim::PlayerId, seen: (i32, i32, i32, i32)) {
+    let Some(hearth) = w
+        .buildings
+        .iter()
+        .find(|b| b.owner == me && b.kind == sim::Kind::Hearth)
+    else {
+        return;
+    };
+    let (hx, hy) = hearth.centre();
+    let base = w.map.height_at(hx, hy) as i32;
+    for y in seen.1..=seen.3 {
+        for x in seen.0..=seen.2 {
+            let climb = w.map.height_at(x, y) as i32 - base;
+            if climb < 2 {
+                continue;
+            }
+            // Two bands rather than a ramp: "higher" and "higher still". A
+            // gradient here would be a second height shading over the one the
+            // ground already carries, and the question is a threshold - can I
+            // get out of the water - not a survey.
+            draw_rectangle(
+                MAP_X + x as f32 * CELL,
+                MAP_Y + y as f32 * CELL,
+                CELL,
+                CELL,
+                if climb >= 6 { palette::HIGH_GROUND_FAR } else { palette::HIGH_GROUND },
             );
         }
     }
