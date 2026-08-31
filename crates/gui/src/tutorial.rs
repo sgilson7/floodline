@@ -30,7 +30,24 @@ use sim::{PlayerId, World};
 /// mechanism and never the clock, so neither player could tell "a day too
 /// slow" from "the food is not moving at all", and both of them separately
 /// asked for this number afterwards.
-fn larder(mouths: u32, eaten: u32, food: u16) -> Option<String> {
+fn larder(mouths: u32, eaten: u32, food: u16, haulers: usize) -> Option<String> {
+    // **"More farmers" was the wrong advice, and both M12.11 players took it.**
+    //
+    // A farm fills a small buffer and stops until somebody empties it, so a
+    // city that puts everybody in a farm starves *beside two working farms*.
+    // City 1 had eight of eight employed and no haulers at all, watched food
+    // fall 428 -> 219 over one day, and was told "more farmers" - which is
+    // exactly the disease. It found the cause in the households roster, which
+    // said `6 farming, 2 cutting wood` and no hauling, and fixed it in a day.
+    //
+    // The line knows how many haulers there are now, and says the thing that
+    // is actually missing.
+    if haulers == 0 && mouths > 0 {
+        return Some(format!(
+            "nobody is hauling. {mouths} mouths eat {eaten} a day, and a farm \
+             fills up and stops until somebody carries it"
+        ));
+    }
     if food == 0 {
         return Some(format!(
             "the granary is empty. {mouths} mouths eat {eaten} a day - \
@@ -127,7 +144,18 @@ pub fn next_thing(w: &World, me: PlayerId) -> Option<String> {
         return Some("drag to choose your people, then right-click the farm".to_owned());
     }
     // What the city costs to keep, whenever the larder is thin.
-    if let Some(line) = larder(w.population(me), w.eaten_a_day(me), w.treasury(me).food) {
+    let haulers = w
+        .citizens
+        .iter()
+        .filter(|c| {
+            c.owner == me
+                && c.alive()
+                && !c.is_child()
+                && !c.held
+                && (c.job.is_none() || c.job == Some(sim::citizen::Job::Hauler))
+        })
+        .count();
+    if let Some(line) = larder(w.population(me), w.eaten_a_day(me), w.treasury(me).food, haulers) {
         return Some(line);
     }
 
@@ -325,15 +353,35 @@ mod tests {
         // consumption is the widest these sentences ever get.
         for (mouths, eaten, food) in [(8u32, 96u32, 0u16), (30, 360, 0), (90, 1080, 0),
                                       (8, 96, 5), (90, 1080, 999)] {
-            let line = super::larder(mouths, eaten, food)
-                .unwrap_or_else(|| panic!("a hungry city of {mouths} says nothing"));
-            assert!(line.contains(&eaten.to_string()), "it should name what they eat: {line:?}");
-            let rows = crate::ui::wrapped_words(&line, 52);
-            assert!(rows.len() <= 2, "{:?} needs {} rows and the panel keeps two", line, rows.len());
+            // Two haulers, so this asks the hungry-larder line rather than
+            // the no-haulers one. Both are checked for width; they are the two
+            // widest sentences in the file.
+            for haulers in [0usize, 2] {
+                let line = super::larder(mouths, eaten, food, haulers)
+                    .unwrap_or_else(|| panic!("a hungry city of {mouths} says nothing"));
+                assert!(
+                    line.contains(&eaten.to_string()),
+                    "it should name what they eat: {line:?}"
+                );
+                let rows = crate::ui::wrapped_words(&line, 52);
+                assert!(
+                    rows.len() <= 2,
+                    "{:?} needs {} rows and the panel keeps two",
+                    line,
+                    rows.len()
+                );
+            }
         }
 
         // A city that is fed says nothing about the larder at all.
-        assert_eq!(super::larder(8, 96, 500), None);
+        assert_eq!(super::larder(8, 96, 500, 2), None);
+
+        // **But a fed city with nobody hauling is told.** Both M12.11 players
+        // put everybody in a farm, watched the granary empty beside two
+        // working farms, and were advised to hire *more farmers* - which is
+        // the disease. A farm fills a small buffer and stops.
+        let line = super::larder(8, 96, 500, 0).expect("a city with no haulers says nothing");
+        assert!(line.contains("hauling"), "it should name the shortage: {line:?}");
     }
 
     /// The flood outranks trade, and a stalled household outranks it too.

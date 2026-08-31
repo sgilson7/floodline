@@ -1284,7 +1284,7 @@ impl Input {
 
         draw_text(
             match self.tool {
-                Tool::Select if self.show_high => "green is higher than your hearth. h to hide",
+                Tool::Select if self.show_high => "violet is higher than your hearth. h to hide",
                 Tool::Select => "drag to choose. right-click to send them. h for high ground",
                 Tool::Build(_) => "click the ground. right-click to stop",
                 Tool::Moving { .. } => "click where it should stand. right-click to stop",
@@ -1458,7 +1458,30 @@ impl Input {
             };
             let want = b.outstanding();
             if want.is_empty() {
-                return format!("{name}: {level}being built");
+                // **How far, and whether anybody is on it.**
+                //
+                // "being built" was the whole of what this said, and in the
+                // M12.11 run city 0 put four hundred and forty stone into
+                // fifteen dike segments that never became a wall, watched them
+                // read `being built` for two ages, and was finally told that a
+                // wall it had never owned had "given way". It called this the
+                // worst thing in the game and it was right: a site nobody is
+                // building and a site thirty seconds from done read
+                // identically, and the difference is the whole decision.
+                let hands = w
+                    .citizens
+                    .iter()
+                    .filter(|c| c.alive() && c.workplace == Some(b.id))
+                    .count();
+                let pct = (b.progress * 100 / b.kind.build_ticks().max(1)).min(100);
+                return format!(
+                    "{name}: {level}being built, {pct}%{}",
+                    match hands {
+                        0 => " - nobody is building it".to_owned(),
+                        1 => ", 1 pair of hands".to_owned(),
+                        n => format!(", {n} pairs of hands"),
+                    }
+                );
             }
             // Whether anybody is actually bringing it.
             //
@@ -1493,6 +1516,29 @@ impl Input {
             // row used to read identically for both — which is what left a
             // player in the M10.5 rehearsal watching an empty granary for two
             // days unable to tell whether the farm was even working.
+            // A hut is a roster and not a bench: nobody stands in it, so
+            // "0 of N working" is the wrong question and `slots_for` answers
+            // `usize::MAX` for it - which both M12.11 players saw drawn on
+            // their screen as `builders hut: 0 of 4294967295 working`.
+            //
+            // What a player wants to know is how many builders they have
+            // named, which is a property of the city and not of the shed.
+            Kind::BuildersHut => {
+                let builders = w
+                    .citizens
+                    .iter()
+                    .filter(|c| {
+                        c.owner == b.owner
+                            && c.alive()
+                            && c.job == Some(sim::citizen::Job::Builder)
+                    })
+                    .count();
+                match builders {
+                    0 => format!("{name}: nobody is a builder yet - choose people and right-click here"),
+                    1 => format!("{name}: 1 builder"),
+                    n => format!("{name}: {n} builders"),
+                }
+            }
             k if sim::citizen::Job::at(k).is_some() => format!(
                 "{name}: {} of {} working{}{}",
                 here(|c, id| c.workplace == Some(id)),

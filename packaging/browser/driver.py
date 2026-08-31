@@ -110,7 +110,19 @@ def main():
                 return img.crop((int(a * d), int(b * d), int(c * d), int(e * d)))
 
             side = box(LOGICAL_W - PANEL_W, 0.0, LOGICAL_W, LOGICAL_H)
-            notice = box(0.0, LOGICAL_H - 60.0, LOGICAL_W - PANEL_W, LOGICAL_H - 8.0)
+            # **All three message slots, not one.**
+            #
+            # This was `LOGICAL_H - 60` and it is the same fault the docstring
+            # above warns about, made again. M12 gave the game three lines
+            # instead of one - a refusal at 52 above the foot, the dead at 96,
+            # and news at 140 - and this crop kept only the refusal. So in the
+            # M12.11 run **neither player ever saw a single death**: city 0
+            # lost eight people and city 1 five, both watched for the line on
+            # every panel they took, and it was being cut off the bottom of
+            # their own eyes. One of them called it the worst thing in the run.
+            #
+            # A slot added above this line has to move this line.
+            notice = box(0.0, LOGICAL_H - 150.0, LOGICAL_W - PANEL_W, LOGICAL_H - 8.0)
             both = Image.new("RGB", (max(side.width, notice.width),
                                      side.height + notice.height))
             both.paste(side, (0, 0))
@@ -136,6 +148,22 @@ def main():
             if name not in BUTTONS:
                 print(f"no such button: {name}. one of: {', '.join(sorted(BUTTONS))}")
                 raise SystemExit(2)
+            # **Switch to the tab the button is on first.**
+            #
+            # Every build button, `choose all`, `back to hauling` and the trade
+            # button are drawn by `input.rs::tools`, which only runs while the
+            # build tab is showing. Pressed with `households` or `people` open,
+            # the click lands on empty panel and *nothing happens at all* -
+            # both M12.11 players lost a cycle of orders to this and one of
+            # them only found out because the game correctly answered a later
+            # right-click with "nobody chosen".
+            #
+            # The game is not at fault: a human sees that the button is not
+            # there. An agent addresses it by name and cannot.
+            if name not in ("tab-build", "tab-households", "tab-people"):
+                tx, ty = P.tab("build")
+                page.mouse.click(*V.css(tx, ty))
+                page.wait_for_timeout(120)
             lx, ly = BUTTONS[name]()
             page.mouse.click(*V.css(lx, ly))
             print(f"pressed the {name} button")

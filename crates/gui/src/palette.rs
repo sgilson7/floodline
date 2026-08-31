@@ -36,11 +36,27 @@ pub const HIGH_WATER: Color = Color::new(0.62, 0.50, 0.28, 0.20);
 
 /// Ground a citizen could climb to, shown only when the player asks (`h`).
 ///
-/// Two bands: higher than your hearth, and well above it. A green, because it
-/// is the one overlay in the game that means *good news* - everything else
-/// drawn over the map is a flood, a mark of a flood, or a warning.
-pub const HIGH_GROUND: Color = Color::new(0.42, 0.72, 0.45, 0.16);
-pub const HIGH_GROUND_FAR: Color = Color::new(0.42, 0.78, 0.45, 0.30);
+/// Two bands: higher than your hearth, and well above it.
+///
+/// **Not green, and that was the first version.** The reasoning was that this
+/// is the one overlay in the game meaning good news. The reasoning was wrong
+/// and the M12.11 run measured exactly how wrong: city 0 diffed the same frame
+/// with the overlay on and off and found *"the largest difference on any
+/// channel is 36 out of 255, in green, painted onto green grass"* — a true
+/// signal rendered below the threshold of sight. It threw the feature away in
+/// the first ten seconds and spent two game-days hovering cells instead.
+///
+/// City 1 did worse: it kept the overlay, read brighter green in the
+/// north-east as high ground, and **evacuated twice to ground three units
+/// lower than its own hearth**. Five people drowned. A signal that cannot be
+/// distinguished from the map under it is worse than no signal, because it is
+/// still trusted.
+///
+/// A violet, which appears nowhere else on this map: the ground ramps olive to
+/// grey, water is blue, the high-water mark is silt, the players are yellow
+/// and magenta. And opaque enough to see — 0.16 was a wash over a texture.
+pub const HIGH_GROUND: Color = Color::new(0.55, 0.42, 0.78, 0.32);
+pub const HIGH_GROUND_FAR: Color = Color::new(0.68, 0.45, 0.92, 0.55);
 
 /// Ground, shaded by height so the lie of the land reads without contours.
 ///
