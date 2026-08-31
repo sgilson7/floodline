@@ -2067,3 +2067,59 @@ they have a bridge or found the ford.
 `MULE_PAY` is provisional and says so. What a round trip is worth cannot be
 settled until M7 has priced an upgrade, because gold buys levels and a level is
 one more pair of hands.
+
+---
+
+## 2026-08-30 — A level is one more pair of hands, and a building can be moved
+
+M7, and it is two rules rather than two features.
+
+**A level is one more citizen the building can hold.** One sentence, no
+per-kind arithmetic: a farm goes three hands to four, a cottage four beds to
+five, a post two traders to three and so two mules on the road to three.
+`Building::slots_for` and `Building::beds` add `level - 1` to whatever the kind
+says, and every reader was moved off `Kind` and onto the building — `assign`,
+`will_take`, `will_house`, `SetHome`, the roster in `jobs.rs`, and the panel's
+hover line.
+
+**The plan's table has a row that cannot be honoured as written**, and this is
+the departure: "granary · stockpile · hearth — one more hauler based there". A
+hauler in this codebase is based *nowhere*. `slots_for(Job::Hauler)` has no
+limit and `assign` deliberately gives a hauler no workplace, because a hauler
+goes where the work is. A level on a store would therefore buy nothing a player
+could see, and a level a player pays for and cannot see is worse than a level
+they cannot buy. So `Kind::upgradable` sells levels only where hands actually
+go — farm, forester, quarry, cottage, trading post — which keeps the
+one-sentence rule true rather than nearly true. The hearth is out because the
+plan says so, and a dike's levels are height bought with stone: the flood
+currency stays separate from the trade one.
+
+**An upgrade does not put the building back to a site.** Raising a dike does,
+because a dike is being made taller; a farm is being given another pair of
+hands, and a farm that stopped feeding anybody while its fourth farmer was
+hired would be a strange thing to sell. It is paid at once out of the city's
+stores, because gold is not hauled.
+
+**A move keeps the id, and that is the whole trick.** Everybody who worked or
+lived there is still pointing at the same `BuildingId` and simply re-paths to
+the new address — no new machinery at all. It keeps its store and its level,
+and it arrives as a construction site with its materials already delivered, so
+the move costs builder-ticks and no materials. Being a site while it moves is
+the price: it shelters nobody and produces nothing until it is finished, which
+is what makes moving the granary the day before the water comes a decision
+rather than a free tidy-up.
+
+`can_move` is split from `move_building` the way `can_place` is split from
+`place`, so the ghost under the cursor can ask without issuing a command that
+will be refused — and it ignores the building's own cells, or a building would
+refuse to shuffle one step because it is already standing in the way.
+
+Dikes are movable. The plan's table does not say either way, and a wall in the
+wrong place is the most expensive mistake in this game: being able to shift it
+is worth more than the tidiness of a shorter rule.
+
+`UPGRADE_GOLD` and `MULE_PAY` are one number really — how many round trips a
+pair of hands is worth — and both say they are provisional. Ten against five
+means two round trips buys the first level and four buys the second, which is
+about an age of trading for a farm that feeds one more mouth. Nobody has played
+it.

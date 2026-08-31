@@ -154,7 +154,7 @@ impl World {
 
         for (_, id) in candidates {
             let taken = self.citizens.iter().filter(|c| c.home == Some(id)).count();
-            if taken < Kind::Cottage.beds() {
+            if taken < self.buildings[id.0 as usize].beds() {
                 self.citizens[i].home = Some(id);
                 return Some(id);
             }
@@ -502,7 +502,7 @@ impl World {
             (Some(job), BuildState::Standing) if job.stationed() => {
                 let b = &mut self.buildings[at.0 as usize];
                 if !b.workers.contains(&CitizenId(i as u16)) {
-                    if b.workers.len() < b.kind.slots_for(job) {
+                    if b.workers.len() < b.slots_for(job) {
                         b.workers.push(CitizenId(i as u16));
                     } else {
                         // Somebody took the last slot while this one walked.

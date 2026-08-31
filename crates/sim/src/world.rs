@@ -75,6 +75,10 @@ pub enum RuleError {
     AlreadyAccepted,
     /// A quarry with no rock beside it.
     NoRockHere,
+    /// Not enough gold.
+    TooPoor,
+    /// A hearth, a road or a bridge. See `Kind::movable`.
+    CannotMove,
 }
 
 impl RuleError {
@@ -107,6 +111,8 @@ impl RuleError {
             RuleError::NoSuchPartner => "there is no such city",
             RuleError::AlreadyAccepted => "already agreed",
             RuleError::NoRockHere => "a quarry needs rock beside it",
+            RuleError::TooPoor => "not enough gold",
+            RuleError::CannotMove => "that one stays where it is",
         }
     }
 }
@@ -345,7 +351,7 @@ impl World {
             },
             _ => return 0,
         };
-        let slots = b.kind.slots_for(job);
+        let slots = b.slots_for(job);
         if slots == usize::MAX {
             return citizens.len();
         }
@@ -371,7 +377,7 @@ impl World {
             .iter()
             .filter(|c| c.alive() && c.home == Some(cottage) && !citizens.contains(&c.id))
             .count();
-        citizens.len().min(Kind::Cottage.beds().saturating_sub(held))
+        citizens.len().min(b.beds().saturating_sub(held))
     }
 
     /// Start a construction site. Materials still have to be hauled to it and
@@ -417,6 +423,127 @@ impl World {
         // Part-built, because the bank below the new course is already there.
         // See `balance::DIKE_RAISE_PERCENT`.
         b.progress = Kind::Dike.build_ticks() * (100 - DIKE_RAISE_PERCENT) / 100;
+        Ok(())
+    }
+
+    /// Buy a building one more level, in gold.
+    ///
+    /// Paid at once out of the city's stores rather than hauled: gold is not
+    /// hauled (`Good::hauled`), and a level is a wage rather than a wall.
+    /// Unlike raising a dike it does not put the building back to a site — the
+    /// building is not being made bigger, it is being given another pair of
+    /// hands, and a farm that stopped feeding anybody while its fourth farmer
+    /// was hired would be a strange thing to sell.
+    pub fn upgrade(&mut self, owner: PlayerId, id: BuildingId) -> Result<(), RuleError> {
+        let b = self.buildings.get(id.0 as usize).ok_or(RuleError::NoSuchBuilding)?;
+        if b.owner != owner {
+            return Err(RuleError::NotYours);
+        }
+        if !b.standing_now() {
+            return Err(RuleError::NotStanding);
+        }
+        if !b.kind.upgradable() {
+            return Err(RuleError::NoJobThere);
+        }
+        if b.level >= MAX_LEVEL {
+            return Err(RuleError::TooHigh);
+        }
+        let cost = b.kind.upgrade_cost(b.level);
+        if !self.treasury(owner).covers(&cost) {
+            return Err(RuleError::TooPoor);
+        }
+        for g in Good::ALL {
+            let n = cost.get(g);
+            if n > 0 {
+                self.take_from_stores(owner, g, n);
+            }
+        }
+        self.buildings[id.0 as usize].level += 1;
+        Ok(())
+    }
+
+    /// Whether a building may be picked up and put down at `(x, y)`.
+    ///
+    /// Split from `move_building` the way `can_place` is split from `place`,
+    /// and for the same reason: the ghost under the cursor has to be able to
+    /// ask without issuing a command the rules will refuse.
+    ///
+    /// Validated exactly the way placement is, but **ignoring the building's
+    /// own cells** — otherwise a building would refuse to shuffle one step
+    /// because it is already standing in the way.
+    pub fn can_move(
+        &self,
+        owner: PlayerId,
+        id: BuildingId,
+        x: i32,
+        y: i32,
+    ) -> Result<(), RuleError> {
+        let b = self.buildings.get(id.0 as usize).ok_or(RuleError::NoSuchBuilding)?;
+        if b.owner != owner {
+            return Err(RuleError::NotYours);
+        }
+        if b.state == BuildState::Rubble {
+            return Err(RuleError::NotStanding);
+        }
+        if !b.kind.movable() {
+            return Err(RuleError::CannotMove);
+        }
+        let (kind, facing) = (b.kind, b.facing);
+        if !Building::fits_on_map(kind, facing, x, y) {
+            return Err(RuleError::OffMap);
+        }
+        if !Building::ground_suits(kind, facing, &self.map, x, y) {
+            return Err(RuleError::WrongGround);
+        }
+        if !Building::neighbours_suit(kind, facing, &self.map, x, y) {
+            return Err(RuleError::NoRockHere);
+        }
+        for (cx, cy) in Building::footprint(kind, facing, x, y) {
+            match self.occupancy[Map::idx(cx, cy)] {
+                Some(other) if other != id => return Err(RuleError::Occupied),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Pick a building up and put it down somewhere else.
+    ///
+    /// It keeps its id, so everybody who worked or lived there keeps pointing
+    /// at it and simply re-paths to the new address — no new machinery at all,
+    /// which is the elegant half. It keeps its store and its level too, and it
+    /// arrives as a construction site with its materials already delivered: so
+    /// a move costs the builder-ticks again and none of the materials.
+    ///
+    /// Being a site while it moves is the price. It shelters nobody and
+    /// produces nothing until it is finished, which makes moving the granary
+    /// the day before the water comes a real decision rather than a free tidy
+    /// up.
+    pub fn move_building(
+        &mut self,
+        owner: PlayerId,
+        id: BuildingId,
+        x: i32,
+        y: i32,
+    ) -> Result<(), RuleError> {
+        self.can_move(owner, id, x, y)?;
+        let was: Vec<(i32, i32)> = self.buildings[id.0 as usize].cells().collect();
+
+        for (cx, cy) in was {
+            self.occupancy[Map::idx(cx, cy)] = None;
+        }
+        let b = &mut self.buildings[id.0 as usize];
+        b.x = x as u8;
+        b.y = y as u8;
+        // Back to a site with its materials in it: the earth has to be moved
+        // again, the timber does not.
+        b.state = BuildState::Site;
+        b.progress = 0;
+        b.delivered = b.total_cost();
+        b.workers.clear();
+        let moved = self.buildings[id.0 as usize].clone();
+        self.occupy(&moved);
+        self.nav_generation += 1;
         Ok(())
     }
 
@@ -690,6 +817,10 @@ impl World {
             }
             Command::Demolish { building } => self.demolish(player, *building).map(|_| ()),
             Command::RaiseDike { dike } => self.raise_dike(player, *dike),
+            Command::Upgrade { building } => self.upgrade(player, *building),
+            Command::Move { building, x, y } => {
+                self.move_building(player, *building, *x as i32, *y as i32)
+            }
             Command::Assign { citizens, building } => self.assign(player, citizens, *building),
             Command::Unassign { citizens } => {
                 for id in citizens {
@@ -733,7 +864,7 @@ impl World {
                     .iter()
                     .filter(|c| c.home == Some(*cottage) && !citizens.contains(&c.id))
                     .count();
-                if outsiders + citizens.len() > Kind::Cottage.beds() {
+                if outsiders + citizens.len() > self.buildings[cottage.0 as usize].beds() {
                     return Err(RuleError::Full);
                 }
                 for id in citizens {
@@ -1210,7 +1341,7 @@ impl World {
                     c.alive() && c.workplace == Some(building) && !citizens.contains(&c.id)
                 })
                 .count();
-            if held + citizens.len() > b.kind.slots_for(job) {
+            if held + citizens.len() > b.slots_for(job) {
                 return Err(RuleError::Full);
             }
         }

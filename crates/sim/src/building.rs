@@ -527,6 +527,49 @@ impl Kind {
         }
     }
 
+    /// Whether gold can buy this one another level.
+    ///
+    /// **The plan's table has a row for granaries and stockpiles — "one more
+    /// hauler based there" — and it cannot be honoured as written**, because a
+    /// hauler in this codebase is based nowhere: `slots_for(Job::Hauler)` has
+    /// no limit and `assign` gives a hauler no workplace. A level that bought
+    /// nothing would be a level a player paid for and could not see. So a
+    /// level is sold only where hands actually go, which keeps the one-sentence
+    /// rule true: a level is one more citizen the building can hold, and a
+    /// store holds goods.
+    ///
+    /// The hearth is out because the plan says so — one per city and the place
+    /// its people came from. A dike is out because its levels are height and
+    /// are bought with stone; the flood currency stays separate from the trade
+    /// one. Roads and bridges are cells rather than buildings.
+    pub fn upgradable(self) -> bool {
+        matches!(
+            self,
+            Kind::Farm | Kind::Forester | Kind::Quarry | Kind::Cottage | Kind::TradingPost
+        )
+    }
+
+    /// What another level costs, in gold, for a building already at `level`.
+    ///
+    /// Rising with the level, so a second pair of hands at one building is
+    /// cheaper than a fourth and spreading gold about is a real alternative to
+    /// stacking it.
+    pub fn upgrade_cost(self, level: u8) -> Goods {
+        Goods::gold(UPGRADE_GOLD * level as u16)
+    }
+
+    /// Whether this can be picked up and put down somewhere else.
+    ///
+    /// Not the hearth: one per city and the place its people came from, and
+    /// moving it is a different feature. Not a road or a bridge: those are
+    /// cells rather than buildings and demolish is the right verb for them.
+    /// Everything else, dikes included — a wall in the wrong place is the most
+    /// expensive mistake in the game and being able to shift it is worth more
+    /// than the tidiness of a shorter rule.
+    pub fn movable(self) -> bool {
+        !matches!(self, Kind::Hearth | Kind::Road | Kind::Bridge)
+    }
+
     /// Whether the ground under one cell of the footprint will take it.
     ///
     /// The two exceptions are the whole reason this is per-kind: a Bridge
@@ -770,6 +813,33 @@ impl Building {
                 (0..h).map(|d| (x0 - 1, y0 + d)).collect(),
                 (0..h).map(|d| (x0 + w, y0 + d)).collect(),
             ],
+        }
+    }
+
+    /// How many of `job` this building can hold, at the level it is.
+    ///
+    /// **A level is one more citizen the building can hold.** One rule for
+    /// every kind rather than a table of special cases: a farm goes from three
+    /// hands to four, a cottage from four beds to five, a post from two
+    /// traders to three and so from two mules on the road to three. It is one
+    /// sentence a player can keep in their head and it needs no per-kind
+    /// arithmetic.
+    ///
+    /// A hauler is the exception and always was: `Kind::slots_for` gives it no
+    /// limit because a hauler is based nowhere and goes where the work is.
+    pub fn slots_for(&self, job: crate::citizen::Job) -> usize {
+        let base = self.kind.slots_for(job);
+        if base == 0 || base == usize::MAX {
+            return base;
+        }
+        base + self.level as usize - 1
+    }
+
+    /// Beds, at the level it is.
+    pub fn beds(&self) -> usize {
+        match self.kind.beds() {
+            0 => 0,
+            n => n + self.level as usize - 1,
         }
     }
 

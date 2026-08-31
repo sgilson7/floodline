@@ -29,6 +29,8 @@ pub enum Tool {
     /// Put one of these down. A dike is also raised with this tool, by
     /// clicking one that is already there.
     Build(Kind),
+    /// Carrying a building to somewhere else. Press `M` with one selected.
+    Moving { building: sim::BuildingId },
     /// Draw a wall. Press where it starts, drag, release where it ends.
     ///
     /// A drag rather than the road tool's two clicks, and its own variant
@@ -82,6 +84,9 @@ pub struct Input {
     trade: Draft,
     /// The last thing the rules said no to, and when, so it fades.
     notice: Option<(String, f64)>,
+    /// The building the player last clicked with the select tool. What the
+    /// level button and `M` act on.
+    chosen: Option<sim::BuildingId>,
     /// How many segments the wall under the cursor would be, and what they
     /// would cost. Worked out with the ghost, drawn with the panel.
     wall_hint: Option<(usize, u16)>,
@@ -99,7 +104,7 @@ fn tool_for(kind: Kind) -> Tool {
 impl Default for Input {
     fn default() -> Input {
         Input { tool: Tool::Select, selected: Vec::new(), drag: None, trade: Draft::default(),
-                notice: None, wall_hint: None }
+                notice: None, wall_hint: None, chosen: None }
     }
 }
 
@@ -153,6 +158,11 @@ impl Input {
         }
         if is_key_pressed(KeyCode::P) {
             self.tool = Tool::Ping;
+        }
+        if is_key_pressed(KeyCode::M) {
+            if let Some(building) = self.chosen {
+                self.tool = Tool::Moving { building };
+            }
         }
         if is_key_pressed(KeyCode::Escape) {
             self.tool = Tool::Select;
@@ -237,6 +247,19 @@ impl Input {
                         x: x as u8,
                         y: y as u8,
                     });
+                }
+                if ui.right_clicked {
+                    self.tool = Tool::Select;
+                }
+            }
+            Tool::Moving { building } => {
+                if let (true, Some((x, y))) = (ui.clicked, cell) {
+                    self.issue(session, Command::Move {
+                        building,
+                        x: x as u8,
+                        y: y as u8,
+                    });
+                    self.tool = Tool::Select;
                 }
                 if ui.right_clicked {
                     self.tool = Tool::Select;
@@ -338,6 +361,14 @@ impl Input {
                     .filter(|c| r.contains(citizen_at(c)))
                     .map(|c| c.id)
                     .collect();
+                // And whichever of your own buildings was under the click.
+                // Clicking people and clicking a building are the same gesture
+                // — a click on a farm with three farmers standing in it should
+                // not make you choose which one you meant.
+                self.chosen = cell
+                    .and_then(|(x, y)| session.world().building_at(x, y))
+                    .filter(|b| b.owner == me)
+                    .map(|b| b.id);
             }
         }
 
@@ -376,6 +407,21 @@ impl Input {
         self.wall_hint = None;
         let Some((x, y)) = cell else { return };
         match self.tool {
+            Tool::Moving { building } => {
+                // Where it would land, and whether it may. A move is validated
+                // ignoring the building's own cells, so shuffling one step
+                // shows green rather than red.
+                let Some(b) = w.buildings.get(building.0 as usize) else { return };
+                let (bw, bh) = b.size();
+                let ok = w.can_move(me, building, x, y).is_ok();
+                draw_rectangle(
+                    x as f32 * CELL,
+                    y as f32 * CELL,
+                    bw as f32 * CELL,
+                    bh as f32 * CELL,
+                    Color { a: 0.35, ..if ok { palette::GOOD } else { palette::ALARM } },
+                );
+            }
             Tool::Wall { from } => {
                 // The ghost is the run `sim` would actually lay, asked of the
                 // same function that will lay it, so a player cannot be shown
@@ -480,6 +526,43 @@ impl Input {
         }
         y += 42.0 * ((BUILDABLE.len() as f32 + 1.0) / 2.0).floor() + 8.0;
 
+        // What you have chosen, and the two things you can do to it. Only
+        // drawn when there is something to do: a row of dead buttons is a row
+        // a player learns to stop reading.
+        if let Some(id) = self.chosen {
+            let w = session.world();
+            if let Some(b) = w.buildings.get(id.0 as usize).filter(|b| b.owner == me) {
+                let (kind, level) = (b.kind, b.level);
+                let can_level = kind.upgradable() && b.standing_now() && level < sim::balance::MAX_LEVEL;
+                if can_level || kind.movable() {
+                    let up = Rect::new(left, y, half, 36.0);
+                    let mv = Rect::new(left + half + 8.0, y, half, 36.0);
+                    if can_level {
+                        let cost = kind.upgrade_cost(level);
+                        if ui.button(up, &format!("level {}", level + 1), true) {
+                            self.issue(session, Command::Upgrade { building: id });
+                        }
+                        draw_text(
+                            &cost_line(cost),
+                            up.x + 6.0,
+                            up.y + up.h - 4.0,
+                            13.0,
+                            if goods.covers(&cost) { palette::FAINT } else { palette::ALARM },
+                        );
+                    }
+                    if kind.movable() && ui.button(mv, "m move", true) {
+                        self.tool = Tool::Moving { building: id };
+                    }
+                    if matches!(self.tool, Tool::Moving { .. }) {
+                        draw_rectangle_lines(mv.x, mv.y, mv.w, mv.h, 2.0, palette::INK);
+                    }
+                    y += 48.0;
+                }
+            } else {
+                self.chosen = None;
+            }
+        }
+
         let road = Rect::new(left, y, half, 36.0);
         let ping = Rect::new(left + half + 8.0, y, half, 36.0);
         // The dike is picked from the build menu above like anything else; it
@@ -502,6 +585,7 @@ impl Input {
             match self.tool {
                 Tool::Select => "drag to choose. right-click to send them",
                 Tool::Build(_) => "click the ground. right-click to stop",
+                Tool::Moving { .. } => "click where it should stand. right-click to stop",
                 Tool::Wall { from: None } => "drag to draw a wall. click one to raise it",
                 Tool::Wall { from: Some(_) } => "let go where the wall should end",
                 Tool::Road { from: None } => "click where the road starts",
@@ -587,14 +671,16 @@ impl Input {
         };
         Some(match b.kind {
             k if sim::citizen::Job::at(k).is_some() => format!(
-                "{name}: {} of {} working",
+                "{name}: {} of {} working{}",
                 here(|c, id| c.workplace == Some(id)),
-                k.job_slots()
+                b.slots_for(sim::citizen::Job::at(k).expect("just matched")),
+                level_note(b),
             ),
             Kind::Cottage => format!(
-                "{name}: {} of {} beds taken",
+                "{name}: {} of {} beds taken{}",
                 here(|c, id| c.home == Some(id)),
-                Kind::Cottage.beds()
+                b.beds(),
+                level_note(b),
             ),
             Kind::Dike => format!("{name}: level {} of {}", b.level, sim::balance::DIKE_MAX_LEVEL),
             _ => format!("{name}: {}", goods_line(b.store)),
@@ -825,6 +911,15 @@ fn goods_line(g: sim::building::Goods) -> String {
         "empty".to_owned()
     } else {
         line
+    }
+}
+
+/// " (level 2)", or nothing at a building nobody has paid to grow.
+fn level_note(b: &sim::Building) -> String {
+    if b.level > 1 {
+        format!(" (level {})", b.level)
+    } else {
+        String::new()
     }
 }
 

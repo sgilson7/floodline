@@ -29,6 +29,17 @@ pub enum Command {
     Demolish { building: BuildingId },
     /// Raise a dike by one level. Design §3.3 has dikes grow; this is how.
     RaiseDike { dike: BuildingId },
+    /// Buy a building one more level, in gold. A level is one more citizen it
+    /// can hold — see `Building::slots_for`.
+    Upgrade { building: BuildingId },
+    /// Pick a building up and put it down somewhere else.
+    ///
+    /// It keeps its id, its store and its level, and arrives as a construction
+    /// site with its materials already in it — so moving costs time and not
+    /// materials, and the building shelters nobody and produces nothing until
+    /// it is finished. That is what makes moving the granary the day before the
+    /// water comes a decision rather than a free tidy-up.
+    Move { building: BuildingId, x: u8, y: u8 },
     /// Put citizens to work at a building. Which job is decided by what the
     /// building is, exactly as right-clicking it would.
     Assign { citizens: Vec<CitizenId>, building: BuildingId },
@@ -96,6 +107,8 @@ impl Command {
             }
             Command::Demolish { building } => format!("demolish @{}", building.0),
             Command::RaiseDike { dike } => format!("raise @{}", dike.0),
+            Command::Upgrade { building } => format!("upgrade @{}", building.0),
+            Command::Move { building, x, y } => format!("shift @{} {x} {y}", building.0),
             Command::Assign { citizens, building } => {
                 format!("assign {} @{}", ids(citizens), building.0)
             }
@@ -163,6 +176,12 @@ impl Command {
             },
             ["demolish", b] => Command::Demolish { building: bid(b)? },
             ["raise", b] => Command::RaiseDike { dike: bid(b)? },
+            ["upgrade", b] => Command::Upgrade { building: bid(b)? },
+            ["shift", b, x, y] => Command::Move {
+                building: bid(b)?,
+                x: x.parse().ok()?,
+                y: y.parse().ok()?,
+            },
             ["assign", c, b] => Command::Assign { citizens: ids(c)?, building: bid(b)? },
             ["unassign", c] => Command::Unassign { citizens: ids(c)? },
             ["move", c, x, y] => {
@@ -251,6 +270,8 @@ mod tests {
             Command::Place { kind: Kind::Bridge, facing: Facing::EastWest, x: 0, y: 255 },
             Command::Demolish { building: BuildingId(7) },
             Command::RaiseDike { dike: BuildingId(3) },
+            Command::Upgrade { building: BuildingId(5) },
+            Command::Move { building: BuildingId(6), x: 40, y: 41 },
             Command::Assign { citizens: vec![CitizenId(1)], building: BuildingId(2) },
             Command::Assign {
                 citizens: vec![CitizenId(0), CitizenId(9), CitizenId(65535)],
@@ -298,8 +319,8 @@ mod tests {
             .collect();
         assert_eq!(
             seen.len(),
-            16,
-            "one_of_each names {} distinct commands, not 16: {seen:?}",
+            18,
+            "one_of_each names {} distinct commands, not 18: {seen:?}",
             seen.len()
         );
     }
@@ -312,6 +333,7 @@ mod tests {
             "demolish 7", "demolish @", "move 1 2 3", "assign #1",
             "pause now", "resume please", "ping 1", "home #1 2",
             "road 1 2 3", "dikeline 1 2 3", "acceptroad 2", "trade !1 food 20 wood",
+            "upgrade 5", "shift @6 40", "shift 6 40 41",
             "accepttrade 0",
         ] {
             assert_eq!(Command::parse(line), None, "{line:?} parsed as a command");

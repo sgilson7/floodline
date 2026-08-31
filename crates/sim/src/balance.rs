@@ -125,6 +125,20 @@ pub const MULE_LOAD: u16 = 10;
 /// within an age and no more than that.
 pub const MULE_PAY: u16 = 5;
 
+/// What the first extra level at a building costs in gold; the second costs
+/// twice this, and so on.
+///
+/// **Provisional, with `MULE_PAY`.** The two are one number really — how many
+/// round trips a pair of hands is worth — and neither can be settled until
+/// somebody plays a run with a post in it. Ten against a mule's five means two
+/// round trips buys the first level and four buys the second, which is an age
+/// of trading for a farm that feeds one more mouth.
+pub const UPGRADE_GOLD: u16 = 10;
+
+/// The most levels anything can be raised to. The same cap as a dike's, so
+/// there is one answer to "how far can this go" rather than two.
+pub const MAX_LEVEL: u8 = DIKE_MAX_LEVEL;
+
 /// How close a mule has to get to count as arrived. A cart does not have to
 /// stand on the doorstep.
 pub const MULE_ARRIVED: i32 = 2;
