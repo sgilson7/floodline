@@ -353,6 +353,25 @@ fn the_clock_can_change_without_changing_the_game() {
     // of thing and are asserted in `net/tests/lockstep.rs`.
     assert_eq!(PING_LIFETIME, 3 * TICKS_PER_SECOND);
 
+    // The day never reads past the last one in an age. `day 7 of 6` was on the
+    // final frame of the M10.6 run: the world finishes on the last tick of the
+    // last age, so the age never rolls over and the count ran on.
+    //
+    // Walked over the tick numbers rather than simulated: `day_of_age` is
+    // arithmetic on two fields, and playing three ages out in a debug build to
+    // read a label costs minutes.
+    let mut w = World::new(11, 2);
+    w.age_start_tick = 0;
+    for day in 1..=DAYS_PER_AGE {
+        w.tick = (day - 1) * TICKS_PER_DAY;
+        assert_eq!(w.day_of_age(), day, "the first tick of day {day}");
+        w.tick = day * TICKS_PER_DAY - 1;
+        assert_eq!(w.day_of_age(), day, "the last tick of day {day}");
+    }
+    // One tick past the end of the last day: an age that has not rolled over.
+    w.tick = DAYS_PER_AGE * TICKS_PER_DAY;
+    assert_eq!(w.day_of_age(), DAYS_PER_AGE, "day 7 of 6 is not a day");
+
     // And the shape of a run, which is the thing M11.1 set out to halve.
     assert_eq!(TICKS_PER_DAY / TICKS_PER_SECOND, 60, "a day is a minute");
     let run_seconds = MAX_AGE * DAYS_PER_AGE * TICKS_PER_DAY / TICKS_PER_SECOND;

@@ -22,6 +22,7 @@ from PIL import Image
 import io
 from playwright.sync_api import sync_playwright
 from view import View, LOGICAL_H
+import panel as P
 import table
 
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8123/index.html"
@@ -30,9 +31,13 @@ DPR = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
 V = View(table.W, table.H, DPR)
 errors = []
 
-# The panel's tick row: draw.rs puts its baseline at LOGICAL_H - 74 and the
-# next row twenty-three below, so this brackets one line and no other.
-TICK_ROW = (1252.0, LOGICAL_H - 90.0, 1420.0, LOGICAL_H - 68.0)
+# The panel's tick row, from `panel.py` rather than as a literal of its own.
+# The lobby coordinates in `table.py` are literals on purpose — if the lobby
+# moves, a check should notice — but the panel has one copy of its running
+# totals and this is a reader of it, not a tripwire for it. It was a literal
+# until M11.2 moved the foot up by twenty-three pixels and this quietly began
+# sampling blank panel, reporting that neither peer was ticking.
+TICK_ROW = (P.LEFT, P.TICK - 16.0, P.LEFT + 180.0, P.TICK + 6.0)
 
 
 def check(ok, what):

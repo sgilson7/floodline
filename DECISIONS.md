@@ -2578,3 +2578,61 @@ city can raise before the first flood from 60 stone to **540**, because haulers
 carry stone nine times better, and drops `flee` from four survivors to one.
 That is not a frame-rate change, it is M5 undone, and the measurement is here so
 nobody has to rediscover it.
+
+---
+
+## 2026-08-31 — The panel is full, and the foot is where it stops
+
+M11.2. `tick`, `peers at` and `build`/`seed` are the rows a player is told to
+read when something has gone wrong, and M10 nominated them as its desync
+instrument. They were being drawn over. The M10.6 run spent twelve minutes with
+a trade offer sitting where the tick count belongs, and the referee reported a
+hundred and sixteen stalls that never happened.
+
+**The measurement first, because it decided the shape of the fix.** With
+nothing selected and no offer pending, the tools section already ended ten
+pixels above the foot. The variable stack wants 48 for the level/move row and
+38 for each offer. **Any design that appends variable content to the bottom of
+this panel is broken by construction**, so "draw the foot last" only changes
+which thing is unreadable, and a ceiling on its own would hide every offer.
+
+Room had to be found, and it came from two places:
+
+* **The tools, 38 pixels.** The road and the point moved into the build grid
+  rather than sitting in a row of their own, the grid's pitch went from 42 to
+  40, and the "BUILD" heading went — the nine numbered buttons under it were
+  already saying what it said. Eleven buttons in two columns still leave one
+  gap; it is at the end now, where an odd count belongs.
+* **The foot, 23 pixels.** Two rows rather than three: `tick 42   peers at
+  [42, 0]` on one line, because the question those two answer is one question.
+
+That is 68 pixels of clearance where there were 15 — enough for one offer *or*
+the level/move row, and not both. So the overflow is real, and `VARIABLE_FLOOR`
+is where it stops: anything that will not fit is not drawn, and a line says how
+many are waiting. Naming what is being kept back is the whole point; hiding it
+silently is the fault this milestone is about.
+
+**A tripwire fired the way it was meant to, twice.** `play.py` and `assign.py`
+carry panel coordinates as literals precisely so a rearrangement is noticed
+rather than silently mis-clicked, and both needed moving — the first time that
+has happened deliberately rather than by accident. `two_agents.py` also failed,
+and that one was a genuine mistake of ours: it had copied the tick row's
+coordinates instead of importing them, so when the foot moved it began sampling
+blank panel and reported that neither peer was ticking. It reads `panel.py`
+now. The lobby literals in `table.py` stay literals; the lobby is a different
+file with a different reason.
+
+**`day 7 of 6`** on the final frame: `day_of_age` is
+`(tick - age_start_tick) / TICKS_PER_DAY + 1`, and the world finishes on the
+last tick of the last age, so the age never rolls over and the count ran on. It
+clamps to `DAYS_PER_AGE` now. The test walks the tick boundaries rather than
+simulating three ages — the first version of it took seven minutes in a debug
+build to read a label.
+
+**And a city that has died is told so.** `next_thing` answers `None` for a dead
+city, which is correct — there is no next thing — but the panel then drew a
+blank row while the status line went on saying `playing`. Both players in the
+M10.5 rehearsal lost their city without being told; one found out by noticing a
+grey nought in the roster. `tutorial::obituary` is a separate function from
+`next_thing` because it answers a different question, and it is silent once the
+run is over: the score screen says it better and says it for everybody.

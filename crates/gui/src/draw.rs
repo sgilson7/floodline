@@ -317,9 +317,17 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
     // says what to do next does not fit in one. Both rows are reserved whether
     // or not there is anything in them, so the buttons below do not move as a
     // city's situation changes.
-    if let Some(next) = crate::tutorial::next_thing(w, me) {
+    // What to do next, or — if there is nobody left to do it — that there is
+    // nobody left. The two are the same row because they answer the same
+    // question, and a city that has died answering it with a blank line is how
+    // both players in the M10.5 rehearsal lost a city without being told.
+    let (say, colour) = match crate::tutorial::obituary(w, me) {
+        Some(gone) => (Some(gone.to_owned()), palette::ALARM),
+        None => (crate::tutorial::next_thing(w, me), palette::WARNING),
+    };
+    if let Some(next) = say {
         for (i, row) in crate::ui::wrapped_words(&next, 52).iter().take(2).enumerate() {
-            draw_text(row, left, y + i as f32 * 18.0, 15.0, palette::WARNING);
+            draw_text(row, left, y + i as f32 * 18.0, 15.0, colour);
         }
     }
     y += 42.0;
@@ -342,9 +350,14 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
 
     // The bottom of the panel is for the things you only look at when
     // something is wrong.
-    let mut y = LOGICAL_H - 74.0;
-    line(&format!("tick {}", w.tick), 15, palette::FAINT, &mut y);
-    line(&format!("peers at {ticks:?}"), 15, palette::FAINT, &mut y);
+    //
+    // Two rows rather than three since M11.2. The tick and the peers belong
+    // together — the question they answer is one question, "are we still in
+    // step" — and putting them on one line bought twenty-three pixels of
+    // clearance for the variable stack above, which had been drawing over
+    // them. See `input::VARIABLE_FLOOR`.
+    let mut y = LOGICAL_H - 51.0;
+    line(&format!("tick {}   peers at {ticks:?}", w.tick), 15, palette::FAINT, &mut y);
     line(&format!("build {build}   seed {}", w.seed), 15, palette::FAINT, &mut y);
     ended
 }

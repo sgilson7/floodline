@@ -40,9 +40,14 @@ CITY_STEP = 24.0
 # Pinned to the foot of the window rather than to the running total, so these
 # are the only rows that do not move when a city is added.
 
-TICK = LOGICAL_H - 74.0         # "tick N"
-PEERS = LOGICAL_H - 51.0        # "peers at [N, N]" - two numbers on the host
+# Two rows since M11.2, not three: the tick and the peers share a line, which
+# bought the variable stack above them enough clearance to stop drawing over
+# the foot. `FOOT` is the whole of it, and `input::VARIABLE_FLOOR` is the line
+# nothing variable may cross.
+TICK = LOGICAL_H - 51.0         # "tick N   peers at [N, N]"
+PEERS = TICK                    # the same row now; kept so callers still read
 BUILD_SEED = LOGICAL_H - 28.0   # "build <hash>   seed N"
+FOOT = LOGICAL_H - 70.0         # nothing variable may be drawn below this
 
 
 def after_cities(cities=2):
@@ -83,51 +88,54 @@ def body_top(cities=2):
 # ---- input.rs::tools ----------------------------------------------------
 # BUILDABLE is nine kinds in two columns, so five rows of buttons.
 
+# Eleven buttons in two columns since M11.2, forty pixels of pitch, and no
+# "BUILD" heading above them: the road and the point moved into the slot the
+# nursery left empty. Thirty-eight pixels, bought back for the variable stack.
 BUILDS = ["cottage", "farm", "granary", "forester", "quarry",
-          "stockpile", "dike", "post", "nursery"]
+          "stockpile", "dike", "post", "nursery", "road", "point"]
 
 
 def build_button(name, cities=2):
-    """The middle of a build button. `1 cottage` through `9 nursery`."""
+    """The middle of a grid button, `1 cottage` through `p point`."""
     i = BUILDS.index(name)
     top = body_top(cities)
     x = LEFT + HALF / 2.0 + (i % 2) * (HALF + 8.0)
-    return (x, top + 62.0 + 42.0 * (i // 2))
+    return (x, top + 42.0 + 40.0 * (i // 2))
 
 
 def road_button(cities=2):
-    return (LEFT + HALF / 2.0, body_top(cities) + 280.0)
+    return build_button("road", cities)
 
 
 def point_button(cities=2):
-    return (LEFT + HALF + 8.0 + HALF / 2.0, body_top(cities) + 280.0)
+    return build_button("point", cities)
 
 
 def tool_hint(cities=2):
     """"drag to choose. right-click to send them", and the rest."""
-    return body_top(cities) + 310.0
+    return body_top(cities) + 272.0
 
 
 def hover(cities=2):
     """What the cursor is over: `farm: 0 of 3 working`. Reserved when empty."""
-    return body_top(cities) + 332.0
+    return body_top(cities) + 294.0
 
 
 def chosen_count(cities=2):
     """"nobody chosen" / "3 chosen"."""
-    return body_top(cities) + 376.0
+    return body_top(cities) + 338.0
 
 
 def back_to_hauling(cities=2):
-    return (LEFT + HALF / 2.0, body_top(cities) + 405.0)
+    return (LEFT + HALF / 2.0, body_top(cities) + 367.0)
 
 
 def choose_all(cities=2):
-    return (LEFT + HALF + 8.0 + HALF / 2.0, body_top(cities) + 405.0)
+    return (LEFT + HALF + 8.0 + HALF / 2.0, body_top(cities) + 367.0)
 
 
 def propose_a_trade(cities=2):
-    return (LEFT + WIDE / 2.0, body_top(cities) + 475.0)
+    return (LEFT + WIDE / 2.0, body_top(cities) + 437.0)
 
 
 def below_the_trade(cities=2):
@@ -135,8 +143,10 @@ def below_the_trade(cities=2):
 
     Nothing fixed lives below this line, which is the property
     `panel_rows.py` checks and the reason the level/move row was moved here.
+    And nothing at all lives below `FOOT`, which is the other half of the same
+    check: the stack stops there and says what it could not show.
     """
-    return body_top(cities) + 500.0
+    return body_top(cities) + 462.0
 
 
 def row(y, size=15.0, x0=None, x1=None):

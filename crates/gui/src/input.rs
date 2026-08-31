@@ -96,6 +96,8 @@ pub struct Input {
     /// How many segments the wall under the cursor would be, and what they
     /// would cost. Worked out with the ghost, drawn with the panel.
     wall_hint: Option<(usize, u16)>,
+    /// Rows the panel had no room for this frame. See `VARIABLE_FLOOR`.
+    overflowed: usize,
 }
 
 /// The two halves of the panel: what you can do, and who is doing it.
@@ -118,12 +120,34 @@ impl Default for Input {
     fn default() -> Input {
         Input { tool: Tool::Select, selected: Vec::new(), drag: None, trade: Draft::default(),
                 notice: None, wall_hint: None, chosen: None,
-                tab: Tab::Tools, ringed: Vec::new() }
+                tab: Tab::Tools, ringed: Vec::new(), overflowed: 0 }
     }
 }
 
 /// How long a refusal stays on screen.
 const NOTICE_SECONDS: f64 = 4.5;
+
+/// The lowest a variable row may reach.
+///
+/// `draw::panel` puts `tick`, `peers at` and `build`/`seed` at the foot, and
+/// those are the rows a player is told to read when something has gone wrong —
+/// M10 nominated them as its desync instrument. They were being drawn over.
+/// The M10.6 run spent twelve minutes with a trade offer sitting where the
+/// tick count belongs, and the referee reported a hundred and sixteen stalls
+/// that never happened.
+///
+/// A floor rather than a rearrangement, because the panel has no room to spare:
+/// with nothing selected and no offer, the tools already ended ten pixels above
+/// the foot. M11.2 bought thirty-eight pixels back from the tools and
+/// twenty-three from the foot, which is enough for one offer *or* the
+/// level/move row and not both — so the overflow is real and has to be said
+/// rather than drawn.
+const VARIABLE_FLOOR: f32 = LOGICAL_H - 70.0;
+
+/// Whether a row of this height still fits above the foot.
+fn room_for(y: f32, height: f32) -> bool {
+    y + height <= VARIABLE_FLOOR
+}
 
 impl Input {
     /// Everything drawn in map space, under the map camera: the selection
@@ -596,15 +620,18 @@ impl Input {
         let mut y = top + 8.0;
 
         draw_line(left, y, left + wide, y, 1.0, palette::RULE);
-        y += 22.0;
-        draw_text("BUILD", left, y, 15.0, palette::FAINT);
-        y += 14.0;
+        // No "BUILD" heading, and forty pixels of pitch rather than
+        // forty-two. Twenty pixels and twelve, bought back for the variable
+        // stack at the foot of the panel — see `VARIABLE_FLOOR`. The buttons
+        // are numbered and say what they are; the heading was telling a player
+        // something the nine labels under it already said.
+        y += 16.0;
 
         let goods = session.world().treasury(me);
         for (i, (kind, name, key)) in BUILDABLE.iter().enumerate() {
             let r = Rect::new(
                 left + (i % 2) as f32 * (half + 8.0),
-                y + (i / 2) as f32 * 42.0,
+                y + (i / 2) as f32 * 40.0,
                 half,
                 36.0,
             );
@@ -630,12 +657,23 @@ impl Input {
             );
             let _ = key;
         }
-        y += 42.0 * ((BUILDABLE.len() as f32 + 1.0) / 2.0).floor() + 8.0;
-
-        // The dike is picked from the build menu above like anything else; it
-        // is the gesture that differs, not the shopping.
-        let road = Rect::new(left, y, half, 36.0);
-        let ping = Rect::new(left + half + 8.0, y, half, 36.0);
+        // The road and the point carry on in the same grid rather than in a
+        // row of their own. Eleven is still odd and still leaves one gap, but
+        // it is at the end where an odd count belongs rather than beside the
+        // nursery, and one uniform grid is a shorter running total than a grid
+        // plus a special row — six pixels, and one less place for `panel.py`
+        // to disagree with this file. The dike is picked from the menu like
+        // anything else; it is the gesture that differs, not the shopping.
+        let slot = |i: usize| {
+            Rect::new(
+                left + (i % 2) as f32 * (half + 8.0),
+                y + (i / 2) as f32 * 40.0,
+                half,
+                36.0,
+            )
+        };
+        let road = slot(BUILDABLE.len());
+        let ping = slot(BUILDABLE.len() + 1);
         if ui.button(road, "r road", true) {
             self.tool = Tool::Road { from: None };
         }
@@ -648,7 +686,7 @@ impl Input {
         if self.tool == Tool::Ping {
             draw_rectangle_lines(ping.x, ping.y, ping.w, ping.h, 2.0, palette::INK);
         }
-        y += 48.0;
+        y += 40.0 * ((BUILDABLE.len() as f32 + 2.0 + 1.0) / 2.0).floor() + 8.0;
 
         draw_text(
             match self.tool {
@@ -739,7 +777,12 @@ impl Input {
             if let Some(b) = w.buildings.get(id.0 as usize).filter(|b| b.owner == me) {
                 let (kind, level) = (b.kind, b.level);
                 let can_level = kind.upgradable() && b.standing_now() && level < sim::balance::MAX_LEVEL;
-                if can_level || kind.movable() {
+                if (can_level || kind.movable()) && !room_for(y, 36.0) {
+                    // An offer has taken the space. Say so rather than draw
+                    // over the foot; clicking away from the building brings
+                    // this back.
+                    self.overflowed += 1;
+                } else if can_level || kind.movable() {
                     let up = Rect::new(left, y, half, 36.0);
                     let mv = Rect::new(left + half + 8.0, y, half, 36.0);
                     if can_level {
@@ -767,7 +810,7 @@ impl Input {
                 self.chosen = None;
             }
         }
-        let _ = y;
+        self.overflow_note(y, left);
     }
 
     /// The building under the mouse, and how full it is.
@@ -836,7 +879,12 @@ impl Input {
             .filter(|r| r.reaches == Some(me) && !r.joined)
             .map(|r| (r.id, r.by))
             .collect();
+        let mut hidden = 0usize;
         for (id, by) in roads {
+            if !room_for(y, 32.0) {
+                hidden += 1;
+                continue;
+            }
             if ui.button(
                 Rect::new(left, y, wide, 32.0),
                 &format!("join city {}'s road", by.0),
@@ -855,6 +903,10 @@ impl Input {
             .map(|t| (t.id, t.from, t.give, t.take))
             .collect();
         for (id, from, give, take) in trades {
+            if !room_for(y, 32.0) {
+                hidden += 1;
+                continue;
+            }
             // `give` and `take` are named from the proposer's side, so this
             // player receives what the other gives. Saying it the wrong way
             // round would be a trap in the one screen where a mistake costs
@@ -871,7 +923,29 @@ impl Input {
             }
             y += 38.0;
         }
+        self.overflowed = hidden;
         y
+    }
+
+    /// Say what did not fit, if anything did not.
+    ///
+    /// One line rather than a scrollbar. The panel is full and the honest
+    /// answer to a full panel is to name what is being kept back, not to hide
+    /// it silently — hiding it silently is the fault this whole milestone is
+    /// about.
+    fn overflow_note(&self, y: f32, left: f32) {
+        if self.overflowed == 0 {
+            return;
+        }
+        let n = self.overflowed;
+        let what = if n == 1 { "1 more waiting" } else { "waiting" };
+        draw_text(
+            &if n == 1 { what.to_owned() } else { format!("{n} more {what}") },
+            left,
+            y.min(VARIABLE_FLOOR + 12.0),
+            15.0,
+            palette::WARNING,
+        );
     }
 
     // ---- the trade dialog ---------------------------------------------------

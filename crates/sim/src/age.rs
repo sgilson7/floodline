@@ -136,8 +136,14 @@ impl World {
     }
 
     /// Which day of the current age it is, counting from one.
+    ///
+    /// Never past the last day of an age. An age rolls over when its impact
+    /// day ends, so under way this can only reach `DAYS_PER_AGE` — except on
+    /// the very last tick of the very last age, where the run finishes and
+    /// there is no next age to roll into. The panel drew `day 7 of 6` on the
+    /// final frame of the M10.6 run, which is where this was found.
     pub fn day_of_age(&self) -> u32 {
-        (self.tick - self.age_start_tick) / TICKS_PER_DAY + 1
+        ((self.tick - self.age_start_tick) / TICKS_PER_DAY + 1).min(DAYS_PER_AGE)
     }
 
     /// The day of an age on which the disaster strikes: the last one.

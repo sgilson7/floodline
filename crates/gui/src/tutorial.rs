@@ -47,6 +47,22 @@ fn larder(mouths: u32, eaten: u32, food: u16) -> Option<String> {
     None
 }
 
+/// What to say when there is nobody left to say it to.
+///
+/// `next_thing` answers `None` for a dead city, which is correct — there is no
+/// next thing — but the panel then drew a blank row and the status line went on
+/// saying `playing`. Both players in the M10.5 rehearsal lost their city
+/// without being told: one found out by noticing a grey nought in the roster.
+///
+/// Not while the run is over: the score screen says it better and says it for
+/// everybody. This is for the gap between losing your own city and the run
+/// ending, which can be two whole ages if the other city is standing.
+pub fn obituary(w: &World, me: PlayerId) -> Option<&'static str> {
+    let playing = w.players.contains(&me) && w.finished().is_none();
+    (playing && w.population(me) == 0)
+        .then_some("your city is gone. nothing is left to command")
+}
+
 /// The one thing this city most needs, and how to do it.
 ///
 /// Ordered by what kills you soonest: a citizen empties at tick 1000 and dies
@@ -224,6 +240,25 @@ mod tests {
     /// without a word. The food lines are the longest here and the only ones
     /// that carry numbers, so they are the ones that can grow past the edge
     /// when a city does — a city of thirty eats three digits a day.
+    /// A dead city is told so, and a living one is not.
+    #[test]
+    fn a_city_that_has_died_is_told() {
+        let mut w = World::new(5, 2);
+        let me = PlayerId(0);
+        assert_eq!(super::obituary(&w, me), None, "a living city has no obituary");
+
+        for c in w.citizens.iter_mut().filter(|c| c.owner == me) {
+            c.die();
+        }
+        assert_eq!(w.population(me), 0);
+        let line = super::obituary(&w, me).expect("a dead city is told so");
+        assert!(crate::ui::wrapped_words(line, 52).len() <= 2, "too wide: {line:?}");
+
+        // And `next_thing` still says nothing, which is the right answer to
+        // "what should I do next" and the reason this function exists.
+        assert_eq!(super::next_thing(&w, me), None);
+    }
+
     #[test]
     fn every_line_fits_the_two_rows_the_panel_keeps_for_it() {
         let mut w = World::new(3, 2);

@@ -1,7 +1,20 @@
-"""Do the panel's fixed rows stay put when a building is chosen?
+"""Do the panel's fixed rows stay put, and its foot stay readable?
 
 `panel_rows_do_not_move_when_a_building_is_chosen`, which is the check
 `input.rs::tools` now names. It exists because the answer was no, five times.
+
+It asks two questions. The first is whether choosing a building *moves* the
+rows below it. The second, added in M11.2, is whether anything is drawn *over*
+the three rows at the foot — `tick`, `peers at` and `build`/`seed` — which are
+the rows a player is told to read when something is wrong, and the ones M10
+nominated as its desync instrument. The M10.6 run spent twelve minutes with a
+trade offer sitting where the tick count belongs, and the referee dutifully
+reported a hundred and sixteen stalls that never happened.
+
+An offer needs two peers, so the case exercised here is the cheap one that
+fails for the same reason: a selected building puts the level/move row over the
+foot on its own. The fix has to make the foot inviolable rather than fit one
+particular stack, so this covers both.
 
 The level/move row appears the moment a player clicks one of their own
 buildings and disappears when they click away. Every row below it moved by
@@ -47,6 +60,23 @@ with sync_playwright() as p:
         x1, yy1 = V.css(*P.band(y0, y1)[2:])
         return img.crop((int(x0), int(yy0), int(x1), int(yy1))).tobytes()
 
+    def plate_pixels(img):
+        """How much of the panel's foot is covered by a button.
+
+        The foot should be text on panel background and nothing else. A button
+        drawn over it is a broad fill of an intermediate brightness — darker
+        than a glyph, lighter than the panel — so counting those separates
+        "a row of text" from "a row of text with a plate on top of it".
+
+        Measured rather than guessed: with nothing selected the foot has about
+        900 such pixels, which is the antialiasing on its own glyphs. With a
+        building selected it has 4 400.
+        """
+        x0, y0 = V.css(P.LEFT - 12.0, P.TICK - 18.0)
+        x1, y1 = V.css(P.RIGHT + 8.0, P.BUILD_SEED + 8.0)
+        band = img.crop((int(x0), int(y0), int(x1), int(y1))).convert("RGB")
+        return sum(1 for q in band.getdata() if 80 <= sum(q) < 200)
+
     # Single player by pasted code: no relays, no second tab, and the panel is
     # the whole subject. Two cities would put a second row in the city list and
     # move everything below it, which `panel.py` knows about and this does not
@@ -91,6 +121,7 @@ with sync_playwright() as p:
     before = shot("rows-1-nothing-chosen")
     was_fixed = strip(before, *FIXED)
     was_variable = strip(before, *VARIABLE)
+    was_foot = plate_pixels(before)
 
     # A cottage, then click it. A cottage is movable, so the row appears even
     # while it is still a site waiting for its wood — which is what makes this
@@ -126,6 +157,12 @@ with sync_playwright() as p:
     # And the variable stack is genuinely below them, not merely absent.
     check(strip(after, *VARIABLE) != was_variable,
           "the level/move row is drawn below everything fixed")
+
+    # But "below everything fixed" has to stop somewhere, and the foot is it.
+    now_foot = plate_pixels(after)
+    check(now_foot < was_foot * 3 // 2,
+          f"nothing is drawn over tick, peers at and build/seed "
+          f"({was_foot} -> {now_foot} plate pixels)")
 
     br.close()
 

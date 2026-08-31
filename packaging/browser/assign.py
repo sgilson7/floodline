@@ -78,10 +78,11 @@ with sync_playwright() as p:
 
     def hover_line(img):
         """The panel's "what is under the cursor" row: `farm: 0 of 3 working`."""
-        # Moved down by the tab row and the ninth build button. The hover row
-        # sits under the tool hint, which is under the road/point row.
-        x0, y0 = css(1252.0, 679.0)
-        x1, y1 = css(1590.0, 709.0)
+        # M11.2 moved this up: the road and point buttons joined the build
+        # grid, the "BUILD" heading went, and the grid's pitch tightened, so
+        # everything under the menu rose by thirty-eight pixels.
+        x0, y0 = css(1252.0, 656.0)
+        x1, y1 = css(1590.0, 686.0)
         return img.crop((int(x0), int(y0), int(x1), int(y1))).tobytes()
 
     pg.goto(URL)
@@ -140,7 +141,7 @@ with sync_playwright() as p:
     pg.wait_for_timeout(400)
     before_work = hover_line(shot())
 
-    pg.mouse.click(*css(1502.0, 775.0))                  # choose all
+    pg.mouse.click(*css(1502.0, 747.0))                  # choose all
     pg.wait_for_timeout(400)
     quiet = alarm_band(shot())
     pg.mouse.click(*cell(*farm), button="right")         # put them to work
