@@ -98,6 +98,17 @@ pub struct Input {
     wall_hint: Option<(usize, u16)>,
     /// Rows the panel had no room for this frame. See `VARIABLE_FLOOR`.
     overflowed: usize,
+    /// How many stretches of this player's wall were rubble last frame.
+    ///
+    /// Counted so that a wall giving way can be *said*. Both players in the
+    /// M10.6 run found out that their wall had broken by noticing it was no
+    /// longer drawn, and neither could tell whether it had broken, been
+    /// overtopped or been washed away.
+    ///
+    /// Rubble rather than "no longer standing", which would fire every time a
+    /// segment was raised: raising returns it to a site, and a site is not a
+    /// ruin.
+    ruins: usize,
 }
 
 /// The two halves of the panel: what you can do, and who is doing it.
@@ -120,7 +131,7 @@ impl Default for Input {
     fn default() -> Input {
         Input { tool: Tool::Select, selected: Vec::new(), drag: None, trade: Draft::default(),
                 notice: None, wall_hint: None, chosen: None,
-                tab: Tab::Tools, ringed: Vec::new(), overflowed: 0 }
+                tab: Tab::Tools, ringed: Vec::new(), overflowed: 0, ruins: 0 }
     }
 }
 
@@ -166,6 +177,7 @@ impl Input {
         let me = session.me();
         self.keys();
         self.forget_the_dead(session.world());
+        self.mind_the_wall(session.world(), me);
         if self.trade.open {
             return;
         }
@@ -194,6 +206,28 @@ impl Input {
         self.notice();
     }
 
+    /// Notice a stretch of wall giving way, and say so.
+    fn mind_the_wall(&mut self, w: &World, me: PlayerId) {
+        let ruins = w
+            .buildings
+            .iter()
+            .filter(|b| {
+                b.owner == me
+                    && b.kind == Kind::Dike
+                    && b.state == sim::building::BuildState::Rubble
+            })
+            .count();
+        if ruins > self.ruins {
+            let n = ruins - self.ruins;
+            self.say(if n == 1 {
+                "a stretch of your wall has given way".to_owned()
+            } else {
+                format!("{n} stretches of your wall have given way")
+            });
+        }
+        self.ruins = ruins;
+    }
+
     fn keys(&mut self) {
         for (kind, _, key) in BUILDABLE {
             if is_key_pressed(key) {
@@ -212,8 +246,16 @@ impl Input {
             }
         }
         if is_key_pressed(KeyCode::Escape) {
+            // Everything, not just the tool.
+            //
+            // A selection survived Escape, and a player in the M10.5 rehearsal
+            // resorted to box-selecting empty ground far away to be rid of one.
+            // Right-click still only puts the *tool* down — one gesture, one
+            // meaning — so this is the cancel that cancels.
             self.tool = Tool::Select;
             self.trade.open = false;
+            self.selected.clear();
+            self.chosen = None;
         }
     }
 
@@ -270,6 +312,34 @@ impl Input {
             return;
         }
         let wanted = citizens.len();
+        // Whoever is free, first.
+        //
+        // It used to take them in id order, so filling a second farm emptied
+        // the first: the people already working there were as likely to be
+        // taken as the idle ones standing next to them. Both players in the
+        // M10.6 run named worker assignment as the worst part of the game and
+        // one spent about a third of its whole run on a rally-and-box-select
+        // workaround for exactly this.
+        //
+        // A stable sort, so among the free — and among the busy — the order is
+        // still id order and still the same on every peer. The command itself
+        // is a list of ids and `World::apply` reads it as given, so this
+        // decides only *which* people, never what happens to them.
+        let busy: Vec<bool> = citizens
+            .iter()
+            .map(|id| {
+                session
+                    .world()
+                    .citizens
+                    .get(id.0 as usize)
+                    .is_some_and(|c| c.workplace.is_some())
+            })
+            .collect();
+        let mut citizens: Vec<(bool, CitizenId)> =
+            busy.into_iter().zip(citizens).collect();
+        citizens.sort_by_key(|&(busy, _)| busy);
+        let citizens: Vec<CitizenId> = citizens.into_iter().map(|(_, id)| id).collect();
+
         let taken: Vec<CitizenId> = citizens.into_iter().take(room).collect();
         let sent = taken.len();
         self.issue(session, cmd(taken));
@@ -567,6 +637,47 @@ impl Input {
         self.ringed.clear();
 
         let w = session.world();
+
+        // What the city is doing, before who is married to whom.
+        //
+        // "There is no way to ask what the city is doing without hovering every
+        // building in turn" — both M10.6 accounts, and one of them said this
+        // tab was where it instinctively came to ask and that it could not
+        // answer. It can now.
+        let mut jobs: Vec<(&str, usize)> = Vec::new();
+        for (name, job) in [
+            ("farming", Some(sim::Job::Farmer)),
+            ("cutting wood", Some(sim::Job::Forester)),
+            ("quarrying", Some(sim::Job::Quarrier)),
+            ("building", Some(sim::Job::Builder)),
+            ("trading", Some(sim::Job::Trader)),
+            ("hauling", Some(sim::Job::Hauler)),
+            ("idle", None),
+        ] {
+            let n = w
+                .citizens
+                .iter()
+                .filter(|c| c.owner == me && c.alive() && !c.is_child() && c.job == job)
+                .count();
+            if n > 0 {
+                jobs.push((name, n));
+            }
+        }
+        let children = w
+            .citizens
+            .iter()
+            .filter(|c| c.owner == me && c.alive() && c.is_child())
+            .count();
+        let mut line: Vec<String> =
+            jobs.iter().map(|(name, n)| format!("{n} {name}")).collect();
+        if children > 0 {
+            line.push(format!("{children} too young"));
+        }
+        for (i, row) in ui::wrapped_words(&line.join(", "), 44).iter().take(2).enumerate() {
+            draw_text(row, left, y + 14.0 + i as f32 * 18.0, 15.0, palette::INK);
+        }
+        y += 52.0;
+
         let mine: Vec<&sim::Household> =
             w.households.iter().filter(|h| h.owner == me && h.alive()).collect();
         if mine.is_empty() {
@@ -854,11 +965,26 @@ impl Input {
             return format!("city {}'s {name}", b.owner.0);
         }
         if !b.standing_now() {
+            // The level, on a site as well as a standing building.
+            //
+            // Raising a dike adds a level and returns the segment to a site,
+            // so this row used to stop saying "level 1 of 4" at the exact
+            // moment the level changed and start saying "being built" — a
+            // player checking whether their click landed saw strictly less
+            // than before they clicked. One played a whole run in the M10.6
+            // account believing the interaction was broken, and its verdict on
+            // walls is therefore only ever about a level-one wall. **Nobody
+            // has yet played a run with a level-three wall in it.**
+            let level = if b.kind == Kind::Dike && b.level > 1 {
+                format!("level {} of {}, ", b.level, sim::balance::DIKE_MAX_LEVEL)
+            } else {
+                String::new()
+            };
             let want = b.outstanding();
             return if want.is_empty() {
-                format!("{name}: being built")
+                format!("{name}: {level}being built")
             } else {
-                format!("{name}: waiting for {}", cost_line(want))
+                format!("{name}: {level}waiting for {}", cost_line(want))
             };
         }
         let here = |f: fn(&sim::Citizen, sim::BuildingId) -> bool| {
@@ -889,7 +1015,25 @@ impl Input {
                 b.beds(),
                 level_note(b),
             ),
-            Kind::Dike => format!("{name}: level {} of {}", b.level, sim::balance::DIKE_MAX_LEVEL),
+            // Level, and how close it is to going.
+            //
+            // `strain` has existed since M3 and was drawn only as a darkening
+            // nobody could read. Both players in the M10.6 run watched a wall
+            // vanish from the map without a word and could not tell whether it
+            // had broken, been overtopped or been washed away — and neither
+            // could tell what level the coming flood needed, which is why one
+            // of them spent its last stone raising a guess.
+            Kind::Dike => format!(
+                "{name}: level {} of {}{}",
+                b.level,
+                sim::balance::DIKE_MAX_LEVEL,
+                match b.strain() {
+                    0 => String::new(),
+                    n if n >= 80 => format!(", {n}% - about to go"),
+                    n if n >= 40 => format!(", {n}% strained"),
+                    n => format!(", {n}% strained"),
+                },
+            ),
             _ => format!("{name}: {}", goods_line(b.store)),
         }
     }
@@ -1084,7 +1228,19 @@ impl Input {
         if segments == 0 {
             return;
         }
-        let text = format!("{segments} x dike - {stone} stone");
+        // What it costs in *hands*, beside what it costs in stone.
+        //
+        // The M10.6 run's finding about the wall was not that it was expensive:
+        // one player spent 220 stone of 648 and never noticed the cost. It was
+        // that the wall is paid for in food, invisibly — the people carrying
+        // stone to it are the people who carry grain, and building it caused
+        // the famine that killed five of its eight. Days-of-one-worker is the
+        // unit that says so before the stone is spent rather than after.
+        let ticks = segments as u32 * Kind::Dike.build_ticks();
+        let days = ticks as f32 / sim::balance::TICKS_PER_DAY as f32;
+        let text = format!(
+            "{segments} x dike - {stone} stone, {days:.1} days of one pair of hands"
+        );
         let m = measure_text(&text, None, 16, 1.0);
         let x = (ui.mouse.x + 14.0).min(LOGICAL_W - PANEL_W - m.width - 8.0);
         let y = (ui.mouse.y - 10.0).max(m.height + 4.0);

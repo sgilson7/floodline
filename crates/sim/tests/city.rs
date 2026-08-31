@@ -11,6 +11,7 @@ use sim::citizen::{Job, PlayerId, State};
 use sim::nav::Nav;
 use sim::world::World;
 use sim::BuildingId;
+use sim::Command;
 
 /// Somewhere legal for `kind`, searched outward from a player's hearth.
 fn spot(w: &World, p: u8, kind: Kind) -> (i32, i32) {
@@ -641,4 +642,48 @@ fn a_city_can_say_what_it_eats_and_how_long_the_larder_lasts() {
     assert_eq!(w.population(me), 0);
     assert_eq!(w.eaten_a_day(me), 0);
     assert_eq!(w.days_of_food(me), None, "nobody left to feed is not nought days");
+}
+
+/// Filling a second farm must not empty the first.
+///
+/// `Command::Assign` takes the citizens it is given, in the order it is given
+/// them, and the panel used to hand it the selection in id order — so sending
+/// "everybody" to a second farm was as likely to take the three already
+/// working the first as the three standing idle beside it. Both players in the
+/// M10.6 run named worker assignment as the worst part of the game, and one
+/// spent about a third of its run on a workaround for exactly this.
+///
+/// The ordering lives in `gui`, because it is about which people a *click*
+/// means. What `sim` promises, and what this pins, is the half that makes such
+/// an ordering possible at all: the command is a list and it is honoured as
+/// given, so choosing who goes is a decision the caller can make.
+#[test]
+fn assign_takes_the_citizens_it_is_given_in_the_order_given() {
+    let (mut w, mut nav) = a_working_city();
+    let me = PlayerId(0);
+    let farm = build(&mut w, 0, Kind::Farm);
+    for _ in 0..400 {
+        w.tick(&mut nav, &[]);
+    }
+
+    let free: Vec<_> = w
+        .citizens
+        .iter()
+        .filter(|c| c.owner == me && c.alive() && c.workplace.is_none())
+        .map(|c| c.id)
+        .collect();
+    assert!(free.len() >= 2, "need two idle citizens, found {}", free.len());
+
+    // Named in reverse, so "as given" and "in id order" cannot agree by luck.
+    let asked: Vec<_> = free.iter().rev().take(2).copied().collect();
+    w.apply(me, &Command::Assign { citizens: asked.clone(), building: farm })
+        .expect("two idle citizens fit a farm");
+
+    for id in &asked {
+        assert_eq!(
+            w.citizens[id.0 as usize].workplace,
+            Some(farm),
+            "citizen {id:?} was named and should have gone"
+        );
+    }
 }
