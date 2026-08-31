@@ -141,7 +141,12 @@ the panel:
   and come back with gold. They need a way across.
 * **9 nursery** — no nursery, no children.
 * **b builders hut** — free, and a roster rather than a workplace: nobody
-  stands in it. Anyone you assign to it becomes a **builder**, and a builder
+  stands in it. **Put people in it before you draw a wall.** A construction
+  site with nobody assigned to it never finishes and says only that it is
+  being built: in the M12.11 run one player put 440 stone into fifteen dike
+  segments that were never anything but holes, and was told at the end that a
+  wall it had never owned had given way. Hover a site — it says the percentage
+  and whether anybody is on it. Anyone you assign to it becomes a **builder**, and a builder
   takes a construction site first and carries loads only when there is no site
   to work on. That is the opposite of an unassigned citizen, who carries first
   and builds when there is nothing to carry. Assign as many as you like — the
@@ -206,9 +211,17 @@ Children do not work. They come of age two ages after they are born.
 
 ## Grow the city
 
-Your city is founded with eight people and both previous playtests ended
-*smaller* than they started. **This time, getting above eight is part of what
-you are testing.** Try for it, and say what it cost you.
+Your city is founded with eight people, and every playtest so far has ended
+*smaller* than it started. **Do not spend a run trying to change that.** A
+child comes of age twelve days after it is born and a run is eighteen days, so
+even a child born on day one works for a third of the game — and no city in
+four playtests has borne one at all. The buildings are on the menu and they do
+what they say; the arithmetic does not.
+
+This paragraph used to say the opposite two paragraphs before the one below it
+said this, and an M12.11 player split the difference and wasted seventy wood.
+If you want to try it anyway, that is your call as a player — but it is not
+what you are being asked to test.
 
 How a city grows, which is all the game will tell you and all you need:
 
