@@ -2123,3 +2123,59 @@ pair of hands is worth — and both say they are provisional. Ten against five
 means two round trips buys the first level and four buys the second, which is
 about an age of trading for a farm that feeds one more mouth. Nobody has played
 it.
+
+---
+
+## 2026-08-31 — Six silhouettes, and a way into the building
+
+M8. Two changes, and the second one is not only cosmetic.
+
+**The outline carries the job, not the colour.** The colour is already spoken
+for — it is whose city this is — and a second meaning on it would make a
+two-player map unreadable. So each of the six is a different *shape* over the
+head: a scythe leans, a saw is level, a pick is a wedge, a hammer is a block, a
+trader has a purse, and somebody unassigned carries nothing. Different shapes
+rather than different lengths of one, because they have to be told apart at
+eight pixels a cell as well as up close.
+
+**`nav::passable` gains its exception, and it is one rule: you may go inside
+the place you are going to.** The plan asked for "somebody whose workplace is
+that building", which a shared flow field cannot express — one field serves
+everybody walking to a granary, and a hauler with a delivery is not employed
+there but should still walk in at the door. `FlowField::build_into` takes the
+destination and opens that building's own cells; every other field still finds
+it solid, which `a_field_is_seeded_at_the_middle_and_reaches_the_whole_footprint`
+holds by checking a field aimed elsewhere cannot get through.
+
+**The field is seeded at the middle rather than over the whole footprint**, and
+that was the actual bug behind three farmers being one circle. Seeding every
+cell made the field *flat* across the building: the first cell anybody touched
+was as good as any other, so they all stopped on whichever corner the field
+reached first. One goal in the middle gives the inside a gradient.
+
+**Arriving is still at the building and not in it, and getting that wrong cost
+an hour.** The first version made a worker arrive only once it was on the
+footprint, which reads exactly like what the plan asked for and starved two
+cities: a farmer that has not "arrived" is still `Walking`, and a city of people
+permanently on their way somewhere eats and sleeps at the wrong times. What
+puts a worker inside its farm is the crowd — a one-step drift toward the middle
+for anybody `Working` at a standing building they are not standing on, in the
+pass where every other question about position is answered. The elbow-room push
+then spreads them through the inside, which is the part that stops three
+farmers being one circle.
+
+**The crowd's wall rule gained the exception rather than losing the rule.**
+`nobody_ends_a_tick_standing_in_a_wall` still holds; `indoors_here` is what it
+asks now, and it says yes to the inside of the building you work at or are
+walking to and no to everything else.
+
+**And a bug from M4 fell out of it.** `lay_road` bridged `Ground::Shallows`
+exactly, and a ford is water too — so a road routed over the ford laid road
+cells on it, every one was refused for standing on water, and the road came out
+with a hole in it that nothing reported. `Road::intact` then said the cities
+were not linked and the trade moved nothing. It bridges anything `watery` now.
+`two_cities_found_a_road_and_trade_for_three_days` also had to be wound back to
+the second day of the age: founding two cities and laying a road across a river
+takes four days of simulated time now, and the test's third day of trading had
+quietly become the impact day, so the flood took the road and the failure read
+as "trade moved nothing" rather than "the water broke the road".

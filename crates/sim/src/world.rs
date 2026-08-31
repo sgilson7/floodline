@@ -976,8 +976,13 @@ impl World {
             if self.building_at(x, y).is_some() {
                 continue; // an existing way, reused
             }
-            // A bridge where it must cross water, a road everywhere else.
-            let kind = if self.map.ground_at(x, y) == Ground::Shallows {
+            // A bridge where it must cross water, a road everywhere else —
+            // and **a ford is water**. This asked for `Shallows` exactly, so a
+            // road routed over the ford laid road cells on it, every one of
+            // them was refused for standing on water, and the road came out
+            // with a hole in it that nothing reported. `Road::intact` then said
+            // the two cities were not linked and the trade moved nothing.
+            let kind = if self.map.ground_at(x, y).watery() {
                 Kind::Bridge
             } else {
                 Kind::Road
@@ -1725,7 +1730,14 @@ impl World {
         // a legal order, and the field is seeded there whether it is passable
         // or not. Getting as close as possible and stopping is what the player
         // meant; walking onto the rock is not.
-        if !nav::passable(self, cx + dx, cy + dy) {
+        //
+        // The exception is the building you are walking to, which you may walk
+        // into — the same rule the field is built with.
+        let into = match self.citizens[i].dest {
+            Some(Dest::Building(id)) => Some(id),
+            _ => None,
+        };
+        if !nav::passable_into(self, cx + dx, cy + dy, into) {
             self.citizens[i].halt();
             return;
         }
@@ -1782,6 +1794,14 @@ impl World {
     }
 
     /// Whether citizen `i` has reached what it was walking to.
+    ///
+    /// Arriving is still *at* the building and not *in* it, and that is
+    /// deliberate. M8 was written the other way first — a worker arrives only
+    /// once it is on the footprint — and it starved two cities: a farmer that
+    /// has not "arrived" is still `Walking`, and a city of people permanently
+    /// on their way somewhere eats and sleeps at the wrong times. What puts a
+    /// worker inside its farm is the crowd, which may now push somebody into
+    /// the building they belong in and cannot push anybody else there.
     fn arrived(&self, i: usize, cx: i32, cy: i32) -> bool {
         match self.citizens[i].dest {
             None => true,

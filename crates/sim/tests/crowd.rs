@@ -62,6 +62,46 @@ fn tightest_of(w: &World, owner: PlayerId) -> i32 {
 }
 
 #[test]
+fn a_worker_may_stand_inside_the_building_it_works_at() {
+    // M8's exception, and the reason the rule below gains one rather than
+    // losing it: a farm's three workers used to pile up on whichever corner
+    // the flow field reached first, because the footprint was closed to them
+    // and the field was flat across it. They go in now — and only they do.
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+    let farm = build(&mut w, Kind::Farm);
+    let hands: Vec<sim::CitizenId> = w
+        .citizens
+        .iter()
+        .filter(|c| c.owner == ME)
+        .map(|c| c.id)
+        .take(3)
+        .collect();
+    w.apply(ME, &Command::Assign { citizens: hands.clone(), building: farm }).unwrap();
+
+    let inside: Vec<(i32, i32)> = w.buildings[farm.0 as usize].cells().collect();
+    let mut any_in = false;
+    for _ in 0..TICKS_PER_DAY {
+        w.tick(&mut nav, &[]);
+        if hands
+            .iter()
+            .any(|id| inside.contains(&w.citizens[id.0 as usize].pos.cell()))
+        {
+            any_in = true;
+        }
+        // And nobody else is ever in there.
+        for c in w.citizens.iter().filter(|c| c.alive() && !hands.contains(&c.id)) {
+            assert!(
+                !inside.contains(&c.pos.cell()),
+                "#{} walked through the farm it does not work at",
+                c.id.0
+            );
+        }
+    }
+    assert!(any_in, "a farmer never got inside its own farm");
+}
+
+#[test]
 fn nobody_ends_a_tick_standing_in_a_wall() {
     // Including the very first one. Every citizen is spawned on its hearth's
     // site, and a Hearth blocks movement, so at tick zero the whole founding

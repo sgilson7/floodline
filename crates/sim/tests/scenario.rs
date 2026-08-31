@@ -194,13 +194,36 @@ fn two_cities_found_a_road_and_trade_for_three_days() {
     let before_0 = w.treasury(PlayerId(0));
     let before_1 = w.treasury(PlayerId(1));
 
+    // Wound back to the second day of the age, so the three days of trade are
+    // three *quiet* days.
+    //
+    // Founding two cities, laying a road across a river and building every
+    // cell of it takes four days of simulated time, and it did not always: as
+    // the setup has grown this test drifted until its third day of trading was
+    // the impact day. The flood then took the road, `Road::intact` said the
+    // cities were not linked, and the failure read as "trade moved nothing"
+    // rather than "the water broke the road", which is design §6 working
+    // exactly as intended.
+    w.age_start_tick = 0;
+    w.tick = TICKS_PER_DAY;
+
     for _ in 0..TICKS_PER_DAY * 3 {
         w.tick(&mut nav, &[]);
     }
+    assert!(
+        w.day_of_age() < World::IMPACT_DAY,
+        "the trade days ran into the flood again"
+    );
 
     let after_0 = w.treasury(PlayerId(0));
     let after_1 = w.treasury(PlayerId(1));
-
+    for r in &w.roads {
+        let broken: Vec<_> = r.cells.iter().filter(|&&(x, y)| {
+            !w.building_at(x as i32, y as i32).is_some_and(|b| b.carries_traffic())
+        }).take(4).map(|&(x, y)| (x, y, w.map.ground_at(x as i32, y as i32),
+            w.building_at(x as i32, y as i32).map(|b| (b.kind, b.state)))).collect();
+        println!("road linked {} broken {:?}", w.linked(PlayerId(0), PlayerId(1)), broken);
+    }
     // City 0 gave food and got wood; city 1 the other way round. Wood is the
     // clean signal: neither city produces any, so every unit that moved got
     // there on somebody's back.

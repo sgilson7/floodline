@@ -16,6 +16,7 @@
 use crate::balance::*;
 use crate::fx::{Fx, V2};
 use crate::map::{Map, CELLS};
+use crate::citizen::State;
 use crate::nav;
 use crate::world::World;
 
@@ -141,16 +142,60 @@ impl World {
                 continue;
             }
             let want = me + push;
-            self.citizens[i].pos = self.somewhere_to_stand(me, want);
+            self.citizens[i].pos = self.somewhere_to_stand(i, me, want);
         }
 
-        // And nobody ends a tick inside a wall, whatever put them there.
+        // Workers drift into the building they work at.
+        //
+        // A step at a time, here in the crowd pass, and deliberately not in
+        // `arrived`: making a worker arrive only once it is *inside* was the
+        // first version and it starved two cities, because a farmer that has
+        // not arrived is still `Walking` and a city of people permanently on
+        // their way somewhere eats and sleeps at the wrong times. Where
+        // somebody stands is a question about position, so it is answered
+        // where every other question about position is.
+        //
+        // The elbow-room pass above then spreads them through the inside,
+        // which is what stops three farmers being one circle on a corner.
+        for i in 0..self.citizens.len() {
+            let c = &self.citizens[i];
+            if !c.alive() || c.state != State::Working {
+                continue;
+            }
+            let Some(id) = c.workplace else { continue };
+            let Some(b) = self.buildings.get(id.0 as usize) else { continue };
+            if !b.standing_now() {
+                continue;
+            }
+            let (cx, cy) = c.pos.cell();
+            if b.cells().any(|(x, y)| (x, y) == (cx, cy)) {
+                continue;
+            }
+            let (mx, my) = b.centre();
+            let step = V2::new(
+                Fx::cells((mx - cx).signum()),
+                Fx::cells((my - cy).signum()),
+            )
+            .with_len(Fx(WALK_SPEED));
+            let want = self.citizens[i].pos + step;
+            if self.standing_room_for(i, want) {
+                self.citizens[i].pos = want;
+            }
+        }
+
+        // And nobody ends a tick inside a wall, whatever put them there —
+        // **unless it is the building they belong in.**
+        //
+        // The rule gains an exception rather than losing the rule. A farmer
+        // stands inside its farm now (M8) and would otherwise be shoved back
+        // out of the door every tick by the very pass that is meant to stop
+        // people standing in walls.
         for i in 0..self.citizens.len() {
             if !self.citizens[i].alive() {
                 continue;
             }
             let (x, y) = self.citizens[i].pos.cell();
-            if nav::passable(self, x, y) {
+            if self.indoors_here(i, x, y) {
                 continue;
             }
             if let Some(out) = self.nearest_standing_room(x, y) {
@@ -159,28 +204,48 @@ impl World {
         }
     }
 
+    /// Whether citizen `i` may be standing on `(x, y)`: anywhere anybody may
+    /// stand, or inside the building it works at or is walking to.
+    fn indoors_here(&self, i: usize, x: i32, y: i32) -> bool {
+        if nav::passable(self, x, y) {
+            return true;
+        }
+        let c = &self.citizens[i];
+        let mine = match (c.workplace, c.dest) {
+            (Some(b), _) => Some(b),
+            (None, Some(crate::nav::Dest::Building(b))) => Some(b),
+            _ => None,
+        };
+        matches!(
+            (mine, self.building_at(x, y)),
+            (Some(mine), Some(b)) if b.id == mine
+        )
+    }
+
     /// `want`, unless that is inside something; then as far along the way as
     /// keeps its feet on ground somebody can stand on.
     ///
     /// Each axis on its own, so somebody pushed diagonally against a wall
     /// slides along it instead of stopping dead — which is what stops a crowd
     /// at a granary door from jamming solid.
-    fn somewhere_to_stand(&self, from: V2, want: V2) -> V2 {
+    fn somewhere_to_stand(&self, i: usize, from: V2, want: V2) -> V2 {
         let mut out = from;
         let try_x = V2::new(want.x, out.y);
-        if self.standing_room(try_x) {
+        if self.standing_room_for(i, try_x) {
             out = try_x;
         }
         let try_y = V2::new(out.x, want.y);
-        if self.standing_room(try_y) {
+        if self.standing_room_for(i, try_y) {
             out = try_y;
         }
         out
     }
 
-    fn standing_room(&self, at: V2) -> bool {
+    /// Whether one citizen may stand at `at` — which is anywhere anybody may
+    /// stand, plus the inside of the building they belong in.
+    fn standing_room_for(&self, i: usize, at: V2) -> bool {
         let (x, y) = at.cell();
-        nav::passable(self, x, y)
+        self.indoors_here(i, x, y)
     }
 
     /// The middle of the nearest cell anybody could stand in, searched in a

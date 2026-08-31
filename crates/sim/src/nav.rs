@@ -99,6 +99,26 @@ impl FlowField {
     /// two cells at the same cost must come off the queue in the same order on
     /// every machine, and the index is what makes that ordering total.
     pub fn build(world: &World, goals: &[(i32, i32)]) -> FlowField {
+        FlowField::build_into(world, goals, None)
+    }
+
+    /// The same, but able to walk *into* one building's footprint.
+    ///
+    /// A field built for `Dest::Building(id)` passes `Some(id)`, so the three
+    /// farmers walking to a farm go inside it instead of piling up on
+    /// whichever corner the field reached first. Everybody else is walking
+    /// somewhere else, on a different field, and still cannot walk through it.
+    ///
+    /// One rule and not two: **you may go inside the place you are going to**.
+    /// The plan says "somebody whose workplace is that building", which is a
+    /// narrower rule that a shared flow field cannot express — a hauler
+    /// carrying wheat to the granary is not employed there, and it should walk
+    /// in at the door like anybody with business inside.
+    pub fn build_into(
+        world: &World,
+        goals: &[(i32, i32)],
+        into: Option<crate::building::BuildingId>,
+    ) -> FlowField {
         use std::cmp::Reverse;
         use std::collections::BinaryHeap;
 
@@ -124,14 +144,14 @@ impl FlowField {
             let y = i as i32 / MAP_W;
 
             for (k, &(dx, dy)) in DIRS.iter().enumerate() {
+                let open = |x: i32, y: i32| passable_into(world, x, y, into);
                 let (nx, ny) = (x + dx, y + dy);
-                if !passable(world, nx, ny) {
+                if !open(nx, ny) {
                     continue;
                 }
                 // No cutting the corner of a building or a rock: a diagonal
                 // step needs both of the cells it squeezes between.
-                if dx != 0 && dy != 0 && (!passable(world, x + dx, y) || !passable(world, x, y + dy))
-                {
+                if dx != 0 && dy != 0 && (!open(x + dx, y) || !open(x, y + dy)) {
                     continue;
                 }
                 let step = enter_cost(world, nx, ny)
@@ -184,6 +204,26 @@ pub fn passable(world: &World, x: i32, y: i32) -> bool {
         Ground::Ford => world.water.depth_at(x, y) < WADE_DEPTH,
         Ground::Grass | Ground::Sand => true,
     }
+}
+
+/// Whether a cell can be walked, for somebody on their way into `into`.
+///
+/// The exception the plan asks for, and the only one: a building's own cells
+/// are open to whoever is walking to it. Everything else still cannot be
+/// walked through, which is what keeps a city a place with buildings in it
+/// rather than a field with decorations on.
+pub fn passable_into(
+    world: &World,
+    x: i32,
+    y: i32,
+    into: Option<crate::building::BuildingId>,
+) -> bool {
+    if let (Some(id), Some(b)) = (into, world.building_at(x, y)) {
+        if b.id == id && b.state != crate::building::BuildState::Rubble {
+            return Map::contains(x, y);
+        }
+    }
+    passable(world, x, y)
 }
 
 /// The cost of stepping onto a cell.
@@ -243,7 +283,12 @@ impl Nav {
 
         if stale {
             let goals = goal_cells(world, dest);
-            let field = FlowField::build(world, &goals);
+            // A field aimed at a building can walk into it. See `build_into`.
+            let into = match dest {
+                Dest::Building(id) => Some(id),
+                Dest::Cell(..) => None,
+            };
+            let field = FlowField::build_into(world, &goals, into);
             if self.fields.insert(dest, field).is_none() {
                 self.order.push(dest);
                 if self.order.len() > NAV_CACHE_MAX {
@@ -275,7 +320,15 @@ pub fn goal_cells(world: &World, dest: Dest) -> Vec<(i32, i32)> {
     match dest {
         Dest::Cell(x, y) => vec![(x as i32, y as i32)],
         Dest::Building(id) => match world.buildings.get(id.0 as usize) {
-            Some(b) if b.state != crate::building::BuildState::Rubble => b.cells().collect(),
+            // Seeded at the middle rather than over the whole footprint.
+            //
+            // Every cell at distance zero means the field is flat across the
+            // building, so the first cell of it anybody touches is as good as
+            // any other and three farmers stack on whichever corner they
+            // reached — which is what a farm has looked like since phase 1.
+            // One goal in the middle gives the inside of the building a
+            // gradient, and they spread through it.
+            Some(b) if b.state != crate::building::BuildState::Rubble => vec![b.centre()],
             _ => Vec::new(),
         },
     }
@@ -515,16 +568,44 @@ mod tests {
     }
 
     #[test]
-    fn a_field_is_seeded_from_a_whole_footprint() {
+    fn a_field_is_seeded_at_the_middle_and_reaches_the_whole_footprint() {
+        // **This used to seed every cell of the footprint**, which made the
+        // field flat across the building: the first cell of it anybody touched
+        // was as good as any other, so three farmers stacked on whichever
+        // corner they reached first and a farm looked like one person. One
+        // goal in the middle gives the inside a gradient and they spread
+        // through it — and every cell is still reachable, because a field
+        // aimed at a building may walk into it.
         let (mut w, hx, hy) = open_world();
         let id = w.place(PlayerId(0), Kind::Farm, Facing::EastWest, hx + 3, hy - 1).unwrap();
         let cells: Vec<(i32, i32)> = w.buildings[id.0 as usize].cells().collect();
         assert_eq!(cells.len(), 9);
+        let (mx, my) = w.buildings[id.0 as usize].centre();
 
         let mut nav = Nav::new();
         let f = nav.field(&w, Dest::Building(id));
+        assert_eq!(f.dist_at(mx, my), 0, "the middle is the goal");
         for &(x, y) in &cells {
-            assert_eq!(f.dist_at(x, y), 0, "({x},{y}) of the farm is not a goal");
+            assert!(f.reachable(x, y), "({x},{y}) of the farm cannot be walked to");
+            if (x, y) != (mx, my) {
+                assert!(f.dist_at(x, y) > 0, "({x},{y}) is flat with the middle");
+            }
+        }
+
+        // And nobody else may walk through it, once it is built: a field
+        // aimed somewhere else finds a standing farm solid. A *site* is not
+        // solid and never was — builders have to stand in it.
+        for g in crate::building::Good::ALL {
+            let want = w.buildings[id.0 as usize].outstanding().get(g);
+            if want > 0 {
+                w.deliver_to(id, g, want);
+            }
+        }
+        assert!(w.build_at(id, Kind::Farm.build_ticks()));
+        let mut nav = Nav::new();
+        let past = nav.field(&w, Dest::Cell((hx + 7) as u8, hy as u8));
+        for &(x, y) in &cells {
+            assert!(!past.reachable(x, y), "({x},{y}) was a thoroughfare");
         }
     }
 

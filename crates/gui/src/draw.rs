@@ -120,14 +120,55 @@ fn citizens(w: &World, selected: &[sim::CitizenId]) {
         if selected.contains(&c.id) {
             draw_circle_lines(px, py, 5.0, 1.0, palette::INK);
         }
+        // A body and two legs, in the city's colour, and then what the job
+        // adds. Everybody was the same circle until M8 and a player could not
+        // tell a farmer from a builder at any zoom.
+        //
+        // Drawn with the primitives everything else is drawn with, and the
+        // *outline* rather than the colour carries the job — the colour is
+        // already spoken for by whose city it is, and a second meaning on it
+        // would make a two-player map unreadable.
         draw_circle(px, py, 2.0, colour);
         draw_line(px, py + 1.5, px - 1.5, py + 4.0, 1.0, colour);
         draw_line(px, py + 1.5, px + 1.5, py + 4.0, 1.0, colour);
+        job_mark(px, py, c.job, colour);
 
         // Somebody in trouble is worth seeing from across the map.
         if c.swept {
             draw_circle_lines(px, py, 4.0, 1.0, palette::ALARM);
         }
+    }
+}
+
+/// What a citizen is carrying, in one or two strokes over its head.
+///
+/// Six of them, and they have to be told apart at the fit — eight pixels a
+/// cell — as well as up close, so each is a different *shape* rather than a
+/// different length of the same one: a scythe leans, a saw is level, a pick
+/// is a wedge, a hammer is a block, a trader has a purse, and somebody with
+/// no job carries nothing at all.
+fn job_mark(px: f32, py: f32, job: Option<sim::Job>, colour: Color) {
+    let Some(job) = job else { return };
+    match job {
+        // A scythe: a long stroke leaning back over the shoulder.
+        sim::Job::Farmer => draw_line(px - 2.5, py - 3.5, px + 1.5, py + 0.5, 1.0, colour),
+        // A saw: level, held out in front.
+        sim::Job::Forester => draw_line(px - 3.0, py - 2.0, px + 3.0, py - 2.0, 1.0, colour),
+        // A pick: two strokes meeting at a point.
+        sim::Job::Quarrier => {
+            draw_line(px - 3.0, py - 3.0, px, py - 1.0, 1.0, colour);
+            draw_line(px + 3.0, py - 3.0, px, py - 1.0, 1.0, colour);
+        }
+        // A hammer: a block on a short handle.
+        sim::Job::Builder => {
+            draw_line(px, py - 1.0, px, py - 3.5, 1.0, colour);
+            draw_rectangle(px - 2.0, py - 4.5, 4.0, 1.5, colour);
+        }
+        // A purse.
+        sim::Job::Trader => draw_circle(px + 2.5, py - 1.0, 1.5, palette::WARNING),
+        // A hauler's arms are full or they are not; the load is drawn by the
+        // errand and not by the job, so this adds nothing.
+        sim::Job::Hauler => {}
     }
 }
 
