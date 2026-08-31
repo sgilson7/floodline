@@ -633,3 +633,83 @@ fn which_dikes_break() {
         }
     }
 }
+
+#[test]
+fn a_course_still_going_up_does_not_say_it_was_never_started() {
+    // M12.7, fault 8. An M11.9 player watched a segment read `level 1 of 4`,
+    // clicked it two minutes later to raise it again, and was told **"it is
+    // not built yet"** - about a wall they had watched go up. They spent the
+    // rest of the run believing the interaction was broken.
+    //
+    // Reproduced, and the message was the thing that was wrong rather than the
+    // rule. Raising adds the level *at once* and puts the segment back to a
+    // site, so between the raise and the last builder-tick the segment really
+    // is not standing - but it is not unbuilt either, and the two want
+    // different sentences.
+    use sim::building::{BuildState, Facing, Good, Kind};
+    use sim::command::Command;
+    use sim::world::{RuleError, World};
+    use sim::PlayerId;
+
+    let me = PlayerId(0);
+    let mut w = World::new(31, 2);
+    let (hx, hy) = w.map.hearth_sites[0];
+
+    let mut dike = None;
+    'ring: for r in 4..40i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (x, y) = (hx + dx, hy + dy);
+                if w.can_place(me, Kind::Dike, Facing::EastWest, x, y).is_ok() {
+                    w.apply(
+                        me,
+                        &Command::Place {
+                            kind: Kind::Dike,
+                            facing: Facing::EastWest,
+                            x: x as u8,
+                            y: y as u8,
+                        },
+                    )
+                    .unwrap();
+                    dike = Some(w.buildings.last().unwrap().id);
+                    break 'ring;
+                }
+            }
+        }
+    }
+    let dike = dike.expect("nowhere for a dike on seed 31");
+
+    // A site nobody has started really is not built yet, and says so.
+    assert_eq!(w.raise_dike(me, dike), Err(RuleError::NotStanding));
+
+    for g in Good::ALL {
+        let want = w.buildings[dike.0 as usize].outstanding().get(g);
+        if want > 0 {
+            w.deliver_to(dike, g, want);
+        }
+    }
+    assert!(w.build_at(dike, Kind::Dike.build_ticks()));
+    assert_eq!(w.buildings[dike.0 as usize].level, 1);
+
+    // Raised: level 2 at once, and back to a site while the course goes on.
+    w.raise_dike(me, dike).unwrap();
+    assert_eq!(w.buildings[dike.0 as usize].level, 2);
+    assert_eq!(w.buildings[dike.0 as usize].state, BuildState::Site);
+
+    // Clicking it again is refused - correctly - and must not borrow the
+    // sentence a never-started segment uses.
+    assert_eq!(
+        w.raise_dike(me, dike),
+        Err(RuleError::StillRising),
+        "a course part-way up said it had never been started"
+    );
+    assert_eq!(RuleError::StillRising.to_message(), "that course is still going up");
+    assert_ne!(
+        RuleError::StillRising.to_message(),
+        RuleError::NotStanding.to_message(),
+        "the two states a player has to tell apart still read the same"
+    );
+}

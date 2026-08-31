@@ -82,6 +82,16 @@ pub enum RuleError {
     CannotMove,
     /// A child. It does not haul, farm or build.
     TooYoung,
+    /// A dike segment part-way through a course it has already been given.
+    ///
+    /// Not the same as `NotStanding`, and telling them apart is the whole
+    /// reason this exists. Raising a dike adds the level *at once* and puts
+    /// the segment back to a site, so a player who raises a segment and then
+    /// clicks it again is told "it is not built yet" about a wall they watched
+    /// reach level 1 two minutes earlier. That is true of the state and false
+    /// about what happened, and an M11.9 player spent a run believing the
+    /// interaction was broken.
+    StillRising,
 }
 
 impl RuleError {
@@ -117,6 +127,7 @@ impl RuleError {
             RuleError::TooPoor => "not enough gold",
             RuleError::CannotMove => "that one stays where it is",
             RuleError::TooYoung => "too young to work",
+            RuleError::StillRising => "that course is still going up",
         }
     }
 }
@@ -464,8 +475,23 @@ impl World {
         if b.owner != owner {
             return Err(RuleError::NotYours);
         }
-        if b.kind != Kind::Dike || b.state != BuildState::Standing {
+        if b.kind != Kind::Dike {
             return Err(RuleError::NotStanding);
+        }
+        if b.state != BuildState::Standing {
+            // A segment that already has a course on it is *rising*, not
+            // unbuilt, and the two want different sentences. See
+            // `RuleError::StillRising`.
+            // Level *two* and up, not one: a dike site starts at level one,
+            // because one is the level a finished segment has. A site at level
+            // one has never been finished; a site above it has been finished
+            // and given another course, which is the state a player watches go
+            // from `level 1 of 4` to `level 2 of 4, being built`.
+            return Err(if b.level >= 2 && b.state == BuildState::Site {
+                RuleError::StillRising
+            } else {
+                RuleError::NotStanding
+            });
         }
         if b.level >= DIKE_MAX_LEVEL {
             return Err(RuleError::TooHigh);

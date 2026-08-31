@@ -134,6 +134,19 @@ pub struct Input {
     /// shared a line. This one accumulates: a flood that takes eight people
     /// reads `8 drowned` and not `1 drowned`, eight times.
     toll: Option<(u32, u32, u32, f64)>,
+    /// Something that happened to the city, in a slot a refusal cannot take.
+    ///
+    /// The same fault as the toll, one building along. M11.4 added a message
+    /// for a wall giving way and city 1 watched almost its whole dike
+    /// disappear between ages without ever seeing it - because `say` has one
+    /// slot and an ordinary click-refusal in the same frame overwrites
+    /// anything in it.
+    ///
+    /// Deaths get their own slot because they *accumulate*; a wall breaking
+    /// and people standing in the flood do not, so they share this one and the
+    /// most recent wins. What none of them may do any more is lose to "you
+    /// clicked a full building".
+    report: Option<(String, f64)>,
     /// How many of this player's people were in deep water last frame.
     wading: usize,
     /// How many households this player has, for the tab that lists them.
@@ -162,7 +175,8 @@ impl Default for Input {
         Input { tool: Tool::Select, selected: Vec::new(), drag: None, trade: Draft::default(),
                 notice: None, wall_hint: None, chosen: None,
                 tab: Tab::Tools, ringed: Vec::new(), overflowed: 0, ruins: 0,
-                buried: None, toll: None, wading: 0, households_count: 0 }
+                buried: None, toll: None, report: None, wading: 0,
+                households_count: 0 }
     }
 }
 
@@ -287,6 +301,7 @@ impl Input {
         }
         self.wall_cost(ui);
         self.toll();
+        self.happened();
         self.notice();
     }
 
@@ -336,6 +351,25 @@ impl Input {
         let fresh = self.toll.is_none_or(|(_, _, _, at)| now - at > TOLL_WINDOW);
         let (d, s, o, _) = if fresh { (0, 0, 0, now) } else { self.toll.unwrap() };
         self.toll = Some((d + drowned, s + starved, o + other, now));
+    }
+
+    /// The last thing that happened, on its own line above the dead.
+    fn happened(&mut self) {
+        let Some((text, at)) = self.report.clone() else { return };
+        let age = get_time() - at;
+        if age > TOLL_SECONDS {
+            self.report = None;
+            return;
+        }
+        let fade = (1.0 - (age / TOLL_SECONDS) as f32).min(0.5) / 0.5;
+        let m = measure_text(&text, None, 20, 1.0);
+        let x = (LOGICAL_W - PANEL_W) / 2.0 - m.width / 2.0;
+        let plate = Rect::new(x - 18.0, LOGICAL_H - 140.0, m.width + 36.0, 34.0);
+        draw_rectangle(plate.x, plate.y, plate.w, plate.h,
+                       Color { a: 0.86 * fade, ..palette::PANEL });
+        draw_rectangle_lines(plate.x, plate.y, plate.w, plate.h, 1.0,
+                             Color { a: fade, ..palette::WARNING });
+        draw_text(&text, x, LOGICAL_H - 116.0, 20.0, Color { a: fade, ..palette::WARNING });
     }
 
     /// The dead, on their own line above the refusals.
@@ -406,7 +440,7 @@ impl Input {
             } else {
                 "wading"
             };
-            self.say(if n == 1 {
+            self.report(if n == 1 {
                 format!("somebody is in the water, {how} - choose them and send them uphill")
             } else {
                 format!("{n} of your people are in the water, {how} - send them uphill")
@@ -428,7 +462,7 @@ impl Input {
             .count();
         if ruins > self.ruins {
             let n = ruins - self.ruins;
-            self.say(if n == 1 {
+            self.report(if n == 1 {
                 "a stretch of your wall has given way".to_owned()
             } else {
                 format!("{n} stretches of your wall have given way")
@@ -483,6 +517,12 @@ impl Input {
 
     fn say(&mut self, text: impl Into<String>) {
         self.notice = Some((text.into(), get_time()));
+    }
+
+    /// Something that happened, rather than a reply to something done. Never
+    /// in the same slot as a refusal — see `report`.
+    fn report(&mut self, text: impl Into<String>) {
+        self.report = Some((text.into(), get_time()));
     }
 
     fn issue(&mut self, session: &mut Session, cmd: Command) {

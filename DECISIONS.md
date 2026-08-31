@@ -2896,3 +2896,67 @@ gap is that **no test anywhere put a joiner in a room with more than one peer
 in it.** Every test was a star with one edge, which is the shape this hides
 behind. `rejoin.py` now has a room where two joiners meet before the host
 arrives, which is the browser form of the same thing.
+
+---
+
+## 2026-08-31 — Three slots, not one: a reply, a report, and a toll
+
+`Input::say` had one slot and everything went into it. A refusal, a wall giving
+way, people standing in the flood, and the dead all competed for the same line
+and the last one in a frame won.
+
+That cost the M11.9 run three separate findings, and they are all the same
+fault. City 0 lost eight people and read *"1 drowned"* throughout, because each
+death overwrote the last. City 1 never saw a death message at all, because its
+own click-refusal landed in the same frame. And city 1 watched almost its whole
+dike disappear between ages without ever seeing the message M11.4 added for
+exactly that, for the same reason.
+
+**They were never the same kind of message.** A refusal is a *reply* to
+something the player just did, and it is only interesting while they are
+wondering what happened — that is why M11.7 made it linger and dim rather than
+vanish. A wall breaking is a *report*: nobody asked, it is news, and it wants
+to be readable a few seconds later by somebody who was looking elsewhere. The
+dead are a *toll*: they arrive several to a frame and the number is the point,
+so they accumulate rather than replace.
+
+Three slots, stacked above the map and above each other: `report` at 140 above
+the foot, `toll` at 96, `notice` at 52. None can take another's line. The toll
+adds within `TOLL_WINDOW` (four seconds — long enough to keep one surge on one
+line, short enough that a starvation days later starts a new one) and stays for
+`TOLL_SECONDS` (twelve, against a refusal's four and a half, because nobody
+asked for it and the player may well have been looking at the map).
+
+**This is in the panel's free space, not its budget.** All three are drawn over
+the map, centred, not in the right-hand panel — so nothing here comes out of
+the eighty-one pixels between the trade offer and `VARIABLE_FLOOR`.
+
+## 2026-08-31 — A rising course is not an unbuilt one
+
+Raising a dike adds the level *at once* and returns the segment to a site, so
+between the click and the last builder-tick a raised segment is genuinely not
+standing. `raise_dike` reported that as `NotStanding`, whose message is "it is
+not built yet" — and an M11.9 player who watched a segment reach `level 1 of 4`
+and clicked it again two minutes later was told their wall had never been
+built. They spent the rest of the run believing the interaction was broken.
+
+`RuleError::StillRising`, "that course is still going up". The rule did not
+change and should not: the refusal is correct, and only the sentence was wrong.
+
+The condition is `level >= 2 && state == Site`, and the two is load-bearing. A
+dike *site* starts at level one, because one is the level a finished segment
+has — so `level >= 1` is true of a segment nobody has started. Level two and
+above at a site means finished once and given another course, which is exactly
+the state the panel draws as `level 2 of 4, being built`.
+
+## 2026-08-31 — Fault 9, a client with no score screen: not reproduced
+
+`main.rs` returns to the lobby on Escape or Enter once the run is over, and
+nothing else drops the session. The M11.9 agent presses keys — that is what an
+agent does — and the lobby is one keypress away from the score screen for as
+long as the score screen is up.
+
+Nothing was changed. If it recurs with a human at the keyboard it is a real
+fault and this paragraph is wrong; until then, an agent that pressed Enter is
+the whole of the explanation and the alternative is to make the score screen
+harder to leave, which would be worse.
