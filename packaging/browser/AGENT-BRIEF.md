@@ -71,6 +71,17 @@ start something you cannot yet pay for, because your people haul the materials
 to the site over time and build it there. Nothing builds itself: somebody has
 to be free to do it.
 
+**Not every cell will take a building.** Rock, water and ground already spoken
+for will refuse. Two things tell you, and both are on the map rather than in
+the panel:
+
+* with a build tool held, the square under the cursor is shaded **green if it
+  will go there and red if it will not** — so `hover-cell` then `shot` before
+  committing to ground you are unsure of;
+* a refused click writes a line **under the map** saying why. `panel` includes
+  that line at the bottom of the image it gives you. Read it: a click that
+  seems to have done nothing has almost always been answered.
+
 * **3 granary** — the only place food is kept, and the only place it is eaten.
 * **2 farm** — the only thing that grows food.
 * **1 cottage** — beds. Two adults sharing a fed cottage become a household.

@@ -16,7 +16,11 @@ here, and `camera.py` is the check that says the arithmetic is right when the
 camera is where this expects it.
 
     shot [path]                  the whole window
-    panel [path]                 the side panel only, which is cheaper to read
+    panel [path]                 the side panel, with the line under the map
+                                 stitched beneath it - that line is where a
+                                 refusal is written, and cropping it away is
+                                 how both players in M10.5 came to believe
+                                 their clicks were being ignored
     rows [path]                  the status line and the three rows at the foot
     frame                        press 0: the whole map again, camera reset
     key <Name>                   Digit1..Digit9, KeyR, KeyP, KeyM, Escape, ...
@@ -84,8 +88,33 @@ def main():
         if verb == "shot":
             save()
         elif verb == "panel":
-            save((LOGICAL_W - PANEL_W, 0.0, LOGICAL_W, LOGICAL_H),
-                 f"/tmp/floodline-panel-{port}.png")
+            # The panel *and* the line under the map, stitched together.
+            #
+            # They are far apart on screen and the second one is easy to crop
+            # away, which is exactly what this verb used to do. A refusal — why
+            # a building would not go there, how many of the eight were taken —
+            # is written under the *map*, at `LOGICAL_H - 52` in `input.rs`, so
+            # an agent told to prefer `panel` because it is cheaper could not
+            # see a single one. Both players in the M10.5 rehearsal reported
+            # placements that "silently did nothing"; neither was silent, and
+            # neither could have known that.
+            path = out or f"/tmp/floodline-panel-{port}.png"
+            img = Image.open(io.BytesIO(page.screenshot())).convert("RGB")
+            d = V.dpr
+
+            def box(x0, y0, x1, y1):
+                a, b = V.css(x0, y0)
+                c, e = V.css(x1, y1)
+                return img.crop((int(a * d), int(b * d), int(c * d), int(e * d)))
+
+            side = box(LOGICAL_W - PANEL_W, 0.0, LOGICAL_W, LOGICAL_H)
+            notice = box(0.0, LOGICAL_H - 60.0, LOGICAL_W - PANEL_W, LOGICAL_H - 8.0)
+            both = Image.new("RGB", (max(side.width, notice.width),
+                                     side.height + notice.height))
+            both.paste(side, (0, 0))
+            both.paste(notice, (0, side.height))
+            both.save(path)
+            print(path)
         elif verb == "rows":
             # The status line and the three at the foot: what is being waited
             # on, and whether the peers are keeping step.
