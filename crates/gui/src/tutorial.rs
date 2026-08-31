@@ -168,15 +168,17 @@ pub fn next_thing(w: &World, me: PlayerId) -> Option<String> {
     if standing(Kind::TradingPost) && !working(Kind::TradingPost) {
         return Some("nobody is at the trading post: right-click it to send a mule out".to_owned());
     }
-    // Then the next generation.
-    if standing(Kind::Cottage) && !placed(Kind::Nursery) {
-        return Some("press 9 for a nursery: no nursery, no children".to_owned());
-    }
-    if standing(Kind::Nursery)
-        && !w.households.iter().any(|h| h.owner == me && h.alive())
-    {
-        return Some("put two people in one cottage: a day of that makes a household".to_owned());
-    }
+    // **The next generation is no longer asked for.** M12.10 measured whether
+    // growing pays inside a three-age run and the answer is that it cannot:
+    // `COMING_OF_AGE` is twelve days of an eighteen-day run, so only a child
+    // born in the first six days ever lifts anything - and no city in this
+    // game has ever borne a child at all, for reasons in DECISIONS.md. Telling
+    // a player to do something that cannot pay back inside the run they are
+    // playing is worse than not mentioning it, and both M11.9 players spent
+    // real days on this line.
+    //
+    // The buildings are still there and still work; the ladder simply stops
+    // recommending them.
     if w.treasury(me).gold >= sim::balance::UPGRADE_GOLD {
         return Some("you have gold: click a farm and level it - a level is one more pair of hands".to_owned());
     }

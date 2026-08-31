@@ -3108,3 +3108,70 @@ median eleven units of relief, a wall across a saddle is a different purchase
 from a ring around a city, and nobody has played a run that could see the
 saddle. **That is a question for the next run**, and the overlay is what makes
 it askable.
+
+---
+
+## 2026-08-31 — Growing does not pay in three ages, and has never worked at all
+
+M12.10 asked whether growth is worth doing now that M11 fixed `CHILD_FOOD`.
+`playtest::whether_growing_pays_inside_three_ages` is the instrument, and the
+first thing it found was that **the `grow` strategy has never grown anything.**
+
+Its build plan was `[Farm, Granary, Cottage, Cottage, Farm]` — no nursery, and
+nothing anywhere put two people in one cottage. So every run of
+`three_full_runs_of_each_strategy` ever taken, in every milestone, has had a
+column labelled `grow` that measured *a city with two spare cottages*. That is
+the M11 lesson in the other direction: `how_a_city_grows` arranged the
+condition it was measuring, and this one never arranged it at all.
+
+Fixed — the plan builds a nursery and a third cottage and pairs people up — and
+then, across four seeds:
+
+    seed        homed  households  settled  nurseries/spare beds  toward a child  born
+    31              8           2        2                 1/4          176/3600     0
+    1000003         8           2        2                 0/8          267/3600     0
+    4043362590      8           2        2                 1/6            0/3600     0
+    99              8           2        2                 1/4            0/3600     0
+
+**Households form. Households settle. No city has ever borne a child.** M12.A
+fixed the first gate of at least four.
+
+1. **`CHILD_FOOD` at `FED_ENOUGH`** — fixed in M11, and it is why the others
+   were never visible.
+2. **A household is "the lowest two ids currently homed in this cottage."**
+   Citizens take a bed to sleep in whether or not anybody told them to, so a
+   third resident moving into the same cottage produces a *different* pair,
+   the existing household is no longer found, and a new one is pushed with its
+   counter at nought. Three to four households are created per run for two
+   concurrent ones, and the orphaned ones never advance again.
+3. **`toward_child` needs `CHILD_TICKS` — 3 600 *consecutive* ticks** fed and
+   with a spare bed. Nobody stays above any bar for three days running: a
+   citizen eats at `HUNGRY`, stops at `FED_ENOUGH` and dips further walking to
+   the granary. And the spare bed is not spare, because the sim houses
+   everybody: eight people fill two four-bed cottages exactly.
+4. **`COMING_OF_AGE` is twelve days of an eighteen-day run.** Even with all of
+   the above working, only a child born in the first six days ever lifts
+   anything, and the first six days are the age with no wood to spare for
+   cottages and a starvation clock on day four. City 0 reasoned its way to this
+   during the M11.9 run without being able to see any of the rest.
+
+**The decision is (4), and it decides the others.** Growth cannot pay inside a
+three-age run whatever is done to the mechanism, so the mechanism is not worth
+changing on the strength of this. **The amber line stops asking for it.** The
+nursery and the cottage are still on the build menu and still do what they say;
+what has gone is a tutorial telling a player to spend four days on something
+that cannot pay back before the run ends. Both M11.9 players spent real days on
+that line.
+
+**Three speculative fixes were written and reverted**, and that is recorded
+because somebody will otherwise write them again. Pausing `together` instead of
+resetting it, pausing `toward_child` instead of resetting it, and dropping the
+spare-bed reset each looked right and each produced **byte-identical**
+measurements, because none of them is the binding constraint — (2) is. A rule
+change that fixes nothing observable does not ship, however good the reasoning
+behind it.
+
+**What growth needs, when somebody comes back to it**: a household that is a
+stable pair rather than a query over whoever is sleeping there, and a run long
+enough for a child to grow up in. Neither is a balance constant and neither
+belongs in a milestone that was asked to decide whether to keep asking for it.

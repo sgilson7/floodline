@@ -79,6 +79,18 @@ struct Report {
     at_the_fire: Vec<u16>,
     /// Stone in hand on the day the water came.
     stone_on_the_day: Vec<u16>,
+    /// Children born, children who reached `COMING_OF_AGE`, and adult-ticks
+    /// those grown children actually worked. M12.10's question.
+    born: u32,
+    came_of_age: u32,
+    adult_ticks: u32,
+    households: u32,
+    settled: u32,
+    homed: u32,
+    nurseries: u32,
+    spare_beds: u32,
+    toward: u32,
+    made: u32,
     ages: u32,
 }
 
@@ -129,6 +141,16 @@ fn play(seed: u64, play: Play) -> Report {
         wall_cost: 0,
         at_the_fire: Vec::new(),
         stone_on_the_day: Vec::new(),
+        born: 0,
+        came_of_age: 0,
+        adult_ticks: 0,
+        households: 0,
+        settled: 0,
+        homed: 0,
+        nurseries: 0,
+        spare_beds: 0,
+        toward: 0,
+        made: 0,
         ages: 0,
     };
 
@@ -138,10 +160,33 @@ fn play(seed: u64, play: Play) -> Report {
     // six half-built sites when the water arrives.
     // Food first, and a granary the same day: a citizen can only eat at a
     // granary, and the founding party's own food empties inside one day.
-    let plan: Vec<Kind> = if play.builds() {
-        vec![Kind::Farm, Kind::Granary, Kind::Cottage, Kind::Cottage, Kind::Farm]
-    } else {
-        Vec::new()
+    //
+    // **The `grow` plan grows, since M12.10.** It was
+    // `[Farm, Granary, Cottage, Cottage, Farm]` for every strategy that builds
+    // anything - no nursery, and nobody ever put two people in one cottage. So
+    // across every seed and every run of this table, the column called "grow"
+    // produced **nought children**, and what it actually measured was a city
+    // with two spare cottages. The same fault as `how_a_city_grows`, one
+    // milestone later and in the other direction: that probe arranged the
+    // condition it was measuring, and this one never arranged it at all.
+    let plan: Vec<Kind> = match play {
+        p if !p.builds() => Vec::new(),
+        Play::Grow | Play::Both => vec![
+            Kind::Farm,
+            Kind::Granary,
+            Kind::Cottage,
+            Kind::Cottage,
+            Kind::Nursery,
+            // A *third* cottage, and it is the finding rather than a tweak.
+            // Citizens take a bed to sleep in whether or not anybody told them
+            // to, so eight people fill two four-bed cottages exactly - and
+            // `have_children` needs a spare bed. A city that had housed
+            // everybody was a city that could not have a child, and nothing
+            // anywhere says so.
+            Kind::Cottage,
+            Kind::Farm,
+        ],
+        _ => vec![Kind::Farm, Kind::Granary, Kind::Cottage, Kind::Cottage, Kind::Farm],
     };
     let mut placed = 0usize;
     let mut last_day = u32::MAX;
@@ -179,6 +224,9 @@ fn play(seed: u64, play: Play) -> Report {
             // with no food at the hearth at all. A player builds a wall out of
             // the hands the harvest can spare, not the other way about.
             assign_to_farms(&mut w);
+            if play == Play::Grow || play == Play::Both {
+                pair_them_up(&mut w);
+            }
             if play == Play::Dike || play == Play::Both {
                 man_the_wall(&mut w);
             }
@@ -252,7 +300,65 @@ fn play(seed: u64, play: Play) -> Report {
         }
 
         let age_before = w.age();
+        let children_before = w
+            .citizens
+            .iter()
+            .filter(|c| c.owner == ME && c.alive() && c.is_child())
+            .count();
+        let people_before =
+            w.citizens.iter().filter(|c| c.owner == ME && c.alive()).count();
         w.tick(&mut nav, &[]);
+        // Births and comings-of-age, counted by watching rather than by
+        // instrumenting `sim`. A birth adds a citizen who is a child; a coming
+        // of age turns one into an adult without the count moving.
+        let children_now = w
+            .citizens
+            .iter()
+            .filter(|c| c.owner == ME && c.alive() && c.is_child())
+            .count();
+        let people_now = w.citizens.iter().filter(|c| c.owner == ME && c.alive()).count();
+        report.born += people_now.saturating_sub(people_before) as u32;
+        // Fewer children with no fewer people is somebody who grew up.
+        if children_now < children_before && people_now >= people_before {
+            report.came_of_age += (children_before - children_now) as u32;
+        }
+        report.adult_ticks += report.came_of_age;
+        report.households = report.households.max(
+            w.households.iter().filter(|h| h.owner == ME && h.alive()).count() as u32,
+        );
+        report.settled = report.settled.max(
+            w.households.iter().filter(|h| h.owner == ME && h.alive() && h.settled()).count() as u32,
+        );
+        report.made = report.made.max(w.households.len() as u32);
+        report.toward = report.toward.max(
+            w.households
+                .iter()
+                .filter(|h| h.owner == ME && h.alive())
+                .map(|h| h.toward_child)
+                .max()
+                .unwrap_or(0),
+        );
+        report.nurseries = report.nurseries.max(
+            w.buildings
+                .iter()
+                .filter(|b| b.owner == ME && b.kind == Kind::Nursery && b.standing_now())
+                .count() as u32,
+        );
+        report.spare_beds = report.spare_beds.max({
+            let beds: usize = w
+                .buildings
+                .iter()
+                .filter(|b| b.owner == ME && b.kind == Kind::Cottage && b.standing_now())
+                .map(|b| b.beds())
+                .sum();
+            let homed =
+                w.citizens.iter().filter(|c| c.owner == ME && c.alive() && c.home.is_some()).count();
+            beds.saturating_sub(homed) as u32
+        });
+        report.homed = report.homed.max(
+            w.citizens.iter().filter(|c| c.owner == ME && c.alive() && c.home.is_some()).count()
+                as u32,
+        );
         deepest_this_age = deepest_this_age.max(deepest_near(&w, hx, hy));
         at_the_fire = at_the_fire.max(w.water.depth_at(hx, hy));
         // Recorded once, on the first flood. It used to be assigned on every
@@ -647,4 +753,105 @@ fn how_far_the_water_reaches() {
     println!("  wading starts at {WADE_DEPTH}, swimming at {SWIM_DEPTH}, drowning after");
     println!("  {DROWN_TICKS} ticks out of your depth.");
     println!();
+}
+
+/// Is growing worth doing inside a three-age run?
+///
+/// M12.10. `COMING_OF_AGE` is two whole ages, so **only a child born in age
+/// one ever works**, and age one is the age with no wood to spare for cottages
+/// and a starvation clock on day four. City 0 reasoned its way to this during
+/// the M11.9 run and asked whether growth is a fourth-age feature the MVP
+/// should stop asking for.
+///
+/// **What this arranges**: nothing about food - M12.A made a farm feed a city,
+/// and the point is to ask the question in the game that ships. It runs the
+/// `grow` script, which builds cottages and a nursery, against `idle`, which
+/// does not, and counts what the spending bought.
+#[test]
+#[ignore]
+fn whether_growing_pays_inside_three_ages() {
+    const SEEDS: [u64; 4] = [31, 1_000_003, 0xF100_D11E, 99];
+    println!();
+    println!("  seed          homed   households   settled   nur/beds  toward/made   born   ended   without");
+    let mut any_worked = 0u32;
+    for seed in SEEDS {
+        let grown = play(seed, Play::Grow);
+        let bare = play(seed, Play::Idle);
+        // A child born at tick t works from t + COMING_OF_AGE. The run is
+        // MAX_AGE * DAYS_PER_AGE * TICKS_PER_DAY long, so anybody born after
+        // that minus COMING_OF_AGE never lifts anything.
+        let run = MAX_AGE * DAYS_PER_AGE * TICKS_PER_DAY;
+        let last_useful = run.saturating_sub(COMING_OF_AGE);
+        println!(
+            "  {:<12}  {:>5}   {:>10}   {:>7}   {:>3}/{:<4}  {:>5}/{:<5}   {:>4}   {:>5}   {:>7}",
+            seed,
+            grown.homed,
+            grown.households,
+            grown.settled,
+            grown.nurseries,
+            grown.spare_beds,
+            grown.toward,
+            grown.made,
+            grown.born,
+            grown.alive.last().copied().unwrap_or(0),
+            bare.alive.last().copied().unwrap_or(0),
+        );
+        any_worked += grown.came_of_age;
+        let _ = last_useful;
+    }
+    println!();
+    println!(
+        "  COMING_OF_AGE is {} days, and a run is {} days.",
+        COMING_OF_AGE / TICKS_PER_DAY,
+        MAX_AGE * DAYS_PER_AGE
+    );
+    println!(
+        "  So a child has to be born in the first {} days to work at all,",
+        (MAX_AGE * DAYS_PER_AGE).saturating_sub(COMING_OF_AGE / TICKS_PER_DAY)
+    );
+    println!("  and children come of age {any_worked} times across these seeds.");
+}
+
+/// Put two adults in every standing cottage that has room, which is what a
+/// player who wants a household does. Design §3.2: two adults sharing a fed
+/// cottage become a household, and no nursery means no children.
+///
+/// Nothing did this before M12.10, which is why the `grow` column of the
+/// strategy table had never produced a child.
+fn pair_them_up(w: &mut World) {
+    let cottages: Vec<sim::building::BuildingId> = w
+        .buildings
+        .iter()
+        .filter(|b| b.owner == ME && b.kind == Kind::Cottage && b.standing_now())
+        .map(|b| b.id)
+        .collect();
+    for c in cottages {
+        // Two, and only into a cottage that has nobody in it yet. Filling
+        // every bed was tried and measured: eight people into two four-bed
+        // cottages leaves no spare bed, and `have_children` needs one - so the
+        // city that had housed everybody was the city that could not have a
+        // child. A household is a *pair* with room to grow, not a full house.
+        let already = w
+            .citizens
+            .iter()
+            .filter(|p| p.owner == ME && p.alive() && p.home == Some(c))
+            .count();
+        if already > 0 {
+            continue;
+        }
+        let homeless: Vec<CitizenId> = w
+            .citizens
+            .iter()
+            .filter(|p| p.owner == ME && p.alive() && !p.is_child() && p.home.is_none())
+            .map(|p| p.id)
+            .take(2)
+            .collect();
+        if homeless.len() < 2 {
+            return;
+        }
+        let room = w.will_house(ME, c, &homeless);
+        if room >= 2 {
+            let _ = w.apply(ME, &Command::SetHome { citizens: homeless, cottage: c });
+        }
+    }
 }

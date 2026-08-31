@@ -214,7 +214,10 @@ How a city grows, which is all the game will tell you and all you need:
 
 * **1 cottage** — beds. Two adults sharing a fed cottage become a household.
 * **9 nursery** — a fed household with a nursery place and a spare bed has a
-  child. No nursery, no children.
+  child. No nursery, no children. **Growing a city is not worth attempting in a
+  three-age run** and the panel no longer suggests it: a child comes of age
+  twelve days after it is born and a run is eighteen days. The buildings work;
+  the arithmetic does not. Do not spend days on it unless you are asked to.
 * **0 builders hut** — free. Assign people to it and they build before they
   haul, and go on doing so until you say otherwise.
 * **c cookery** — turns raw food into meals worth two of it. Needs cooks.
