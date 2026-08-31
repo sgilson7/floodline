@@ -185,7 +185,10 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
 
     let goods = w.treasury(me);
     line(
-        &format!("food {}   wood {}   stone {}", goods.food, goods.wood, goods.stone),
+        &format!(
+            "food {}   wood {}   stone {}   gold {}",
+            goods.food, goods.wood, goods.stone, goods.gold
+        ),
         18, palette::INK, &mut y,
     );
     y += 14.0;

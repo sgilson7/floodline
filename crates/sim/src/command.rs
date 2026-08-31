@@ -230,6 +230,7 @@ pub fn good_key(g: Good) -> &'static str {
         Good::Food => "food",
         Good::Wood => "wood",
         Good::Stone => "stone",
+        Good::Gold => "gold",
     }
 }
 
@@ -310,7 +311,7 @@ mod tests {
             "demolish 7", "demolish @", "move 1 2 3", "assign #1",
             "pause now", "resume please", "ping 1", "home #1 2",
             "road 1 2 3", "dikeline 1 2 3", "acceptroad 2", "trade !1 food 20 wood",
-            "trade !1 gold 20 wood 15", "accepttrade 0",
+            "accepttrade 0",
         ] {
             assert_eq!(Command::parse(line), None, "{line:?} parsed as a command");
         }

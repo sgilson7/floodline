@@ -17,17 +17,34 @@ use serde::{Deserialize, Serialize};
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub struct BuildingId(pub u16);
 
-/// The three things a city moves around. No currency: design §6 is explicit
-/// that trade is barter along a road you can watch.
+/// The four things a city moves around.
+///
+/// **Design §6 says "there is no market, no price and no currency in version
+/// one", and gold is a departure from it, asked for and taken deliberately.**
+/// Barter stays exactly as it was — a standing daily exchange two players
+/// agree on and haulers walk — and gold is what the trading post's mules earn,
+/// which is a different thing in a different place. What gold buys is levels,
+/// and a level is one more pair of hands.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum Good {
     Food,
     Wood,
     Stone,
+    Gold,
 }
 
 impl Good {
-    pub const ALL: [Good; 3] = [Good::Food, Good::Wood, Good::Stone];
+    pub const ALL: [Good; 4] = [Good::Food, Good::Wood, Good::Stone, Good::Gold];
+
+    /// Whether a hauler can be sent to fetch this.
+    ///
+    /// Gold is not carried about the city: it is earned by a mule, kept where
+    /// the mule brought it, and spent from there. A city whose haulers spent
+    /// their day moving coins between the hearth and the stockpile would be a
+    /// city doing nothing useful very busily.
+    pub fn hauled(self) -> bool {
+        self != Good::Gold
+    }
 }
 
 /// A quantity of each good. Used for costs, for what has been delivered to a
@@ -38,21 +55,26 @@ pub struct Goods {
     pub food: u16,
     pub wood: u16,
     pub stone: u16,
+    pub gold: u16,
 }
 
 impl Goods {
-    pub const NONE: Goods = Goods { food: 0, wood: 0, stone: 0 };
+    pub const NONE: Goods = Goods { food: 0, wood: 0, stone: 0, gold: 0 };
 
     pub const fn wood(n: u16) -> Goods {
-        Goods { food: 0, wood: n, stone: 0 }
+        Goods { food: 0, wood: n, stone: 0, gold: 0 }
     }
 
     pub const fn stone(n: u16) -> Goods {
-        Goods { food: 0, wood: 0, stone: n }
+        Goods { food: 0, wood: 0, stone: n, gold: 0 }
     }
 
-    pub const fn of(food: u16, wood: u16, stone: u16) -> Goods {
-        Goods { food, wood, stone }
+    pub const fn gold(n: u16) -> Goods {
+        Goods { food: 0, wood: 0, stone: 0, gold: n }
+    }
+
+    pub const fn of(food: u16, wood: u16, stone: u16, gold: u16) -> Goods {
+        Goods { food, wood, stone, gold }
     }
 
     pub fn get(&self, g: Good) -> u16 {
@@ -60,6 +82,7 @@ impl Goods {
             Good::Food => self.food,
             Good::Wood => self.wood,
             Good::Stone => self.stone,
+            Good::Gold => self.gold,
         }
     }
 
@@ -68,6 +91,7 @@ impl Goods {
             Good::Food => self.food = n,
             Good::Wood => self.wood = n,
             Good::Stone => self.stone = n,
+            Good::Gold => self.gold = n,
         }
     }
 
@@ -90,7 +114,7 @@ impl Goods {
 
     /// Whether this holds at least `cost` of everything.
     pub fn covers(&self, cost: &Goods) -> bool {
-        self.food >= cost.food && self.wood >= cost.wood && self.stone >= cost.stone
+        Good::ALL.into_iter().all(|g| self.get(g) >= cost.get(g))
     }
 
     /// What is still missing to reach `cost`.
@@ -99,17 +123,18 @@ impl Goods {
             food: cost.food.saturating_sub(self.food),
             wood: cost.wood.saturating_sub(self.wood),
             stone: cost.stone.saturating_sub(self.stone),
+            gold: cost.gold.saturating_sub(self.gold),
         }
     }
 
     pub fn total(&self) -> u32 {
-        self.food as u32 + self.wood as u32 + self.stone as u32
+        Good::ALL.into_iter().map(|g| self.get(g) as u32).sum()
     }
 
     /// A percentage of each, rounded down — what rubble gives back.
     pub fn percent(&self, pct: u16) -> Goods {
         let f = |n: u16| ((n as u32 * pct as u32) / 100) as u16;
-        Goods { food: f(self.food), wood: f(self.wood), stone: f(self.stone) }
+        Goods { food: f(self.food), wood: f(self.wood), stone: f(self.stone), gold: f(self.gold) }
     }
 }
 
@@ -223,7 +248,7 @@ impl Kind {
             // Free, and one per player: the run begins with it.
             Kind::Hearth => Goods::NONE,
             Kind::Cottage => Goods::wood(30),
-            Kind::Farm => Goods::of(0, 40, 10),
+            Kind::Farm => Goods::of(0, 40, 10, 0),
             // Each one is bought with what the other makes, and that is the
             // whole point of the pair.
             //
@@ -403,13 +428,15 @@ impl Kind {
             // refused it, and the leftovers stayed in its arms for the rest of
             // the run. A hundred and forty stone went missing from the panel
             // that way, which is a fifth of the game's entire supply.
-            Kind::Hearth => Goods::of(0, 900, 900),
-            Kind::Granary => Goods::of(500, 0, 0),
-            Kind::Stockpile => Goods::of(0, 500, 500),
+            // Gold is kept where it lands, and it lands at the hearth: see
+            // `Good::hauled`.
+            Kind::Hearth => Goods::of(0, 900, 900, 900),
+            Kind::Granary => Goods::of(500, 0, 0, 0),
+            Kind::Stockpile => Goods::of(0, 500, 500, 0),
             // Not stores — output buffers. See `is_store`.
-            Kind::Farm => Goods::of(FARM_BUFFER, 0, 0),
-            Kind::Forester => Goods::of(0, PRODUCER_BUFFER, 0),
-            Kind::Quarry => Goods::of(0, 0, PRODUCER_BUFFER),
+            Kind::Farm => Goods::of(FARM_BUFFER, 0, 0, 0),
+            Kind::Forester => Goods::of(0, PRODUCER_BUFFER, 0, 0),
+            Kind::Quarry => Goods::of(0, 0, PRODUCER_BUFFER, 0),
             _ => Goods::NONE,
         }
     }
@@ -614,10 +641,12 @@ impl Building {
     pub fn total_cost(&self) -> Goods {
         let c = self.kind.cost();
         let n = self.level as u32;
+        let times = |v: u16| (v as u32 * n).min(u16::MAX as u32) as u16;
         Goods {
-            food: (c.food as u32 * n).min(u16::MAX as u32) as u16,
-            wood: (c.wood as u32 * n).min(u16::MAX as u32) as u16,
-            stone: (c.stone as u32 * n).min(u16::MAX as u32) as u16,
+            food: times(c.food),
+            wood: times(c.wood),
+            stone: times(c.stone),
+            gold: times(c.gold),
         }
     }
 
@@ -805,8 +834,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_fourth_good_is_a_good_like_the_others() {
+        // Gold is a departure from design §6 and it is still a `Good`: every
+        // rule that reads `Good::ALL` reads it too, so nothing can quietly
+        // forget it. What is *not* the same is that a hauler will not fetch
+        // it — see `Good::hauled`.
+        assert_eq!(Good::ALL.len(), 4);
+        let mut g = Goods::of(1, 2, 3, 4);
+        assert_eq!(g.get(Good::Gold), 4);
+        assert_eq!(g.total(), 10);
+        assert!(g.covers(&Goods::gold(4)));
+        assert!(!g.covers(&Goods::gold(5)));
+        assert_eq!(g.shortfall(&Goods::gold(10)), Goods::gold(6));
+        assert_eq!(g.take(Good::Gold, 3), 3);
+        assert_eq!(g.gold, 1);
+        assert_eq!(Goods::of(0, 0, 0, 10).percent(50), Goods::gold(5));
+
+        assert!(Good::ALL.into_iter().filter(|g| !g.hauled()).eq([Good::Gold]));
+    }
+
+    #[test]
     fn goods_arithmetic_saturates_rather_than_wrapping() {
-        let mut g = Goods::of(1, 2, 3);
+        let mut g = Goods::of(1, 2, 3, 0);
         assert_eq!(g.get(Good::Food), 1);
         assert_eq!(g.get(Good::Wood), 2);
         assert_eq!(g.get(Good::Stone), 3);
@@ -821,24 +870,24 @@ mod tests {
 
     #[test]
     fn covers_and_shortfall_are_opposites() {
-        let cost = Goods::of(0, 40, 10);
-        assert!(!Goods::of(0, 39, 10).covers(&cost));
-        assert!(Goods::of(0, 40, 10).covers(&cost));
-        assert!(Goods::of(5, 100, 20).covers(&cost));
+        let cost = Goods::of(0, 40, 10, 0);
+        assert!(!Goods::of(0, 39, 10, 0).covers(&cost));
+        assert!(Goods::of(0, 40, 10, 0).covers(&cost));
+        assert!(Goods::of(5, 100, 20, 0).covers(&cost));
 
         assert_eq!(Goods::NONE.shortfall(&cost), cost);
-        assert_eq!(Goods::of(0, 30, 0).shortfall(&cost), Goods::of(0, 10, 10));
-        assert_eq!(Goods::of(0, 99, 99).shortfall(&cost), Goods::NONE);
-        assert!(Goods::of(0, 99, 99).shortfall(&cost).is_empty());
+        assert_eq!(Goods::of(0, 30, 0, 0).shortfall(&cost), Goods::of(0, 10, 10, 0));
+        assert_eq!(Goods::of(0, 99, 99, 0).shortfall(&cost), Goods::NONE);
+        assert!(Goods::of(0, 99, 99, 0).shortfall(&cost).is_empty());
     }
 
     #[test]
     fn percent_rounds_down() {
-        assert_eq!(Goods::of(0, 30, 10).percent(50), Goods::of(0, 15, 5));
-        assert_eq!(Goods::of(0, 1, 1).percent(50), Goods::NONE, "half of one is none");
-        assert_eq!(Goods::of(9, 9, 9).percent(100), Goods::of(9, 9, 9));
+        assert_eq!(Goods::of(0, 30, 10, 0).percent(50), Goods::of(0, 15, 5, 0));
+        assert_eq!(Goods::of(0, 1, 1, 0).percent(50), Goods::NONE, "half of one is none");
+        assert_eq!(Goods::of(9, 9, 9, 0).percent(100), Goods::of(9, 9, 9, 0));
         // No overflow at the top of the range.
-        assert_eq!(Goods::of(u16::MAX, 0, 0).percent(100).food, u16::MAX);
+        assert_eq!(Goods::of(u16::MAX, 0, 0, 0).percent(100).food, u16::MAX);
     }
 
     #[test]
@@ -948,7 +997,7 @@ mod tests {
     fn a_site_needs_its_materials_before_anyone_can_build() {
         let mut b = Building::site(BuildingId(0), PlayerId(0), Kind::Farm, Facing::EastWest, 5, 5);
         assert_eq!(b.state, BuildState::Site);
-        assert_eq!(b.outstanding(), Goods::of(0, 40, 10));
+        assert_eq!(b.outstanding(), Goods::of(0, 40, 10, 0));
         assert!(!b.ready_to_build());
 
         // Builders standing at a site with nothing on it achieve nothing —
@@ -1030,9 +1079,9 @@ mod tests {
     #[test]
     fn salvage_returns_half_the_materials_and_all_the_stores() {
         let mut b = Building::standing(BuildingId(0), PlayerId(0), Kind::Granary, Facing::EastWest, 5, 5);
-        b.store = Goods::of(120, 0, 0);
+        b.store = Goods::of(120, 0, 0, 0);
         // 50% of the 50 wood that went in, plus every scrap of the food.
-        assert_eq!(b.salvage(), Goods::of(120, 25, 0));
+        assert_eq!(b.salvage(), Goods::of(120, 25, 0, 0));
     }
 
     #[test]

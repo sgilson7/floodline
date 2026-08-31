@@ -254,7 +254,7 @@ impl World {
                 cx - w / 2,
                 cy - h / 2,
             );
-            hearth.store = Goods::of(0, STARTING_WOOD, STARTING_STONE);
+            hearth.store = Goods::of(0, STARTING_WOOD, STARTING_STONE, 0);
             world.occupy(&hearth);
             world.buildings.push(hearth);
         }
@@ -1647,7 +1647,7 @@ mod tests {
                 assert_eq!(b.kind, Kind::Hearth);
                 assert_eq!(b.owner, PlayerId(p as u8));
                 assert!(b.standing_now(), "a hearth is not a building site");
-                assert_eq!(b.store, Goods::of(0, STARTING_WOOD, STARTING_STONE));
+                assert_eq!(b.store, Goods::of(0, STARTING_WOOD, STARTING_STONE, 0));
 
                 // Centred on the site the map generator levelled for it.
                 let (cx, cy) = w.map.hearth_sites[p];

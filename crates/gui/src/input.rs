@@ -717,10 +717,13 @@ impl Input {
         draw_text(label, card.x + 40.0, y + 24.0, 18.0, palette::INK);
         let (good, amount) = if giving { self.trade.give } else { self.trade.take };
         if ui.button(Rect::new(card.x + 130.0, y, 150.0, 34.0), good_name(good), true) {
+            // Round the three things a hauler can carry. Gold is not one of
+            // them (`Good::hauled`): barter is design §6's standing exchange
+            // walked by people, and coins are what the mules bring back.
             let next = match good {
                 Good::Food => Good::Wood,
                 Good::Wood => Good::Stone,
-                Good::Stone => Good::Food,
+                _ => Good::Food,
             };
             if giving {
                 self.trade.give.0 = next;
@@ -828,19 +831,18 @@ fn good_name(g: Good) -> &'static str {
         Good::Food => "food",
         Good::Wood => "wood",
         Good::Stone => "stone",
+        Good::Gold => "gold",
     }
 }
 
 fn cost_line(c: sim::building::Goods) -> String {
+    // Every good, in one loop rather than a line each, so a fifth one cannot
+    // be added and silently left off a price tag.
     let mut parts: Vec<String> = Vec::new();
-    if c.food > 0 {
-        parts.push(format!("{} food", c.food));
-    }
-    if c.wood > 0 {
-        parts.push(format!("{} wood", c.wood));
-    }
-    if c.stone > 0 {
-        parts.push(format!("{} stone", c.stone));
+    for g in Good::ALL {
+        if c.get(g) > 0 {
+            parts.push(format!("{} {}", c.get(g), good_name(g)));
+        }
     }
     if parts.is_empty() {
         "free".to_owned()
