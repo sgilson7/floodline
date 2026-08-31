@@ -22,9 +22,9 @@ This document is also an artifact, if a link is easier to hand on than a file:
 | M10.3 | Hands and eyes | **done** — `table.py`, `panel.py`, `driver.py`, `driver_check.py` |
 | M10.4 | The referee, and ten minutes of nothing going wrong | **done** — clean, though the soak is eight minutes and not ten |
 | M10.5 | A rehearsal: one age | **done** — and it answered M5's parked question |
-| M10.6 | The run | ← **next**; push first |
-| M10.7 | The account | |
-| M10.8 | What the run demands | two findings waiting; the food line was pulled forward |
+| M10.6 | The run | **done** — "The map stood", three ages, no desync |
+| M10.7 | The account | **done** — `PLAYTEST-M10.md` |
+| M10.8 | What the run demands | ← **all that is left**; seven findings waiting, none of them a balance change |
 
 Setting the table found three things, which is what the ordering was for. Two
 are fixed (`peers at` said nothing in a browser; the panel's variable row still

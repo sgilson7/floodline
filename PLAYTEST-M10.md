@@ -1,8 +1,15 @@
-# FLOODLINE — the rehearsal
+# FLOODLINE — played to the end
 
-Design step 7 is "playtest the flood until it is fun". This is the first time
-anybody has played this game for a full age, and the first time two players
-have been in the same world for more than a few minutes.
+Design step 7 is "playtest the flood until it is fun". Two agents have now
+played FLOODLINE from age one to the score screen, twice over: a twelve-minute
+rehearsal (M10.5) and the full thirty-six minute run (M10.6).
+
+**The run finished. "The map stood."** Three ages survived; city 0 with two
+souls of eight, city 1 with three. Neither client ever showed a desync banner.
+
+This document is the account. The rehearsal comes first because it is what made
+the run possible; the run itself is at the end and is the part that answers the
+milestone.
 
 M10.5: two agents, one browser each, twelve minutes on the deployed build.
 Neither could see the other's screen — each was given one debugging port and
@@ -272,3 +279,198 @@ stands.
 
 That is not a reason to change the game before the run — it is the finding, and
 M10.6 will say whether it is a first-time-player problem or a design one.
+
+---
+---
+
+# M10.6 — the run
+
+Three ages, eighteen days, thirty-five and a half minutes, on the deployed
+build with the food line in it. The brief was **unchanged** from the rehearsal:
+still a first-time player's brief, deliberately, because the lesson the last
+pair died for had been put into the game rather than into their instructions.
+
+## What the referee saw
+
+**No desync, ever.** Zero alarm pixels on either status row across 359 samples,
+and the final panel read `peers at [21564, 21561]` — three ticks apart, which
+is the pipeline and not a parting.
+
+**The clock held exactly.** Eighteen day-turns:
+
+    120 119 121 120 116 116 123 116 122 123 118 122 121 119 115 121 125
+
+Mean 119.8 seconds against a nominal 120, over thirty-five minutes, with two
+agents clicking throughout. `Clock`'s fixed timestep does what it says.
+
+## The ending
+
+**"The map stood."** Three ages survived. City 0: eight at its height, **two
+left, standing**. City 1: eight at its height, **three left, standing**.
+
+Both cities were mauled and both were alive. It is the first complete run of
+FLOODLINE by anybody.
+
+## The wall, answered a second time and more sharply
+
+City 0 ran what amounts to a controlled experiment without being asked to:
+
+| age | defence | deaths |
+|---|---|---|
+| 1 | no wall at all | **0** |
+| 2 | 43 cells of dike — its whole 668 stone, four days of hauling | **6**, and the wall broke |
+| 3 | no wall; moved the granary uphill, one keypress | **0**, through the worst flood of the three |
+
+> Elevation beat masonry by a mile. If a wall is meant to be the answer, it
+> currently needs to be either much cheaper in labour or much more legible
+> about whether it will hold.
+
+Its three reasons, in its own order:
+
+1. **It broke, and there was no way to know it would.** A segment says "level 1
+   of 4" and nothing says what level the coming flood needs, or how hard the
+   water is leaning on it.
+2. **It cost farmers, not stone.** Building it pulled three of six farmers onto
+   hauling — and stone was the resource it had most of.
+3. **It moved people into the water.** The wall line is lower and closer to the
+   river than the town, and that is where its haulers were standing on the day
+   the flood came. *"I think the wall killed people by moving them."*
+
+City 1, twenty-one cells up the far bank, reached the same verdict from the
+opposite geography — and its two losses were both self-inflicted by wall
+building:
+
+> Both of my losses were caused by building a wall. Neither was caused by the
+> flood finding me undefended.
+
+It spent about 600 stone across two ages and could not detect the wall's effect
+at all: flood 1 with no wall reached y≈68; flood 2 with a full L-shaped wall
+reached y≈67.
+
+**Its own caveat is the fairest statement of the finding**, and it is honest
+about the limit of its evidence:
+
+> Dikes go to level 4 and I never got one above level 1, because the raise
+> interaction silently did nothing. It is entirely possible a level-3 or
+> level-4 wall holds and my conclusion is really "a level-1 wall is worse than
+> useless". But as a player I had no way to discover that.
+
+### Why the raise "did nothing" — checked afterwards, and it is real
+
+The mechanism works. On a standing dike, clicking it with the dike tool raises
+it: `dike: level 1 of 4` becomes `dike: being built`, which is `raise_dike`
+adding a level and returning the segment to a site with most of its progress
+already there. Three things conspire to make that invisible:
+
+* **A raise that works looks like nothing happening.** The level readout
+  *disappears* the moment you raise it — the hover row stops saying "level 1 of
+  4" and starts saying "being built". A player checking whether their click
+  landed sees strictly less information than before they clicked.
+* **A raise that is refused says so for four and a half seconds.** Clicking a
+  segment that is not yet built writes **"it is not built yet"** in red under
+  the map, and `NOTICE_SECONDS` then takes it away. A player who clicks and
+  looks elsewhere — or an agent polling every twenty-five seconds — never sees
+  it.
+* **Most of city 1's wall was never standing.** Its first dike sat on "being
+  built" for two entire ages without receiving a single stone, which it could
+  not explain and the panel never explained either.
+
+So the wall verdict stands as "a level-one wall is not worth building", which
+is a narrower claim than "walls are not worth building" — and the reason
+nobody has ever tested the wider one is that the game makes levelling
+undiscoverable.
+
+## What both players independently wanted most
+
+**The high-water mark.** Neither had any way to ask how high a cell is or how
+far the water came last time, in a game which is entirely about water height.
+Both chose every wall position by squinting at map colours; city 0 planned its
+whole third age by screenshotting flood 2 at its peak and noting which pixels
+stayed green.
+
+> I wanted the game to draw last flood's high-water line on the map. That one
+> feature would have turned the whole run from guessing into planning, and it's
+> the thing I'd ask for above everything else. — city 1
+
+> That is reading the renderer, not playing the game. — city 0
+
+**A way to send *some* of the people.** Both named worker selection as the
+worst part of the game, in almost the same words. Right-clicking a building
+with everybody chosen takes people off other buildings silently, so filling a
+second farm empties the first. City 0 spent about a third of its entire run on
+a rally-and-box-select workaround.
+
+## What was fun, on the evidence of two independent accounts
+
+* **The other city, seen only through the shared map and the roster.** City 1
+  watched city 0 fall 8→6→5→4→2 in a single day, in two lines of text, with no
+  way to help and no way to look. Both called this the best thing in the game.
+* **The amber line**, and specifically the number this session added to it:
+  city 1 quoted *"8 mouths eat 96 a day — more farmers, or fewer hands carrying
+  stone"* back as the sentence that taught it the whole system.
+* **Day six.** The omen going amber and then red, and the water coming across
+  the map, was tense every single time in both accounts.
+* **The households tab.** *"Pagan and Oswin — settling in"* was, for city 1,
+  "the only moment the city stopped being counters and became people" — and it
+  noted that it is buried behind a tab it opened out of curiosity.
+
+## Did the food fix work?
+
+**Partly, and the part that failed is instructive.** City 1 read the new line,
+quoted it, and named it as the reason it survived age one — where in the
+rehearsal both cities died. Neither city starved to death this time.
+
+But city 1 also said this:
+
+> The panel had literally warned me in those words — "more farmers, or fewer
+> hands carrying stone" — and I did not understand it was about walls until it
+> was too late.
+
+The line names the trade-off correctly and still did not stop the player making
+it. That is worth knowing before anybody writes another sentence into that row.
+
+## New faults the run found
+
+Recorded, not fixed; M10.8 is where these are answered.
+
+1. **A trade offer is drawn over the panel's three diagnostic rows.** The
+   variable stack — pending offers, then the level/move row — grows past the
+   foot of the panel and overdraws `tick`, `peers at` and `build`/`seed`. Those
+   are exactly the rows a player needs when something is wrong, and exactly the
+   rows M10 nominated as the desync instrument: **the referee spent twelve
+   minutes reading `city 1: 20 food for your 20 stone` where the tick count
+   should have been**, and reported 116 phantom stalls. Partly this session's
+   doing — moving the level/move row to the bottom added up to 48 pixels to a
+   stack that already overflowed.
+2. **`day 7 of 6`** on the final frame. `day_of_age` is
+   `(tick - age_start_tick) / TICKS_PER_DAY + 1`, and at the last tick of the
+   last age that is seven; the world has finished, so the age never rolls over.
+3. **A standing offer never expires and cannot be answered from the panel.**
+   City 0 watched "20 food for your 20 stone" sit there through all of age 3
+   with zero stone to its name.
+4. **The trade dialog opens over the map**, so a player watching the panel sees
+   nothing happen. City 0 had it open, unseen, through several actions; city 1
+   had a click pass through it to the map after it closed itself.
+5. **Nothing says who died, where, or of what.** The soul count drops. Neither
+   player could tell drowning from starving during a flood, which is precisely
+   when the difference decides what to do next.
+6. **Nothing says a wall has broken.** Both players discovered it by noticing
+   the wall was no longer drawn.
+7. **Hauling during a flood is fatal and unremarked.** City 1 lost four people
+   to a routine "back to hauling" order given on day five: it sent them into
+   the floodplain, and nothing warned it.
+
+## What this leaves for M10.8
+
+The plan said the run's findings get answered afterwards, with a probe and a
+table behind anything numeric. Nothing here asks for a balance change. Every
+item above is the game failing to *say* something it already knows:
+
+* where the water reached last time;
+* that a wall has broken, or is under strain;
+* who died and of what;
+* that a raise worked;
+* that people are standing in the flood plain.
+
+**The wall is not underpowered. It is unreadable**, and both players spent
+their stone by guessing.

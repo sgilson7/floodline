@@ -2466,3 +2466,50 @@ Nothing about the balance changed. No constant was retuned, no yield altered,
 no rule about how food is made or moved. This is the panel saying out loud a
 number the simulation already had — which is what M5 meant when it said the
 food economy needed a person to look at it, rather than a probe.
+
+---
+
+## 2026-08-31 — The run, and the row it could not read
+
+M10.6 finished: three ages, eighteen days, 35.4 minutes, "The map stood", both
+cities alive and mauled, **no desync on either client at any point**. The clock
+held to 119.8 seconds a day against a nominal 120 across the whole run.
+
+**The referee said NOT CLEAN and was wrong, which found a real bug.** It
+reported city 0 drawing no tick 116 times while days kept turning on schedule —
+two things that cannot both be true. The cause: `Input::offers` and the
+level/move row grow *past the foot of the panel* and overdraw `tick`,
+`peers at` and `build`/`seed`. The referee spent twelve minutes reading
+`city 1: 20 food for your 20 stone` where the tick count should have been.
+
+Those three rows are the ones a player is told to look at when something is
+wrong, and the ones M10 nominated as the desync instrument. **Part of this is
+mine**: moving the level/move row below the offers put up to forty-eight more
+pixels on a stack that already overflowed by design — the offers alone start at
+y≈880 and the foot begins at 890. Recorded here rather than fixed, because it
+is a panel-layout decision and the panel has moved six times; whoever fixes it
+should decide whether the foot is drawn last, whether the variable stack gets a
+hard ceiling, or whether the panel is simply out of room.
+
+**A raise that works looks exactly like nothing happening.** `raise_dike` adds
+a level and returns the segment to a site, so the hover row stops saying "level
+1 of 4" and starts saying "being built" — a player who clicks to check whether
+their click landed sees strictly less than before. A refused raise says "it is
+not built yet" in red and `NOTICE_SECONDS` removes it after four and a half
+seconds. Between the two, city 1 played a whole run believing the raise was
+broken, and its verdict on walls is therefore "a level-one wall is not worth
+building" rather than the wider claim. **Nobody has ever tested a level-three
+wall in a played game**, because the game makes levelling undiscoverable.
+
+**`day 7 of 6` on the final frame.** `day_of_age` is
+`(tick - age_start_tick) / TICKS_PER_DAY + 1`; at the last tick of the last age
+that is seven, and the world has finished so the age never rolls over.
+
+**The finding that matters is not a number.** Both players, independently,
+spent their stone by guessing and both said the same thing afterwards: there is
+no way to ask how high a cell is or how far the water came last time, in a game
+entirely about water height. City 0 planned its third age by screenshotting the
+second flood at its peak and noting which pixels stayed green — "that is
+reading the renderer, not playing the game". **The wall is not underpowered; it
+is unreadable.** M5's balance work stands; what M10 found is that the decision
+it balanced is one the player is asked to make blind.

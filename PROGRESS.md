@@ -454,15 +454,46 @@ standing on it — `farm: 3 of 3 working, 1 food waiting`. No balance constant
 moved; twelve a head a day is arithmetic on the eating model the game already
 had.
 
+### M10.6 and M10.7 — the run, played to the end
+
+**"The map stood."** Three ages, eighteen days, 35.4 minutes on the deployed
+build; city 0 with two souls of eight, city 1 with three, both standing.
+**Neither client ever showed a desync banner** — 359 samples, zero alarm
+pixels, and `peers at [21564, 21561]` at the final tick. The clock held to
+119.8 seconds a day against a nominal 120. M10's done-condition is met.
+
+The brief was left unchanged on purpose: the lesson the rehearsal pair died for
+had been put into the *game* rather than into their instructions, so the run
+tested the fix on players who did not already know. Neither city starved this
+time, and city 1 quoted the new line back as the sentence that taught it the
+system.
+
+**The wall, answered twice more.** City 0 ran a clean experiment without being
+asked: age 1 no wall, no deaths; age 2 a 43-cell dike costing its whole stone
+and four days of hauling, six deaths and the wall broke; age 3 no wall, one
+`m move` of the granary to high ground, no deaths through the worst flood.
+*"Elevation beat masonry by a mile."* City 1, on the far bank, lost people only
+to wall-building — once to the famine it caused and once to standing in the
+floodplain hauling for it.
+
+**But the wall is not underpowered — it is unreadable.** Neither player could
+ask how high a cell is or where the water reached last time, and both chose
+their wall lines by squinting at map colours. And a *raise* that works looks
+exactly like nothing happening, so city 1 played a whole run believing the
+interaction was broken. Nobody has ever tested a level-three wall in a played
+game.
+
+`PLAYTEST-M10.md` is the account, and it is an artifact.
+
 ### Next action
 
-**M10.6 — the run.** Three ages, thirty-six minutes, two agents, on the
-deployed build. Two things first:
+**M10.8 — what the run demands**, and it is the only step left. Seven findings
+are listed at the end of `PLAYTEST-M10.md`; **none of them is a balance
+change**. Every one is the game failing to say something it already knows:
+where the water reached last time, that a wall has broken, who died and of
+what, that a raise worked, that people are standing in the floodplain.
 
-1. **Push.** `main` is ten commits ahead of the deployed page and the run has
-   to happen on what is deployed — including the food line, which is the whole
-   reason the run was held back.
-2. **Decide what the agents are told.** `AGENT-BRIEF.md` as it stands makes
-   them first-time players, and on this evidence a first-time player's city
-   dies in age one. A run that ends there is a finding rather than a failure,
-   but it is not a three-age run.
+The one to do first, because it hides the instrument M10 depends on: **a
+pending trade offer overdraws `tick`, `peers at` and `build`/`seed`** at the
+foot of the panel. Partly this session's doing — moving the level/move row
+below the offers added up to 48 pixels to a stack that already overflowed.
