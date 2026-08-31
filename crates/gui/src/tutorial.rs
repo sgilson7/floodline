@@ -84,6 +84,15 @@ pub fn next_thing(w: &World, me: PlayerId) -> Option<&'static str> {
     if standing(Kind::TradingPost) && !working(Kind::TradingPost) {
         return Some("nobody is at the trading post: right-click it to send a mule out");
     }
+    // Then the next generation.
+    if standing(Kind::Cottage) && !placed(Kind::Nursery) {
+        return Some("press 9 for a nursery: no nursery, no children");
+    }
+    if standing(Kind::Nursery)
+        && !w.households.iter().any(|h| h.owner == me && h.alive())
+    {
+        return Some("put two people in one cottage: a day of that makes a household");
+    }
     if w.treasury(me).gold >= sim::balance::UPGRADE_GOLD {
         return Some("you have gold: click a farm and level it - a level is one more pair of hands");
     }
@@ -159,6 +168,7 @@ impl Welcome {
         line("7 then drag         a wall between your city and the water", 18.0, palette::INK, 26.0, &mut y);
         line("8                   a trading post: mules sell wood for gold", 18.0, palette::INK, 26.0, &mut y);
         line("click a building    then level it with gold, or m to move it", 18.0, palette::INK, 26.0, &mut y);
+        line("9                   a nursery. two in a cottage make a family", 18.0, palette::INK, 26.0, &mut y);
         line("right-click ground  send them there, and they stay", 18.0, palette::INK, 40.0, &mut y);
 
         ui::centred(

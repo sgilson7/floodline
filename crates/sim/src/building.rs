@@ -198,6 +198,10 @@ pub enum Kind {
     /// that earns gold. Its traders are mules on the road rather than people
     /// at a bench.
     TradingPost,
+    /// Where children are kept until they come of age. **No nursery, no
+    /// children** — which is what makes growing a city a thing a player
+    /// decides to do rather than a thing that happens to them.
+    Nursery,
     Dike,
     Road,
     Bridge,
@@ -206,7 +210,7 @@ pub enum Kind {
 impl Kind {
     /// Everything the MVP builds. Design §3.3 also lists Fishery, Forester's
     /// hut, Quarry, Guildhall, Tavern and Watchtower; the plan defers all six.
-    pub const ALL: [Kind; 11] = [
+    pub const ALL: [Kind; 12] = [
         Kind::Hearth,
         Kind::Cottage,
         Kind::Farm,
@@ -215,6 +219,7 @@ impl Kind {
         Kind::Granary,
         Kind::Stockpile,
         Kind::TradingPost,
+        Kind::Nursery,
         Kind::Dike,
         Kind::Road,
         Kind::Bridge,
@@ -227,7 +232,11 @@ impl Kind {
             Kind::Hearth => (HEARTH_SIZE, HEARTH_SIZE),
             Kind::Farm => (3, 3),
             Kind::Forester | Kind::Quarry => (2, 2),
-            Kind::Cottage | Kind::Granary | Kind::Stockpile | Kind::TradingPost => (2, 2),
+            Kind::Cottage
+            | Kind::Granary
+            | Kind::Stockpile
+            | Kind::TradingPost
+            | Kind::Nursery => (2, 2),
             Kind::Dike => match facing {
                 Facing::EastWest => (DIKE_LENGTH, 1),
                 Facing::NorthSouth => (1, DIKE_LENGTH),
@@ -272,6 +281,10 @@ impl Kind {
             // producers going first. Priced above a granary because a city
             // that can afford it is a city that is fed.
             Kind::TradingPost => Goods::of(0, 60, 30, 0),
+            // A roof and four walls, and cheaper than a cottage per head: it
+            // is the one building whose whole purpose is somewhere for the
+            // next generation to be.
+            Kind::Nursery => Goods::wood(40),
             // Free — it is a patch of ground somebody agreed to keep tidy.
             Kind::Stockpile => Goods::NONE,
             // Ten a level *per cell*, not forty. A wall that changes the
@@ -305,6 +318,7 @@ impl Kind {
             Kind::Quarry => 220,
             Kind::Granary => 250,
             Kind::TradingPost => 260,
+            Kind::Nursery => 200,
             Kind::Stockpile => 60,
             // Fifty a cell, not a hundred and fifty.
             //
@@ -332,6 +346,7 @@ impl Kind {
             | Kind::Granary
             | Kind::Stockpile
             | Kind::TradingPost
+            | Kind::Nursery
             | Kind::Bridge => Material::Wood,
             Kind::Hearth | Kind::Dike | Kind::Road => Material::Stone,
         }
@@ -347,6 +362,7 @@ impl Kind {
             Kind::Quarry => 220,
             Kind::Granary => 250,
             Kind::TradingPost => 220,
+            Kind::Nursery => 200,
             Kind::Stockpile => 150,
             Kind::Dike => 400,
             // A road cell is a strip of packed stone and a bridge a few
@@ -371,6 +387,7 @@ impl Kind {
             Kind::Hearth => 6,
             Kind::Granary => 5,
             Kind::TradingPost => 4,
+            Kind::Nursery => 4,
             Kind::Cottage => 4,
             Kind::Farm => 3,
             Kind::Forester | Kind::Quarry => 3,
@@ -527,6 +544,14 @@ impl Kind {
         }
     }
 
+    /// How many children this can keep. Only a nursery keeps any.
+    pub fn places(self) -> usize {
+        match self {
+            Kind::Nursery => NURSERY_PLACES,
+            _ => 0,
+        }
+    }
+
     /// Whether gold can buy this one another level.
     ///
     /// **The plan's table has a row for granaries and stockpiles — "one more
@@ -545,7 +570,12 @@ impl Kind {
     pub fn upgradable(self) -> bool {
         matches!(
             self,
-            Kind::Farm | Kind::Forester | Kind::Quarry | Kind::Cottage | Kind::TradingPost
+            Kind::Farm
+                | Kind::Forester
+                | Kind::Quarry
+                | Kind::Cottage
+                | Kind::TradingPost
+                | Kind::Nursery
         )
     }
 
@@ -833,6 +863,15 @@ impl Building {
             return base;
         }
         base + self.level as usize - 1
+    }
+
+    /// Places for children, at the level it is. A level is one more citizen
+    /// the building can hold, and a child is a citizen.
+    pub fn places(&self) -> usize {
+        match self.kind.places() {
+            0 => 0,
+            n => n + self.level as usize - 1,
+        }
     }
 
     /// Beds, at the level it is.

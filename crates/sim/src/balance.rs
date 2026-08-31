@@ -107,6 +107,42 @@ pub const SLOPE_SPAN: i32 = 40;
 /// changing this or the octave weights.
 pub const NOISE_AMPLITUDE: i32 = 16;
 
+// ---- families --------------------------------------------------------------
+
+/// How long a household's larder has to hold out before the next child.
+///
+/// Measured by `families::how_a_city_grows`, which runs three ages with two
+/// households, fed and unfed:
+///
+/// | fed | day 6 | day 12 | day 18 |
+/// |---|---|---|---|
+/// | yes | 10 | 12 | 9-12 |
+/// | no  | 8  | 8  | 4-8  |
+///
+/// A fed city of eight is ten by the first flood and twelve by the second, and
+/// what it loses after that it loses to the water. **A hungry one never leaves
+/// eight**, which is the rule doing its job: being fed is the gate, so the
+/// granary decides the size of a village and not only whether it survives.
+pub const CHILD_TICKS: u32 = 3 * TICKS_PER_DAY;
+
+/// How long a child takes to become an ordinary citizen.
+///
+/// Two ages. A child born in the first age is working by the third, so growing
+/// a city is a decision whose payoff arrives late enough to be a decision —
+/// and one born just before the last flood never works at all, which is the
+/// cost of leaving it too late. `how_a_city_grows` finds two of the four
+/// children born in a fed run grown by day eighteen, which is the shape that
+/// was wanted.
+pub const COMING_OF_AGE: u32 = 2 * DAYS_PER_AGE * TICKS_PER_DAY;
+
+/// How many children one nursery holds. No nursery, no children.
+pub const NURSERY_PLACES: usize = 4;
+
+/// How full a household's members and its city's larder must be for a child.
+/// The same bar as `FED_ENOUGH`, so "a fed city grows" means what a player
+/// would expect it to mean.
+pub const CHILD_FOOD: u16 = FED_ENOUGH;
+
 // ---- trade on the road -----------------------------------------------------
 
 /// What a mule carries to the other city, in wood.

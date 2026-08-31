@@ -13,6 +13,7 @@ use crate::command::Command;
 use crate::fx::V2;
 use crate::fx::Fx;
 use crate::map::{Ground, Map};
+use crate::household::{Household, HouseholdId};
 use crate::mule::{Leg, Mule, MuleId};
 use crate::names::NAMES;
 use crate::nav::{self, Dest, FlowField, Nav};
@@ -79,6 +80,8 @@ pub enum RuleError {
     TooPoor,
     /// A hearth, a road or a bridge. See `Kind::movable`.
     CannotMove,
+    /// A child. It does not haul, farm or build.
+    TooYoung,
 }
 
 impl RuleError {
@@ -113,6 +116,7 @@ impl RuleError {
             RuleError::NoRockHere => "a quarry needs rock beside it",
             RuleError::TooPoor => "not enough gold",
             RuleError::CannotMove => "that one stays where it is",
+            RuleError::TooYoung => "too young to work",
         }
     }
 }
@@ -165,6 +169,8 @@ pub struct World {
     /// Carts on the road, indexed by `MuleId`. Retired ones stay in it, for
     /// the reason every other id here does.
     pub mules: Vec<Mule>,
+    /// Families, indexed by `HouseholdId`. Ended ones stay in it.
+    pub households: Vec<Household>,
     pub roads: Vec<Road>,
     /// Standing trade agreements, proposed and accepted.
     pub trades: Vec<Trade>,
@@ -237,6 +243,7 @@ impl World {
             peak_population: vec![0; players as usize],
             water: Water::dry(),
             mules: Vec::new(),
+            households: Vec::new(),
             roads: Vec::new(),
             trades: Vec::new(),
             pings: Vec::new(),
@@ -753,6 +760,7 @@ impl World {
                 self.clear_from_rosters(CitizenId(i as u16));
             }
         }
+        self.families();
         self.assign_errands();
         self.walk(nav);
         self.resolve_arrivals();
@@ -1325,6 +1333,12 @@ impl World {
         if b.owner != player {
             return Err(RuleError::NotYours);
         }
+        if citizens
+            .iter()
+            .any(|id| self.citizens.get(id.0 as usize).is_some_and(|c| c.is_child()))
+        {
+            return Err(RuleError::TooYoung);
+        }
         let job = match b.state {
             // Anything half-built wants builders, whatever it is going to be.
             BuildState::Site => Job::Builder,
@@ -1439,6 +1453,187 @@ impl World {
     pub fn tick_alone(&mut self) {
         let mut nav = Nav::new();
         self.tick(&mut nav, &[]);
+    }
+
+    // ---- families ----------------------------------------------------------
+
+    /// One tick of who lives with whom, and what comes of it.
+    ///
+    /// Three small passes in a fixed order: children grow up, households form,
+    /// households have children. Order matters only in that a child coming of
+    /// age this tick is an adult for the rest of it, which is the answer a
+    /// player would expect.
+    fn families(&mut self) {
+        self.grow_up();
+        self.form_households();
+        self.have_children();
+    }
+
+    /// Children become ordinary citizens on the tick they were born knowing.
+    fn grow_up(&mut self) {
+        let now = self.tick;
+        for i in 0..self.citizens.len() {
+            if self.citizens[i].alive() {
+                self.citizens[i].come_of_age(now);
+            }
+        }
+    }
+
+    /// Two adults who share a cottage become a household, after a day of it.
+    ///
+    /// **In id order, and only the first two.** A cottage with five beds and
+    /// five people in it is not two and a half families; it is one household
+    /// and three lodgers, and which two is decided by the same rule on every
+    /// machine. Design §3.2 says "two adult citizens sharing a cottage", and
+    /// the pairing has to be a function of the world or two peers would
+    /// disagree about who married whom.
+    fn form_households(&mut self) {
+        let cottages: Vec<BuildingId> = self
+            .buildings
+            .iter()
+            .filter(|b| b.kind == Kind::Cottage && b.standing_now())
+            .map(|b| b.id)
+            .collect();
+
+        for cottage in cottages {
+            let mut residents: Vec<CitizenId> = self
+                .citizens
+                .iter()
+                .filter(|c| c.alive() && !c.is_child() && c.home == Some(cottage))
+                .map(|c| c.id)
+                .collect();
+            residents.sort_unstable();
+            let Some(&[a, b]) = residents.get(..2).map(|s| <&[CitizenId; 2]>::try_from(s).ok()).flatten()
+            else {
+                continue;
+            };
+
+            let owner = self.citizens[a.0 as usize].owner;
+            let fed = self.citizens[a.0 as usize].food >= CHILD_FOOD
+                && self.citizens[b.0 as usize].food >= CHILD_FOOD;
+
+            match self.households.iter_mut().position(|h| {
+                h.alive() && h.cottage == cottage && h.members == [a, b]
+            }) {
+                Some(i) => {
+                    // A hungry day loses the progress rather than pausing it:
+                    // being fed is the gate, and a gate that only slows you
+                    // down is not a gate.
+                    if fed {
+                        self.households[i].together += 1;
+                    } else {
+                        self.households[i].together = 0;
+                    }
+                }
+                None => {
+                    let id = HouseholdId(self.households.len() as u16);
+                    self.households.push(Household::new(id, owner, [a, b], cottage));
+                }
+            }
+        }
+
+        // A household whose cottage is gone, or one of whose members has died,
+        // is over. Its children keep growing up; the flood does that.
+        for i in 0..self.households.len() {
+            if !self.households[i].alive() {
+                continue;
+            }
+            let h = &self.households[i];
+            let standing = self
+                .buildings
+                .get(h.cottage.0 as usize)
+                .is_some_and(|b| b.standing_now());
+            let both = h.members.iter().all(|m| {
+                self.citizens
+                    .get(m.0 as usize)
+                    .is_some_and(|c| c.alive() && c.home == Some(h.cottage))
+            });
+            if !standing || !both {
+                self.households[i].ended = true;
+            }
+        }
+    }
+
+    /// A fed household with somewhere to put a child has one, on a timer.
+    fn have_children(&mut self) {
+        for i in 0..self.households.len() {
+            if !self.households[i].alive() || !self.households[i].settled() {
+                continue;
+            }
+            let owner = self.households[i].owner;
+            let [a, b] = self.households[i].members;
+            let fed = self.citizens[a.0 as usize].food >= CHILD_FOOD
+                && self.citizens[b.0 as usize].food >= CHILD_FOOD
+                && self.treasury(owner).food > 0;
+            let spare_bed = {
+                let cottage = self.households[i].cottage;
+                let taken = self
+                    .citizens
+                    .iter()
+                    .filter(|c| c.alive() && c.home == Some(cottage))
+                    .count();
+                taken < self.buildings[cottage.0 as usize].beds()
+            };
+            if !fed || !spare_bed {
+                self.households[i].toward_child = 0;
+                continue;
+            }
+            self.households[i].toward_child += 1;
+            if self.households[i].toward_child < CHILD_TICKS {
+                continue;
+            }
+            self.households[i].toward_child = 0;
+            if let Some(child) = self.bear_a_child(i) {
+                self.households[i].children.push(child);
+            }
+        }
+    }
+
+    /// Somewhere for a child to be kept: a nursery of this player's with a
+    /// place free. **No nursery, no children.**
+    fn free_nursery(&self, owner: PlayerId) -> Option<BuildingId> {
+        self.buildings
+            .iter()
+            .filter(|b| b.owner == owner && b.kind == Kind::Nursery && b.standing_now())
+            .find(|b| {
+                let held = self
+                    .citizens
+                    .iter()
+                    .filter(|c| c.alive() && c.nursery == Some(b.id))
+                    .count();
+                held < b.places()
+            })
+            .map(|b| b.id)
+    }
+
+    /// Add a citizen to the world. The only place that ever does.
+    ///
+    /// **Appending only.** Ids are indices into `citizens` in half a dozen
+    /// places, and the crowd, the flood and every roster iterate it: appending
+    /// is safe and anything that reorders or reuses an id is not. There is no
+    /// removal anywhere — the dead stay in the vector.
+    fn bear_a_child(&mut self, household: usize) -> Option<CitizenId> {
+        let owner = self.households[household].owner;
+        let nursery = self.free_nursery(owner)?;
+        let cottage = self.households[household].cottage;
+        let (nx, ny) = self.buildings[nursery.0 as usize].centre();
+
+        let name = self.rng.below(NAMES.len() as u32) as u16;
+        let jitter = V2::new(Fx(self.rng.range(-48, 48)), Fx(self.rng.range(-48, 48)));
+        let id = CitizenId(self.citizens.len() as u16);
+        let mut child = Citizen::born(
+            id,
+            owner,
+            name,
+            V2::cell_centre(nx, ny) + jitter,
+            self.tick,
+            nursery,
+        );
+        // It sleeps where its parents do. The spare bed was checked before
+        // this was called.
+        child.home = Some(cottage);
+        self.citizens.push(child);
+        Some(id)
     }
 
     // ---- mules -------------------------------------------------------------

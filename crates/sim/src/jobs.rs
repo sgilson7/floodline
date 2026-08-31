@@ -169,6 +169,19 @@ impl World {
     /// delivered cannot be built and a builder standing at one is a citizen
     /// doing nothing.
     fn find_work(&mut self, i: usize) {
+        // A child does not haul, farm or build. It stays at the nursery it was
+        // born into, which is what a nursery is for, and everything else in
+        // this file applies to it: it eats, it sleeps, and the flood does not
+        // care how old anybody is.
+        if self.citizens[i].is_child() {
+            if let Some(n) = self.citizens[i].nursery {
+                if self.buildings[n.0 as usize].standing_now() {
+                    self.citizens[i].errand = Some(Errand::ToWork(n));
+                    self.citizens[i].walk_to(Dest::Building(n));
+                }
+            }
+            return;
+        }
         match self.citizens[i].job {
             // Everything that is not hauling: a producer stands at its
             // building, a builder walks to sites.

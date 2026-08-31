@@ -63,15 +63,19 @@ fn a_level_is_one_more_pair_of_hands() {
         let id = build(&mut w, kind);
         pay(&mut w, 500);
 
-        let before = match kind {
+        // "One more citizen the building can hold" is one sentence and three
+        // shapes: a bed at a cottage, a place at a nursery, a job everywhere
+        // else. A kind that holds people some fourth way has to come here and
+        // say which, which is the point of asking every kind.
+        let holds = |w: &World, id: BuildingId| match kind {
             Kind::Cottage => w.buildings[id.0 as usize].beds(),
-            _ => w.buildings[id.0 as usize].slots_for(Job::at(kind).unwrap()),
+            Kind::Nursery => w.buildings[id.0 as usize].places(),
+            _ => w.buildings[id.0 as usize]
+                .slots_for(Job::at(kind).expect("a kind that holds workers has a job")),
         };
+        let before = holds(&w, id);
         w.apply(ME, &Command::Upgrade { building: id }).unwrap();
-        let after = match kind {
-            Kind::Cottage => w.buildings[id.0 as usize].beds(),
-            _ => w.buildings[id.0 as usize].slots_for(Job::at(kind).unwrap()),
-        };
+        let after = holds(&w, id);
         assert_eq!(after, before + 1, "{kind:?} did not gain a pair of hands");
         assert_eq!(w.buildings[id.0 as usize].level, 2);
         // It keeps working while it grows: a farm that stopped feeding people

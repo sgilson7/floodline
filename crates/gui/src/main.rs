@@ -201,7 +201,13 @@ async fn main() {
             // *on* the map goes here too, or the two would disagree the moment
             // anybody zoomed.
             set_camera(&map.camera(&view));
-            draw::world(s.world(), me, input::selected(&input), &map);
+            draw::world(
+                s.world(),
+                me,
+                input::selected(&input),
+                input::ringed(&input),
+                &map,
+            );
             if !busy {
                 input.map_layer(&ui, s, &map);
             }

@@ -13,12 +13,18 @@ pub const MAP_Y: f32 = 0.0;
 
 /// Everything under the map camera. The caller sets it; this draws in map
 /// space and never asks where the window is.
-pub fn world(w: &World, me: PlayerId, selected: &[sim::CitizenId], view: &MapView) {
+pub fn world(
+    w: &World,
+    me: PlayerId,
+    selected: &[sim::CitizenId],
+    ringed: &[sim::CitizenId],
+    view: &MapView,
+) {
     let seen = view.visible();
     ground(w, seen);
     water(w, seen);
     buildings(w, seen);
-    citizens(w, selected);
+    citizens(w, selected, ringed);
     mules(w);
     pings(w);
     let _ = me;
@@ -108,7 +114,7 @@ fn buildings(w: &World, seen: (i32, i32, i32, i32)) {
 
 /// A circle with two lines for legs (design §1), and a ring in the owner's
 /// colour when selected.
-fn citizens(w: &World, selected: &[sim::CitizenId]) {
+fn citizens(w: &World, selected: &[sim::CitizenId], ringed: &[sim::CitizenId]) {
     for c in &w.citizens {
         if !c.alive() {
             continue;
@@ -119,6 +125,17 @@ fn citizens(w: &World, selected: &[sim::CitizenId]) {
 
         if selected.contains(&c.id) {
             draw_circle_lines(px, py, 5.0, 1.0, palette::INK);
+        }
+        // Whoever the households list is pointing at. A wider, warmer ring
+        // than a selection's, because it is a different question — "where are
+        // these people" rather than "who am I about to order".
+        if ringed.contains(&c.id) {
+            draw_circle_lines(px, py, 7.0, 1.0, palette::WARNING);
+        }
+        // A child is smaller, and drawn after the rings so it is still legible
+        // inside one.
+        if c.is_child() {
+            draw_circle(px, py, 1.0, palette::BACKDROP);
         }
         // A body and two legs, in the city's colour, and then what the job
         // adds. Everybody was the same circle until M8 and a player could not

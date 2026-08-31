@@ -50,7 +50,7 @@ pub enum Tool {
 /// them and the order the number keys pick them. `Hearth` is not among them:
 /// the run starts with the only one a city gets. `Road` and `Bridge` are laid
 /// by the road tool, which routes and bridges by itself (design §6).
-const BUILDABLE: [(Kind, &str, KeyCode); 8] = [
+const BUILDABLE: [(Kind, &str, KeyCode); 9] = [
     (Kind::Cottage, "cottage", KeyCode::Key1),
     (Kind::Farm, "farm", KeyCode::Key2),
     (Kind::Granary, "granary", KeyCode::Key3),
@@ -59,6 +59,7 @@ const BUILDABLE: [(Kind, &str, KeyCode); 8] = [
     (Kind::Stockpile, "stockpile", KeyCode::Key6),
     (Kind::Dike, "dike", KeyCode::Key7),
     (Kind::TradingPost, "post", KeyCode::Key8),
+    (Kind::Nursery, "nursery", KeyCode::Key9),
 ];
 
 /// A trade being composed. Design §6: a standing daily exchange, proposed by
@@ -87,9 +88,21 @@ pub struct Input {
     /// The building the player last clicked with the select tool. What the
     /// level button and `M` act on.
     chosen: Option<sim::BuildingId>,
+    /// Which half of the panel is showing.
+    tab: Tab,
+    /// Whoever the cursor is over in the households list, rung on the map.
+    /// The first thing in this game that connects a list to the world.
+    ringed: Vec<CitizenId>,
     /// How many segments the wall under the cursor would be, and what they
     /// would cost. Worked out with the ghost, drawn with the panel.
     wall_hint: Option<(usize, u16)>,
+}
+
+/// The two halves of the panel: what you can do, and who is doing it.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum Tab {
+    Tools,
+    Households,
 }
 
 /// Which tool puts a kind down. Everything is placed with a click except the
@@ -104,7 +117,8 @@ fn tool_for(kind: Kind) -> Tool {
 impl Default for Input {
     fn default() -> Input {
         Input { tool: Tool::Select, selected: Vec::new(), drag: None, trade: Draft::default(),
-                notice: None, wall_hint: None, chosen: None }
+                notice: None, wall_hint: None, chosen: None,
+                tab: Tab::Tools, ringed: Vec::new() }
     }
 }
 
@@ -142,7 +156,11 @@ impl Input {
         if self.trade.open {
             self.trade_dialog(ui, session, me);
         }
-        self.tools(ui, session, me, panel_top, view);
+        let top = self.tabs(ui, panel_top);
+        match self.tab {
+            Tab::Tools => self.tools(ui, session, me, top, view),
+            Tab::Households => self.households(ui, session, me, top),
+        }
         self.wall_cost(ui);
         self.notice();
     }
@@ -482,6 +500,94 @@ impl Input {
     }
 
     // ---- the panel ----------------------------------------------------------
+
+    /// The two tab buttons, and where the panel body starts under them.
+    fn tabs(&mut self, ui: &Ui, top: f32) -> f32 {
+        let left = LOGICAL_W - PANEL_W + 18.0;
+        let wide = PANEL_W - 36.0;
+        let half = (wide - 8.0) / 2.0;
+        let y = top + 10.0;
+        for (i, (tab, label)) in
+            [(Tab::Tools, "build"), (Tab::Households, "households")].into_iter().enumerate()
+        {
+            let r = Rect::new(left + i as f32 * (half + 8.0), y, half, 28.0);
+            if ui.button(r, label, true) {
+                self.tab = tab;
+                self.ringed.clear();
+            }
+            if self.tab == tab {
+                draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, palette::INK);
+            }
+        }
+        y + 30.0
+    }
+
+    /// One chip per household: who, where, how many children, and how close
+    /// the next one is.
+    ///
+    /// Hovering a chip rings its people on the map, which is only useful
+    /// because there is a camera to see them at — and is the first thing in
+    /// this game that connects a list to the world.
+    fn households(&mut self, ui: &Ui, session: &mut Session, me: PlayerId, top: f32) {
+        let left = LOGICAL_W - PANEL_W + 18.0;
+        let wide = PANEL_W - 36.0;
+        let mut y = top + 8.0;
+        self.ringed.clear();
+
+        let w = session.world();
+        let mine: Vec<&sim::Household> =
+            w.households.iter().filter(|h| h.owner == me && h.alive()).collect();
+        if mine.is_empty() {
+            draw_text(
+                "nobody shares a cottage yet",
+                left,
+                y + 16.0,
+                15.0,
+                palette::FAINT,
+            );
+            draw_text(
+                "put two people in one and give them a day",
+                left,
+                y + 34.0,
+                15.0,
+                palette::FAINT,
+            );
+            return;
+        }
+
+        for h in mine {
+            let chip = Rect::new(left, y, wide, 40.0);
+            let over = chip.contains(ui.mouse);
+            draw_rectangle(chip.x, chip.y, chip.w, chip.h, palette::BUTTON);
+            draw_rectangle_lines(
+                chip.x,
+                chip.y,
+                chip.w,
+                chip.h,
+                1.0,
+                if over { palette::INK } else { palette::RULE },
+            );
+            let names: Vec<&str> = h
+                .members
+                .iter()
+                .filter_map(|id| w.citizens.get(id.0 as usize))
+                .map(|c| sim::names::NAMES[c.name as usize])
+                .collect();
+            draw_text(&names.join(" and "), chip.x + 8.0, chip.y + 17.0, 16.0, palette::INK);
+            let line = if !h.settled() {
+                "settling in".to_owned()
+            } else {
+                format!("{} children - next {}%", h.children.len(), h.expecting())
+            };
+            draw_text(&line, chip.x + 8.0, chip.y + 33.0, 14.0, palette::FAINT);
+
+            if over {
+                self.ringed = h.members.to_vec();
+                self.ringed.extend(h.children.iter().copied());
+            }
+            y += 46.0;
+        }
+    }
 
     fn tools(&mut self, ui: &Ui, session: &mut Session, me: PlayerId, top: f32, view: &MapView) {
         let left = LOGICAL_W - PANEL_W + 18.0;
@@ -898,6 +1004,7 @@ fn kind_name(k: Kind) -> &'static str {
         Kind::Granary => "granary",
         Kind::Stockpile => "stockpile",
         Kind::TradingPost => "trading post",
+        Kind::Nursery => "nursery",
         Kind::Dike => "dike",
         Kind::Road => "road",
         Kind::Bridge => "bridge",
@@ -951,5 +1058,10 @@ fn cost_line(c: sim::building::Goods) -> String {
 /// Selected citizens, for the renderer's owner ring.
 pub fn selected(input: &Input) -> &[CitizenId] {
     &input.selected
+}
+
+/// Whoever the households list is pointing at.
+pub fn ringed(input: &Input) -> &[CitizenId] {
+    &input.ringed
 }
 

@@ -223,6 +223,7 @@ pub fn kind_key(k: Kind) -> &'static str {
         Kind::Granary => "granary",
         Kind::Stockpile => "stockpile",
         Kind::TradingPost => "post",
+        Kind::Nursery => "nursery",
         Kind::Dike => "dike",
         Kind::Road => "road",
         Kind::Bridge => "bridge",

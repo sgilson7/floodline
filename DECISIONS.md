@@ -2179,3 +2179,49 @@ the second day of the age: founding two cities and laying a road across a river
 takes four days of simulated time now, and the test's third day of trading had
 quietly become the impact day, so the flood took the road and the failure read
 as "trade moved nothing" rather than "the water broke the road".
+
+---
+
+## 2026-08-31 — Families, children, and the one thing that adds a citizen
+
+M9, and the largest addition to `sim` since the MVP.
+
+**Being fed is the gate, and it is a gate rather than a brake.** A hungry day
+sets a household's progress back to nought rather than pausing it, because a
+gate that only slows you down is not a gate. `families::how_a_city_grows` is
+the measurement: a fed city of eight is ten by the first flood and twelve by
+the second, and a hungry one never leaves eight. That is what makes the granary
+decide the *size* of a village and not only whether it survives.
+
+**No nursery, no children.** A child is born into one and takes a place there,
+so it is a building a player chooses to put up rather than a rule that happens
+to them — and a full nursery is a city that has decided how big it wants to be.
+A level buys a nursery one more place, which is the same one-sentence rule M7
+sells everywhere else: a level is one more citizen the building can hold, and a
+child is a citizen.
+
+**The pairing has to be a function of the world.** Two adults sharing a cottage
+become a household, and a cottage with five beds and five people in it is not
+two and a half families: it is one household and three lodgers, and *which two*
+is decided in id order on every machine. Two peers that disagreed about who
+married whom would desync on the next child.
+
+**Appending only, and it is the only place a citizen is ever added.** Ids are
+indices into `World::citizens` in half a dozen places and the crowd, the flood
+and every roster iterate it, so `bear_a_child` pushes and nothing anywhere
+reorders or reuses. `two_peers_raise_the_same_children` runs ten thousand ticks
+with births in them and compares checksums every five hundred.
+
+**A child is a citizen in every way but work.** It does not haul, farm or
+build — `assign` refuses it with "too young to work" and `find_work` sends it
+to its nursery — and it eats, it can be ordered uphill, and the flood does not
+care how old anybody is. It comes of age on a tick it was born knowing, two
+ages later, so a child born in the first age is working by the third and one
+born just before the last flood never works at all.
+
+**The households tab is the first thing in this game that connects a list to
+the world.** One chip per household with the two names, how many children and
+how close the next one is; hovering it rings those people on the map in a
+wider, warmer ring than a selection's — a different question ("where are these
+people") deserving a different mark. It is only useful because M2 put a camera
+over the map to see them at.

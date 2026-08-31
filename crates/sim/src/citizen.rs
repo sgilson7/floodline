@@ -27,6 +27,25 @@ pub struct PlayerId(pub u8);
 /// Hauler is what an unassigned citizen does, which is why `Citizen::job` is
 /// an `Option` and `None` means hauling rather than idling: a city where
 /// nobody moves anything is a city that starves next to a full granary.
+/// A child, or somebody old enough to work.
+///
+/// A child does not haul, farm or build: it occupies a place in a nursery and
+/// comes of age on a tick decided when it was born. It is a citizen in every
+/// other way — it eats, it can be ordered uphill, and the flood does not care
+/// how old anybody is.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Age {
+    /// The tick this one becomes an adult.
+    Child { of_age: u32 },
+    Adult,
+}
+
+impl Age {
+    pub fn is_child(self) -> bool {
+        matches!(self, Age::Child { .. })
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Job {
     Hauler,
@@ -158,6 +177,11 @@ pub struct Citizen {
     pub held: bool,
     /// Carried by the water rather than walking: too deep to stand up in.
     pub swept: bool,
+    /// A child until the tick it names, then an adult. Everybody the run
+    /// starts with is an adult.
+    pub age: Age,
+    /// The nursery a child is kept at, and nothing for an adult.
+    pub nursery: Option<BuildingId>,
 }
 
 impl Citizen {
@@ -181,6 +205,39 @@ impl Citizen {
             drowning_for: 0,
             held: false,
             swept: false,
+            age: Age::Adult,
+            nursery: None,
+        }
+    }
+
+    /// A child, born at `now` into `nursery`.
+    pub fn born(
+        id: CitizenId,
+        owner: PlayerId,
+        name: u16,
+        pos: V2,
+        now: u32,
+        nursery: BuildingId,
+    ) -> Citizen {
+        let mut c = Citizen::new(id, owner, name, pos);
+        c.age = Age::Child { of_age: now + COMING_OF_AGE };
+        c.nursery = Some(nursery);
+        c
+    }
+
+    pub fn is_child(&self) -> bool {
+        self.age.is_child()
+    }
+
+    /// Grow up, if it is time. Returns true on the tick it happens.
+    pub fn come_of_age(&mut self, now: u32) -> bool {
+        match self.age {
+            Age::Child { of_age } if now >= of_age => {
+                self.age = Age::Adult;
+                self.nursery = None;
+                true
+            }
+            _ => false,
         }
     }
 
