@@ -2363,3 +2363,58 @@ about the game rather than about the playtest; making it during the setup for a
 run, on evidence from reading rather than from playing, is the kind of change
 this project has twice found reasons to regret. They are written down so the
 account has them, and M10.8 is where they are answered — with a run behind them.
+
+---
+
+## 2026-08-31 — The soak, and why it can only be eight minutes long
+
+M10.4's ten-minute soak found that a ten-minute soak is not possible, and the
+reason is the game rather than the harness.
+
+The measurement, on the deployed build, two browsers, nobody playing:
+
+    10:07:00  watching 2 peers for 900s, a look every 5s
+    10:08:50  city 0 turned a day (now 1); city 1 turned a day (now 1)
+    10:10:51  city 0 turned a day (now 2); city 1 turned a day (now 2)
+    10:12:51  city 0 turned a day (now 3); city 1 turned a day (now 3)
+    10:14:37  city 0 IS OVER - the score screen is up; city 1 IS OVER
+    10:14:37  city 0: 3 days in 7.6 min, 0 samples with no tick, 0 red, ended
+    10:14:37  city 1: 3 days in 7.6 min, 0 samples with no tick, 0 red, ended
+    10:14:37  CLEAN
+
+**The clock is exact.** A day is nominally two minutes and the three turns came
+121 and 120 seconds apart. Nothing throttled, nothing drifted, neither peer
+ever drew no tick, and the status row never went red — for the whole life of
+the game, on two browsers with the flags of the previous entry.
+
+**And the whole life of an unattended game is about eight minutes.** Nobody
+feeds anybody, so both cities starve on day four and the run ends. A longer
+soak cannot be run without playing, and playing is the rehearsal, not a soak.
+That is the honest limit and it is written here rather than worked around: the
+harness is proven for as long as there is a game to prove it against, and
+M10.5 extends the evidence by keeping the cities alive.
+
+It matters for M10.6 too. Thirty-six minutes is three ages, and an unattended
+city does not last one. Both agents have to be feeding their people inside the
+first four days or the run ends on its own, and a run that ends that way is a
+finding about the food economy rather than a failed setup.
+
+**The first soak reported twenty-six failures for a game that had finished
+normally.** An ended game and a stopped page are identical at the tick row —
+which is the only place the difference matters and the only place it cannot be
+seen. `still_playing` tells them apart at the **tab row**: `main.rs` draws the
+score screen *instead of* `panel_layer` when the run is over, so the tabs go
+with it. Measured at 847 lit pixels live and none once it has ended.
+
+The tab row and not the build menu, which was the first attempt: a player
+merely *looking at the households tab* has no build menu either, and reporting
+"the game has ended" halfway through a run because somebody checked on their
+families would have been worse than the fault it was meant to catch.
+
+**One more thing that would have made the referee useless.** `Status::Desync`
+is drawn in `palette::ALARM` (230, 84, 71) and `Status::WaitingOn` in
+`palette::WARNING` (240, 184, 71) — in the same row. `assign.py::alarm_band`'s
+"is it reddish" test matches both, and it is right to, because it is looking at
+a row where only a refusal is ever coloured. Here it would report a desync
+every few seconds, since waiting on the other peer is what lockstep does all
+day. `alarm_pixels` separates them on green.

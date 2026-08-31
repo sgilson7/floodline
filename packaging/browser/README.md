@@ -30,6 +30,8 @@ after that it is about a minute. `.venv-test/` is gitignored.
 | `table.py` | not a check: the one copy of the lobby dance. Run it directly to leave two browsers standing in one game with a debugging port each, which is how a run starts |
 | `driver.py` | not a check: an agent's hands and eyes, one CDP command at a time, because an agent's turns are separate processes |
 | `driver_check.py` | one of each of the driver's verbs doing something visible in a live game — the hands, proven before a run depends on them |
+| `referee.py` | not a check: watches both peers of a running game and writes down whether they stayed together. Reads only what is drawn, issues no input, and needs `table.py` already running |
+| `AGENT-BRIEF.md` | not a script: everything an agent playing this is told, and nothing from `crates/sim` |
 
 The three `echo_*` scripts drive `web/echo.html`, which drives `window.FLOODLINE_RTC`
 directly — no wasm, no `sim`, no lockstep. That separation is design 9.6's and
