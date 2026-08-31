@@ -170,3 +170,133 @@ measurement in M12.8, M12.9 or M12.10 taken against the pre-M12.A table is
 reading a game that no longer exists.
 
 ---
+
+## M12.B — the builder's hut
+
+**The change.** `Kind::BuildersHut`, free, `Job::at` answers `Builder` for it,
+and `find_work` lets go of the hut instead of walking to it.
+
+**Follows from.**
+
+1. **A hut's builders are no longer counted against the hut.** `find_work`
+   clears `workplace` the first time it looks, so the slot accounting in
+   `assign` sees nought held and a player can name a fifth, a sixth, a
+   twentieth builder. That is deliberate — `slots_for` returns `usize::MAX` for
+   a hut and says why — but it means **`job_slots()` for a hut is a display
+   number that constrains nothing.** If a future roster wants to show "4 of 4",
+   it has to count `job == Some(Builder)` and not the hut's workers.
+2. **`BUILDER_SLOTS` still caps a site**, and that is now the *only* place it
+   caps anything. Four builders on one site, any number of builders in a city.
+3. **The panel did not move, by luck.** Eleven buttons needed six rows and so
+   did twelve, because eleven left a gap at the end and the hut filled it. The
+   next building costs a row — and M12.C was the next building, so this was
+   luck that lasted one milestone.
+4. **The button digit stopped being the index.** With ten buildings the tenth
+   is `0`, and `format!("{}", i + 1)` would have drawn `10`. Now read off the
+   `KeyCode`, so the label and the shortcut cannot disagree.
+5. **An unassigned citizen is still a hauler that builds when idle**, and that
+   is untouched on purpose — it is what keeps an unattended city from dying
+   with the materials on the ground.
+
+**Watch.** A builder whose site finishes has `workplace = None` and
+`job = Some(Builder)` for ever. If a later change makes `find_work` clear the
+job when there is nothing to build, the hut silently stops meaning anything.
+
+---
+
+## M12.C — the cookery, and a fifth good
+
+**The change.** `Good::Meal`, `Kind::Cookery`, `Job::Cook`, and `produce` learns
+to consume.
+
+**Follows from, and this is the longest list in the document.**
+
+1. **`Goods` is five wide and `Goods::of` still takes four.** Nothing *costs*
+   meals, and all twenty-seven call sites meant zero. A fifth parameter would
+   have made every one of them say so for no gain. `Goods::meal(n)` is the
+   constructor. **Anyone adding a sixth good must decide this again.**
+2. **The snapshot grew 60 bytes**, 102 419 → 102 479, against 47 KB of
+   headroom. **The build hash changed**, so two machines on the old build and
+   the new cannot meet — by design, and it means the deployed page and any open
+   tab must both reload.
+3. **`produce` has an input path now.** It was "worker-ticks become a good out
+   of nothing" for every building in the game. A cookery breaks when its larder
+   is empty *and keeps its accumulated `work`*, so cooks waiting on a hauler
+   have not wasted the morning.
+4. **`stores` grew a sibling, `takes`.** A cookery is somewhere to *put* food
+   and not somewhere to *fetch* it — `stores_for` answers both questions, and a
+   cookery in the fetch answer would have haulers carrying the same sack
+   between the granary and the kitchen for the rest of the run.
+5. **A new haul, `next_feed_run`,** placed between supply runs and collection,
+   and only for a cookery with somebody in it. An unmanned kitchen is not worth
+   a walk.
+6. **Meals are eaten first, always.** A granary holding both spends the better
+   one. This is the only ordering a player can predict, and it means **a city
+   with a cookery drains its meals before its food** — so "how much food do I
+   have" and "how long will it last" are different questions now, which is why
+   `days_of_food` counts a meal at `MEAL_WORTH`.
+7. **`nearest_food` had to learn about meals** or a city with a working cookery
+   could starve in front of a full larder. That is one line, and it was one
+   line away from being the worst bug in the game.
+8. **The treasury row could not take a fifth figure.** Two layout facts,
+   measured before anything was drawn: eleven buildings need a seventh row of
+   buttons, which is 40 px the panel does not have — the trade offer sat 93 px
+   above `VARIABLE_FLOOR` and a selected building's level/move row costs 48, so
+   a seventh row at the old pitch left **five**. The overflow counter would then
+   have quietly stopped drawing the trade row, which is the M10.6 fault wearing
+   its other face: not drawn *over* the foot, but not drawn at all.
+   `TOOL_PITCH` went 40 → 36 and the row now costs four pixels. Slack: 93 → 81.
+9. **And the row itself is 16 point, not 18**, because five figures do not fit
+   on 330 px. It hands its two pixels back so nothing below it moves, and the
+   meals figure appears **only when the city has meals**. A row whose *content*
+   varies is safe; a row that comes and goes is what has bitten this panel five
+   times.
+10. **`panel.py` stopped carrying 272 as a literal** and derives the rows under
+    the build grid from the grid's height. `play.py` and `assign.py` keep their
+    own literals as tripwires and are **expected to fail once** on the next
+    browser run — that is them working.
+
+**Watch — three things.**
+
+* **The strategy table has not been re-measured since this landed.** M12.A's
+  numbers are the baseline for M12.8–M12.10, and a cookery changes what a city
+  can do with the same farmland. **Re-measure before Part IV.**
+* A cookery drains the granary into meals. A city that builds one and then
+  loses it to the flood has a larder of meals and no way to make more, which is
+  fine, and a city that builds one *instead of* a second farm has fewer raw
+  units in absolute terms. Nothing tells the player either thing.
+* `COOK_TICKS_PER_UNIT` is 22 against a farm's 11 so a cook converts at the
+  same worth-per-tick a farmer grows. If `FARM_TICKS_PER_UNIT` moves again,
+  **this has to move with it** or the cookery becomes either free food or a
+  waste of two people.
+
+---
+
+## M12.D — the people tab, and progress
+
+**The change.** A third tab listing one chip per citizen, and a progress line
+over anyone working on the map.
+
+**Follows from.**
+
+1. **No sim change and no snapshot cost**, and that was a constraint rather
+   than an outcome. `draw::task_progress` derives everything from `work`,
+   `progress`, `food` and `rest`. A progress field per citizen would have been
+   two bytes each on the wire to say what the world already knows.
+2. **A walker has no bar anywhere.** The world records where somebody is going,
+   not where they set out from. This is a real gap in what can be shown and it
+   is left as a gap rather than guessed at.
+3. **The tab row is three tabs and the same height.** A taller row would have
+   moved the entire build tab down and there are 81 px left.
+4. **The chip list is capped by `VARIABLE_FLOOR`** and says "and N more". A
+   city of eight fits with room to spare; a city of twenty does not, and
+   **growth now has a visible ceiling in the panel** that nobody has played
+   against. M12.10 may make cities that large.
+5. **`ringed` is now shared between two tabs.** Hovering a person's chip rings
+   them exactly as hovering a household rings its members. Both clear it on
+   entry, so the two cannot fight.
+6. **Clicking a chip replaces the selection** rather than adding to it. That is
+   the simplest rule and it is not obviously the right one — a player building
+   a work gang may want to add. Left as it is, deliberately, and named here.
+
+---
