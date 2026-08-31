@@ -500,7 +500,17 @@ eating* at, so a household never got past 99 of the 1 200 consecutive ticks it
 needed. Fixed, with a test that plays rather than feeds.
 
 Thirteen further findings are ranked in the handover: five confirmed and small,
-four reported but **not reproduced**, four design questions. The single next
-action is to reproduce the first of the unreproduced ones — right-clicking the
-cell you built on does not always staff the building, silently, on the game's
-most common gesture.
+four reported but **not reproduced**, four design questions.
+
+**But the first priority is not one of them.** Playing laptop-to-desktop, the
+author got through one game and has not been able to get two machines into a
+lobby since: the joiner sits for ever on *"found the host, asking for a
+city..."*. That means it has met a peer and sent its `Hello` and never received
+a `Welcome` — a handshake failure, not a transport one. `mind_the_silence`
+should be saying so after a few seconds and never does, and `peer_left` resets
+`unanswered` to nought on every departure, which would keep the timer from ever
+firing in a room with churn.
+
+Nothing tests it: `rejoin.py` is lobby-only and no check anywhere plays a run to
+its end and then puts two peers into a lobby again. The `cargo` reproduction
+needs no browser — run a loopback game to `finished`, then try to join it.

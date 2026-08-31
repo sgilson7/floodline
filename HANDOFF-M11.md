@@ -25,7 +25,10 @@ build and this document all agree at commit `998b50d`.
 | The previous run's account | `PLAYTEST-M10.md` |
 | Every decision, in date order | `DECISIONS.md` — the last dozen entries are M11 |
 
-M11.1 through M11.9 are **done**. This document is what M11.9 turned up.
+M11.1 through M11.9 are **done**. This document is what M11.9 turned up —
+and, at the top, one thing it did not: **two machines can no longer get into a
+lobby together after a game has been played.** That is the first priority and
+nothing in the playtest outranks it.
 
 ## What M11 was
 
@@ -63,7 +66,84 @@ same.
 
 ---
 
-## The work, ranked
+## First priority: a second game cannot be joined
+
+**Reported first-hand by the author, playing laptop-to-desktop.** One game was
+played to the end. Since then *no* attempt to get two machines into a lobby has
+worked: the joiner sits for ever on
+
+    found the host, asking for a city...
+
+This outranks everything else in this document. It is not a legibility problem
+or a balance question — **it makes the game unplayable a second time**, and the
+whole of M10 and M11 rests on two people being able to get into a room.
+
+### What that screen means, exactly
+
+`lobby.rs::joining_screen` picks that line when
+`session.connected() > 0 && !session.roster_empty()` and **not**
+`session.welcomed()`. So the joiner has a live peer connection and a roster —
+it has met somebody — and has sent its `Hello` and never received a `Welcome`.
+The failure is in the handshake, not in the transport or the relays.
+
+### What is not happening, and should be
+
+`Lockstep::mind_the_silence` exists precisely for this: after `SILENCE_FRAMES`
+it is meant to say *"connected to the host, but it is not answering. It may
+have left its lobby — ask for a fresh room code."* **The author never sees that
+message**, which is itself a bug and is the best clue in here.
+
+Look at `peer_left` on the joiner: when the peer it greeted goes away it sets
+`greet = true` and **`unanswered = 0`**. Every departure restarts the silence
+timer. In a Trystero room with any churn — a ghost joining and leaving, a stale
+tab reconnecting — the counter never reaches `SILENCE_FRAMES`, so the joiner
+greets, waits, resets, greets again, and is never told anything. **That is a
+loop with no message, which is exactly what was reported.**
+
+### The ranked suspects
+
+1. **Ghosts in a reused room.** If the same room *name* is typed each time —
+   which is what a person playing with themselves would naturally do — every
+   previous session's peer may still be discoverable in it. The joiner then
+   greets a corpse. `DECISIONS.md`'s "a lobby that was left kept its room"
+   fixed the case where a lobby was *abandoned*; nothing has ever tested the
+   room a *finished run* leaves behind.
+2. **A finished host that never went back to the lobby.** `main.rs` only drops
+   the session on Escape or Enter at the score screen. A host who closes the
+   tab, or who leaves the score screen up, is still in the room with a world at
+   age 3 — and `Message::Hello`'s handler answers `Refusal::TooLate` for any
+   world past age 1 day 1. That path *does* send a `Bye`, so the joiner should
+   see a reason; if it does not, the `Bye` is being lost or the joiner is
+   greeting somebody else entirely.
+3. **The build hash.** Two machines on different builds cannot join, by design
+   (§9.4) — but that is refused with a message, and the room name carries the
+   hash so they should not even meet. Rule it out first because it is one
+   glance at the two lobbies: the hash is on screen on both.
+
+### Nothing tests this
+
+`rejoin.py` covers a seat given back, an abandoned lobby leaving its room, and
+hosting a second game — **all of it lobby-only**. There is no check anywhere,
+in `cargo` or in the browser, that plays a run to its end and then puts two
+peers into a lobby again. That gap is why this survived M10 and M11.
+
+### How to go at it
+
+Reproduce in `cargo` first if you can: `net/tests/lockstep.rs` has the loopback
+star and `Game::new`, so "run to `finished`, then stand up a fresh `Lockstep::join`
+against the same host" is a test that needs no browser. If it passes there, the
+fault is in `net-web`/the room rather than in the handshake, and
+`packaging/browser/rejoin.py` is where to add the browser case — it already has
+the machinery for three tabs.
+
+**Whatever the cause turns out to be, `mind_the_silence` should still have
+spoken.** Fixing the timer so a joiner is always told something after a few
+seconds is worth doing on its own, independently of the root cause, because it
+converts a silent hang into a sentence a player can act on.
+
+---
+
+## The rest of the work, ranked
 
 Three groups, in the order they are worth doing. The account has the players'
 own words for all of it.
@@ -249,10 +329,13 @@ existed to check.
 
 ## The single next action
 
-**Reproduce fault 6** — the silent right-click that does not staff a building.
-It is the game's most common gesture, it fails without a word, and it cost a
-player two game-days in a run that only lasts eighteen minutes. Write the
-browser check that places a forester and staffs it at the clicked cell, watch
-it fail, and only then look at `place`, `occupancy` and `building_at`.
+**The lobby.** A second game cannot be joined, and that is worth more than
+every finding below it put together — a game two people cannot start twice is
+not a game. Start with the `cargo` reproduction, because it needs no browser
+and no relays: run a loopback game to `finished`, then try to join it.
 
-Then group A in order. It is a session's work and it is all certain.
+Then **fix `mind_the_silence` whatever the cause turns out to be**: a joiner
+that waits for ever should always end up being told something.
+
+After that, fault 6 — the silent right-click that does not staff a building —
+and then group A in order, which is a session's work and all of it certain.
