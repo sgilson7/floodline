@@ -563,11 +563,31 @@ pub const FOOD_A_DAY: u32 =
 /// Farmer-ticks per unit of food produced.
 ///
 /// A citizen burns a thousand points of food need a day and one unit fills a
-/// hundred, so eating costs about twelve units a day. At thirty-two ticks a
-/// unit a farmer makes thirty-seven a day and so feeds about three people, and
-/// a three-slot farm feeds nine. A founding party of eight is therefore one
-/// farm and some room to grow, rather than a city where everybody farms.
-pub const FARM_TICKS_PER_UNIT: u32 = 32;
+/// hundred, so eating costs about twelve units a day — `FOOD_A_DAY`, which is
+/// derived rather than chosen.
+///
+/// **Eleven, and it was thirty-two.** At thirty-two a farmer made thirty-seven
+/// units a day and fed about three people, so a three-slot farm fed nine and a
+/// founding party of eight was one farm with nothing spare. That is the number
+/// three playtests were played against, and in all three the same thing
+/// happened: feeding the city was the whole game, and every other verb —
+/// walling, growing, trading, getting uphill — was paid for in days nobody
+/// could afford. M11.9's own account of building a dike is the clearest
+/// statement of it: *"for a day and a half nobody farmed and nobody finished
+/// the cottages, which is very likely why the births never came."*
+///
+/// At eleven a farmer makes a hundred and nine a day and feeds about nine, and
+/// a three-slot farm feeds twenty-seven. One farm now covers a founding party
+/// three times over, which is the point: **the food clock stops being the only
+/// clock.** A city that ignores food still dies — `FOOD_A_DAY` has not moved,
+/// a farm still has three slots, a farm still has to be built and hauled from,
+/// and a farm under water still produces nothing.
+///
+/// Measured either side, in `three_full_runs_of_each_strategy`, and the table
+/// is in SECOND-ORDER-M12.md. This is a balance constant and it moved on a
+/// direct instruction, not on a measurement — the measurement says what it
+/// did, which is not the same thing and is written down as such.
+pub const FARM_TICKS_PER_UNIT: u32 = 11;
 
 /// Worker-ticks per unit of wood and of stone.
 ///

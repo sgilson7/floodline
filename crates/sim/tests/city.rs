@@ -687,3 +687,110 @@ fn assign_takes_the_citizens_it_is_given_in_the_order_given() {
         );
     }
 }
+
+#[test]
+fn a_farm_feeds_a_founding_party_several_times_over() {
+    // `FARM_TICKS_PER_UNIT`, held to what the game actually does — which
+    // nothing did until now. Tripling a farm's output in M12 moved **not one
+    // of the two hundred and eighty-nine tests in the suite**, because not one
+    // of them asked what a farm feeds. Three playtests found the number by
+    // hand instead, and all three found the same thing: feeding the city was
+    // the whole game, and walling, growing and getting uphill were paid for in
+    // days nobody had.
+    //
+    // Bounded on both sides, like the forester and the quarry above. Too
+    // little and food is the only clock; too much and there is no clock at
+    // all, and a granary nobody has to think about is a granary that should
+    // not be on the map.
+    use sim::balance::{FOOD_A_DAY, NEED_FULL, TICKS_PER_DAY};
+    use sim::building::{Facing, Good, Goods, Kind};
+    use sim::command::Command;
+    use sim::nav::Nav;
+    use sim::world::World;
+    use sim::PlayerId;
+
+    let me = PlayerId(0);
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+    let (hx, hy) = w.map.hearth_sites[0];
+
+    let mut placed = None;
+    'ring: for r in 3..40i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (x, y) = (hx + dx, hy + dy);
+                if w.can_place(me, Kind::Farm, Facing::EastWest, x, y).is_ok() {
+                    w.apply(
+                        me,
+                        &Command::Place {
+                            kind: Kind::Farm,
+                            facing: Facing::EastWest,
+                            x: x as u8,
+                            y: y as u8,
+                        },
+                    )
+                    .unwrap();
+                    placed = Some(w.buildings.last().unwrap().id);
+                    break 'ring;
+                }
+            }
+        }
+    }
+    let id = placed.expect("nowhere for a farm on seed 31");
+    for g in Good::ALL {
+        let want = w.buildings[id.0 as usize].outstanding().get(g);
+        if want > 0 {
+            w.deliver_to(id, g, want);
+        }
+    }
+    assert!(w.build_at(id, Kind::Farm.build_ticks()));
+
+    let all: Vec<sim::CitizenId> =
+        w.citizens.iter().filter(|c| c.owner == me).map(|c| c.id).collect();
+    let room = w.will_take(me, id, &all);
+    assert_eq!(room, Kind::Farm.job_slots(), "a farm did not offer its slots");
+    let take: Vec<sim::CitizenId> = all.into_iter().take(room).collect();
+    w.apply(me, &Command::Assign { citizens: take, building: id }).unwrap();
+
+    // A day.
+    //
+    // **What this arranges** — the rule M11 paid for: hunger is held off, so
+    // this asks what a farm makes rather than whether the same eight people
+    // can also feed themselves while making it; and the farm's output buffer
+    // is emptied every tick, which is what a hauler that keeps up does. Both
+    // matter, and the second one is not a formality. A city starts with a
+    // Hearth, and a Hearth deliberately holds **no food** (design §3.3 gives
+    // it no larder), so until a granary is standing there is nowhere on the
+    // map to put a farm's output: the buffer fills at `FARM_BUFFER` and the
+    // farmers stop. Measured without draining, a farm makes exactly sixty
+    // units in a day at *any* value of this constant, which is the buffer and
+    // not the rate. That is a real thing about the game and it is not what
+    // this test is for.
+    let mut made: u16 = 0;
+    for _ in 0..TICKS_PER_DAY {
+        for c in &mut w.citizens {
+            c.food = NEED_FULL;
+            c.rest = NEED_FULL;
+        }
+        w.tick(&mut nav, &[]);
+        let b = &mut w.buildings[id.0 as usize];
+        made += b.store.get(Good::Food);
+        b.store = Goods::NONE;
+    }
+    let fed = made as u32 / FOOD_A_DAY;
+    println!("  a day of one farm: {made} food, which keeps {fed} people");
+
+    assert!(
+        fed >= 16,
+        "one farm feeds {fed} people a day, and a founding party is eight — \
+         food is the only clock again"
+    );
+    assert!(
+        fed <= 48,
+        "one farm feeds {fed} people a day, which is a granary nobody has to \
+         think about"
+    );
+}
