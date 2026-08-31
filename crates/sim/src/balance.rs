@@ -173,10 +173,30 @@ pub const COMING_OF_AGE: u32 = 2 * DAYS_PER_AGE * TICKS_PER_DAY;
 /// How many children one nursery holds. No nursery, no children.
 pub const NURSERY_PLACES: usize = 4;
 
-/// How full a household's members and its city's larder must be for a child.
-/// The same bar as `FED_ENOUGH`, so "a fed city grows" means what a player
-/// would expect it to mean.
-pub const CHILD_FOOD: u16 = FED_ENOUGH;
+/// How full a household's members must be for their time together to count.
+///
+/// **Low on purpose, and this was a bug for three playtests.** It used to be
+/// `FED_ENOUGH`, which reads like the right idea — "a fed city grows" — and is
+/// the exact level at which a citizen *stops eating*. Food then decays a point
+/// a tick, so a citizen is at that level for one tick and below it for the
+/// rest of its life. `together` needs `TICKS_PER_DAY` **consecutive** ticks
+/// with both members above the bar, and a bar at the top of the cycle can
+/// never be held. Measured, in `what_a_fed_household_actually_manages`: the
+/// best a household in a well-fed city ever managed was 99 ticks of the 1 200
+/// it needed, and no city in three playtests ever grew past the eight it was
+/// founded with.
+///
+/// `how_a_city_grows` did not catch it because it sets `c.food = NEED_FULL`
+/// every tick, so it has only ever tested a city that cannot get hungry.
+///
+/// The bar has to sit *below the trough* of an ordinary cycle, because the
+/// cycle is inherent: a citizen goes to eat at `HUNGRY` and stops at
+/// `FED_ENOUGH`, and dips further while it walks to the granary. Measured at
+/// this level a household settles and goes on to bear children; at `HUNGRY` it
+/// still stalls at 699 of 1 200. What it now means is "neither of them is
+/// failing to get fed", which is the gate M9 wanted — a city that cannot feed
+/// its people still never grows.
+pub const CHILD_FOOD: u16 = NEED_FULL / 10;
 
 // ---- trade on the road -----------------------------------------------------
 

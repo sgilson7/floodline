@@ -322,3 +322,74 @@ fn how_a_city_grows() {
         }
     }
 }
+
+/// A household in an ordinary city settles, without anybody force-feeding it.
+///
+/// The regression guard for the bug M11.9's playtest found. `CHILD_FOOD` was
+/// `FED_ENOUGH`, which is the level a citizen *stops eating* at, so both
+/// members had to hold a level they were above for one tick in every cycle —
+/// for `TICKS_PER_DAY` consecutive ticks. No household ever got past 99 of the
+/// 1 200 it needed and no city in three playtests ever grew past eight.
+///
+/// `how_a_city_grows` sets `c.food = NEED_FULL` every tick and so has never
+/// been able to see this. Nothing here feeds anybody: the city eats the way a
+/// played city eats.
+#[test]
+fn a_household_in_a_fed_city_settles_without_being_force_fed() {
+    let (mut w, mut nav, _, _) = a_family();
+    let mut settled_at = None;
+    for t in 0..3 * TICKS_PER_DAY {
+        w.tick(&mut nav, &[]);
+        if settled_at.is_none() && w.households.iter().any(|h| h.alive() && h.settled()) {
+            settled_at = Some(t);
+        }
+    }
+    let at = settled_at.expect(
+        "no household settled in three days of an ordinary fed city -          CHILD_FOOD is probably above the trough of a citizen's food cycle again",
+    );
+    assert!(
+        at < 2 * TICKS_PER_DAY,
+        "settling took {at} ticks, which is more than the day it is meant to"
+    );
+}
+
+/// What a household in an ordinary, well-fed city actually manages.
+///
+/// M11.9's directed playtest asked two players to grow a city above eight.
+/// Neither could: both built cottages, a nursery and a full granary, both
+/// formed households, and both watched them read "settling in" for four days
+/// and never bear a child. Three playtests in, no city has ever exceeded the
+/// eight it was founded with.
+///
+/// `how_a_city_grows` says growth works, and it does — but it force-feeds
+/// `c.food = NEED_FULL` every tick, so it has never tested the condition a
+/// played city has to meet. This measures that condition instead.
+#[test]
+#[ignore]
+fn what_a_fed_household_actually_manages() {
+    let (mut w, mut nav, _, _) = a_family();
+    let mut lowest = u16::MAX;
+    let mut highest = 0u16;
+    let mut best_together = 0u32;
+
+    for _ in 0..4 * TICKS_PER_DAY {
+        w.tick(&mut nav, &[]);
+        for c in w.citizens.iter().filter(|c| c.alive() && !c.is_child()) {
+            lowest = lowest.min(c.food);
+            highest = highest.max(c.food);
+        }
+        for h in w.households.iter().filter(|h| h.alive()) {
+            best_together = best_together.max(h.together);
+        }
+    }
+
+    println!("  a citizen's food over four days: {lowest} to {highest}");
+    println!("  CHILD_FOOD is {CHILD_FOOD}, and FED_ENOUGH {FED_ENOUGH}");
+    println!("  the best any household managed: together = {best_together}");
+    println!("  it needs {TICKS_PER_DAY} consecutive ticks to settle");
+    println!(
+        "  households {}, children {}",
+        w.households.len(),
+        w.citizens.iter().filter(|c| c.is_child()).count()
+    );
+}

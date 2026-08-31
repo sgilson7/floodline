@@ -2793,3 +2793,46 @@ is a bit over one screen pixel at the default zoom, and both players said they
 could never count their own. Everything about a citizen is scaled by
 `(1/zoom).clamp(1.0, 2.2)`, so they hold a couple of pixels wherever the camera
 is and a close-up looks exactly as it did.
+
+---
+
+## 2026-08-31 — No city could grow, and the probe was the reason nobody knew
+
+M11.9's directed playtest asked two agents to get a city above eight souls.
+Neither could, and the cause is a bug that has been in the game since M9 and
+that the one probe pointed at the mechanism could not see.
+
+A household accumulates `together` only while **both** members are at or above
+`CHILD_FOOD`, and it needs `TICKS_PER_DAY` *consecutive* such ticks to settle.
+`CHILD_FOOD` was `FED_ENOUGH`, which is by definition the level at which a
+citizen **stops eating** — food then decays a point a tick, so a citizen is at
+that level for one tick of each cycle and below it for the rest. The counter
+reset almost every tick.
+
+    a citizen's food over four days: 0 to 999
+    CHILD_FOOD is 900, and FED_ENOUGH 900
+    the best any household managed: together = 99
+    it needs 1200 consecutive ticks to settle
+
+**Ninety-nine of twelve hundred, for ever.** Both players built cottages, a
+nursery, kept three hundred food in the granary, formed households, and watched
+them read "settling in" for four days.
+
+**`how_a_city_grows` has always reported healthy growth**, and still does — it
+sets `c.food = NEED_FULL` every tick, so it has only ever tested a city that
+cannot get hungry. A probe that arranges the condition it is measuring is a
+probe that can only confirm itself. That is the lesson worth more than the fix:
+this repo's rule is "measure, do not pick", and the corollary is that the
+measurement has to be taken on the thing that ships.
+
+The bar has to sit *below the trough* of an ordinary cycle, because the cycle
+is inherent: a citizen goes to eat at `HUNGRY`, stops at `FED_ENOUGH`, and dips
+further while it walks to the granary. Measured at `HUNGRY` a household still
+stalls at 699 of 1 200. `NEED_FULL / 10` settles, and the gate still gates —
+fed cities reach ten and twelve, unfed ones stay at eight or die, which is
+exactly the table M9 wanted.
+
+`a_household_in_a_fed_city_settles_without_being_force_fed` is the guard, and
+it plays rather than feeds. `what_a_fed_household_actually_manages` is the
+probe that found it and is kept, because the number it prints is the one that
+matters if anybody moves this constant again.
