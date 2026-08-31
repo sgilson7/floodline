@@ -667,48 +667,6 @@ impl Input {
             palette::FAINT,
         );
         y += 22.0;
-        // What you have chosen, and the two things you can do to it. Only
-        // drawn when there is something to do: a row of dead buttons is a row
-        // a player learns to stop reading.
-        //
-        // **Below everything fixed, and that is not a layout preference.**
-        // This row appears and disappears as a player clicks about, so
-        // anything under it would move under the cursor — and every browser
-        // check clicks the panel at a written-down coordinate. The panel has
-        // shifted five times now and each time it silently broke two of them.
-        if let Some(id) = self.chosen {
-            let w = session.world();
-            if let Some(b) = w.buildings.get(id.0 as usize).filter(|b| b.owner == me) {
-                let (kind, level) = (b.kind, b.level);
-                let can_level = kind.upgradable() && b.standing_now() && level < sim::balance::MAX_LEVEL;
-                if can_level || kind.movable() {
-                    let up = Rect::new(left, y, half, 36.0);
-                    let mv = Rect::new(left + half + 8.0, y, half, 36.0);
-                    if can_level {
-                        let cost = kind.upgrade_cost(level);
-                        if ui.button(up, &format!("level {}", level + 1), true) {
-                            self.issue(session, Command::Upgrade { building: id });
-                        }
-                        draw_text(
-                            &cost_line(cost),
-                            up.x + 6.0,
-                            up.y + up.h - 4.0,
-                            13.0,
-                            if goods.covers(&cost) { palette::FAINT } else { palette::ALARM },
-                        );
-                    }
-                    if kind.movable() && ui.button(mv, "m move", true) {
-                        self.tool = Tool::Moving { building: id };
-                    }
-                    if matches!(self.tool, Tool::Moving { .. }) {
-                        draw_rectangle_lines(mv.x, mv.y, mv.w, mv.h, 2.0, palette::INK);
-                    }
-                    y += 48.0;
-                }
-            } else {
-                self.chosen = None;
-            }
-        }
 
         // What the cursor is over, so a farm's three slots are visible before
         // the click rather than as a refusal after it. Its own line, kept
@@ -759,6 +717,56 @@ impl Input {
         }
         y += 42.0;
         y = self.offers(ui, session, me, left, wide, y);
+
+        // What you have chosen, and the two things you can do to it. Only
+        // drawn when there is something to do: a row of dead buttons is a row
+        // a player learns to stop reading.
+        //
+        // **Last, under everything, and that is not a layout preference.** It
+        // appears and disappears as a player clicks about, so anything below it
+        // would move under the cursor — and every browser check clicks the
+        // panel at a written-down coordinate. The panel has shifted five times
+        // and each time it silently broke two of them.
+        //
+        // It was moved here once before and not far enough: it went above the
+        // hover line, the selection row and the trade button, all three of
+        // which are fixed and all three of which it went on shifting by
+        // forty-eight pixels whenever a building was picked. `panel_rows_do_
+        // not_move_when_a_building_is_chosen` is the check that says so now,
+        // because five incidents of reasoning about it were not enough.
+        if let Some(id) = self.chosen {
+            let w = session.world();
+            if let Some(b) = w.buildings.get(id.0 as usize).filter(|b| b.owner == me) {
+                let (kind, level) = (b.kind, b.level);
+                let can_level = kind.upgradable() && b.standing_now() && level < sim::balance::MAX_LEVEL;
+                if can_level || kind.movable() {
+                    let up = Rect::new(left, y, half, 36.0);
+                    let mv = Rect::new(left + half + 8.0, y, half, 36.0);
+                    if can_level {
+                        let cost = kind.upgrade_cost(level);
+                        if ui.button(up, &format!("level {}", level + 1), true) {
+                            self.issue(session, Command::Upgrade { building: id });
+                        }
+                        draw_text(
+                            &cost_line(cost),
+                            up.x + 6.0,
+                            up.y + up.h - 4.0,
+                            13.0,
+                            if goods.covers(&cost) { palette::FAINT } else { palette::ALARM },
+                        );
+                    }
+                    if kind.movable() && ui.button(mv, "m move", true) {
+                        self.tool = Tool::Moving { building: id };
+                    }
+                    if matches!(self.tool, Tool::Moving { .. }) {
+                        draw_rectangle_lines(mv.x, mv.y, mv.w, mv.h, 2.0, palette::INK);
+                    }
+                    y += 48.0;
+                }
+            } else {
+                self.chosen = None;
+            }
+        }
         let _ = y;
     }
 

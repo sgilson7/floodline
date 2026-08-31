@@ -59,6 +59,12 @@ say "assign.py"
 "$VENV/bin/python" "$ROOT/packaging/browser/assign.py" \
   "http://localhost:$PORT/index.html" || fail=1
 
+# The panel has moved under a written-down coordinate five times. This is the
+# one that asks the picture rather than reasoning about the running total.
+say "panel_rows.py"
+"$VENV/bin/python" "$ROOT/packaging/browser/panel_rows.py" \
+  "http://localhost:$PORT/index.html" || fail=1
+
 # The Copy button, with clipboard writing denied - the case the fallback is for.
 say "clipboard.py"
 "$VENV/bin/python" "$ROOT/packaging/browser/clipboard.py" \

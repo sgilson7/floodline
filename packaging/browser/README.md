@@ -22,6 +22,8 @@ after that it is about a minute. `.venv-test/` is gitignored.
 | `assign.py` | choosing a whole city and right-clicking a farm puts three people on it and says so, instead of being refused whole |
 | `camera.py` | zoom and pan, nothing drawn over the panel, and a click still lands on the cell the cursor is over |
 | `view.py` | not a check: the one copy of the letterbox-and-camera arithmetic every other script imports |
+| `panel.py` | not a check: the one copy of the *panel's* running totals, for anything written for M10. `play.py` and `assign.py` keep their own literals on purpose |
+| `panel_rows.py` | whether choosing a building moves the rows below it — it did, five times, and the symptom is a click landing in a gap |
 | `play.py` | the mouse reaching the simulation: choosing citizens, ordering them about, a cottage, a road, a ping, a trade, a wall drawn with a drag, and a refusal that says so |
 | `game_two_tabs.py` | the whole stack: two tabs reach the lobby, join by room code or by pasted code, and both leave the lobby into the same world |
 | `two_agents.py` | the same world reached by two *browsers* that share no clipboard, storage or renderer — M10's ground, and the one setup that has to hold for thirty-six minutes |
