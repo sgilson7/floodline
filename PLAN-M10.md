@@ -21,10 +21,10 @@ This document is also an artifact, if a link is easier to hand on than a file:
 | M10.2 | The clock, decided and written down | **done** — three paragraphs in `DECISIONS.md` |
 | M10.3 | Hands and eyes | **done** — `table.py`, `panel.py`, `driver.py`, `driver_check.py` |
 | M10.4 | The referee, and ten minutes of nothing going wrong | **done** — clean, though the soak is eight minutes and not ten |
-| M10.5 | A rehearsal: one age | ← **next**, and the first step that needs two agents |
-| M10.6 | The run | |
+| M10.5 | A rehearsal: one age | **done** — and it answered M5's parked question |
+| M10.6 | The run | ← **next**; push first |
 | M10.7 | The account | |
-| M10.8 | What the run demands | two findings already waiting for it |
+| M10.8 | What the run demands | two findings waiting; the food line was pulled forward |
 
 Setting the table found three things, which is what the ordering was for. Two
 are fixed (`peers at` said nothing in a browser; the panel's variable row still

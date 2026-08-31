@@ -420,11 +420,49 @@ ended game and a stopped page are identical at the tick row. And `WaitingOn` is
 drawn in WARNING in the same row a desync uses ALARM, so "is it reddish" cries
 desync every few seconds — which is how often lockstep waits.
 
+### M10.5 — two agents played an age, and M5's question is answered
+
+Twelve minutes, two browsers, the deployed build, neither agent able to see the
+other's screen or read `crates/sim`. The full account is `PLAYTEST-M10.md`.
+
+**The harness holds.** Seven day-turns 124, 119, 120, 119, 118 and 121 seconds
+apart against a nominal 120; no stalls, nothing red, fifteen minutes with two
+agents clicking and a flood in the middle. Thirty-six minutes is not in doubt.
+
+**M5 parked the food economy for a run to answer.** City 0 built the wall and
+came out of age one with three souls of eight, only two of whom drowned: *"the
+dike cost me a day and a half of my only three free labourers, and that labour
+is the same labour that feeds the city."* The wall is not too expensive in
+stone — it spent 220 of 648 and never noticed. **It is paid for in food,
+invisibly.** City 1 never saw the water at all: it sat fifteen cells up the
+bank, the flood stopped seven cells short, and it starved anyway with its farm
+staffed three-of-three. Neither had any way to know which of those two
+situations it was in before choosing.
+
+**Three findings were ours, not the game's**, and all three would have wasted
+the run. The worst: `driver.py panel` cropped the panel and nothing else, so
+the red line under the map that says *why* a click was refused was never in the
+picture either agent was told to prefer. Both reported clicks that "silently
+did nothing"; none of them was silent.
+
+### And the one game fix pulled forward
+
+Both cities died of the same blindness, so the food line was fixed before the
+run rather than after it. The panel names the clock now — `1 food left, and 8
+mouths eat 96 a day - under a day` — and a working building says what is
+standing on it — `farm: 3 of 3 working, 1 food waiting`. No balance constant
+moved; twelve a head a day is arithmetic on the eating model the game already
+had.
+
 ### Next action
 
-**M10.5 — the rehearsal.** Twelve minutes, two agents, the deployed build,
-through the first flood, with `PLAYTEST-M10.md` kept as it happens. Two things
-to settle before it starts: whether to push first, since the deployed build is
-now seven commits behind `main` and M10.6 has to run on what is deployed; and
-that spawning the two agents is a deliberate, billable step rather than
-something to drift into.
+**M10.6 — the run.** Three ages, thirty-six minutes, two agents, on the
+deployed build. Two things first:
+
+1. **Push.** `main` is ten commits ahead of the deployed page and the run has
+   to happen on what is deployed — including the food line, which is the whole
+   reason the run was held back.
+2. **Decide what the agents are told.** `AGENT-BRIEF.md` as it stands makes
+   them first-time players, and on this evidence a first-time player's city
+   dies in age one. A run that ends there is a finding rather than a failure,
+   but it is not a three-age run.

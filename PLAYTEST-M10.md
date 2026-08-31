@@ -12,6 +12,9 @@ is `packaging/browser/AGENT-BRIEF.md` and what the panel told them.
 The full run to age three is M10.6. This is the rehearsal that says whether the
 loop works, and it found enough that it was worth doing on its own.
 
+This document is also an artifact, if a link is easier to hand on than a file:
+**<https://claude.ai/code/artifact/448fffb7-1742-4f2c-be64-74825864da49>**
+
 ---
 
 ## The setup
