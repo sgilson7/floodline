@@ -3354,3 +3354,49 @@ what does not is the right-hand column. A game of five or six can still be
 played — the rows that overflow are announced, not silently dropped — but
 somebody who wants six comfortably has to give the variable stack a home of its
 own rather than the bottom of a pile.
+
+---
+
+## 2026-09-01 — A joiner's turn went to everybody, and the test transport hid it
+
+Triage for three players, and the finding is about the instrument as much as
+the bug.
+
+`send_turns` ended `peer.broadcast(&encode(&turn), true)` for a joiner. In a
+star that is "send to the host", because a joiner has one peer. **A Trystero
+room is not a star** — everybody connects to everybody, and
+`WebPeer::peers()` returns the whole roster. So the same line meant *to the
+host* in every test in this crate and *to every other player, every tick* in a
+browser.
+
+With two players there is no difference, which is exactly why it survived
+four playtests and the whole of phases 3 through 6. With three it is one
+wasted `Turn` a tick per joiner; with six it is four, twenty times a second,
+on the connections that also have to carry the game. The peers receiving them
+do nothing at all with them — `Message::Turn` is handled `if self.host` and
+falls through — so it is pure waste and it grows with the square of the table.
+
+**`Loopback` could not catch this and never could.** Its `peers()` filtered so
+a joiner saw only the host, which *enforces* the star rather than testing that
+the lockstep keeps it. A message sent where it should not be went to the host
+anyway and nothing could tell. The test transport was upholding the very
+property under test.
+
+So `Conditions::mesh` — off by default, on via `Conditions::room()` — hands
+every peer every other peer, as a browser does, and `broken_star` now keeps the
+bytes as well as the pair. `the_star_holds_even_when_the_wire_does_not` plays
+three peers in a room under latency and loss and asserts that no *game* traffic
+goes round the hub.
+
+**A `Hello` going joiner-to-joiner is in `broken_star` and is not a fault.**
+Discovery in a room is necessarily mesh-shaped: a joiner cannot tell a host
+from a bystander until one of them answers, which is why M12.2 has it greet
+everybody it meets. It is turns, bundles and rosters that must go through the
+hub, so the guard decodes rather than counts.
+
+**The general lesson, which is the same one M12 has now learned four times.**
+A test double that is *stricter* than the thing it doubles will pass forever
+and prove nothing. `Loopback`'s docstring says it is "a real transport, not a
+stub — it has one-way latency, it drops unreliable messages", and it is; it was
+also quietly more disciplined than any browser, in the one dimension that
+mattered.

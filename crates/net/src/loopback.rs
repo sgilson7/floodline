@@ -25,18 +25,39 @@ pub struct Conditions {
     pub latency: u32,
     /// Chance in a hundred that an unreliable message is thrown away.
     pub loss_percent: u32,
+    /// Whether every peer can see every other one, as in a real room.
+    ///
+    /// **Off by default, and that default hid a bug for the whole of the
+    /// project.** This transport gives a joiner exactly one peer — the host —
+    /// which *enforces* the star rather than testing that the lockstep keeps
+    /// it. `WebPeer::peers()` returns the whole roster, because a Trystero
+    /// room is a mesh: everybody is connected to everybody. So
+    /// `peer.broadcast` from a joiner meant "to the host" in every test here
+    /// and "to every other player, every tick" in a browser, and `send_turns`
+    /// did exactly that until M12 went looking.
+    ///
+    /// With this on, a joiner is handed every peer and `broken_star` records
+    /// anything it sends where the design says it may not.
+    /// `the_star_holds_even_when_the_wire_does_not` is the guard.
+    pub mesh: bool,
 }
 
 impl Default for Conditions {
     fn default() -> Self {
-        Conditions { latency: 0, loss_percent: 0 }
+        Conditions { latency: 0, loss_percent: 0, mesh: false }
     }
 }
 
 impl Conditions {
+    /// A room rather than a star: everybody sees everybody, which is what the
+    /// browser actually gives us. See `mesh`.
+    pub fn room() -> Self {
+        Conditions { mesh: true, ..Conditions::realistic() }
+    }
+
     /// About what two people on home connections see.
     pub fn realistic() -> Self {
-        Conditions { latency: 2, loss_percent: 2 }
+        Conditions { latency: 2, loss_percent: 2, mesh: false }
     }
 }
 
@@ -49,8 +70,10 @@ struct Wire {
     conditions: Conditions,
     rng: Rng,
     step: u32,
-    /// Set when somebody sends where the star says they may not.
-    pub broken_star: Vec<(PeerId, PeerId)>,
+    /// Set when somebody sends where the star says they may not, with what
+    /// they sent — because one message is allowed to go that way and the rest
+    /// are not, and only the caller can tell them apart. See `broken_star`.
+    pub broken_star: Vec<(PeerId, PeerId, Vec<u8>)>,
 }
 
 /// A shared in-process network.
@@ -81,7 +104,7 @@ impl Loopback {
                 if id == other {
                     continue;
                 }
-                if id == HOST || other == HOST {
+                if conditions.mesh || id == HOST || other == HOST {
                     net.wire.borrow_mut().inbox.get_mut(&id).unwrap().push_back(Event::Peer(other));
                 }
             }
@@ -133,7 +156,14 @@ impl Loopback {
     }
 
     /// Whether anybody sent where the star forbids it.
-    pub fn broken_star(&self) -> Vec<(PeerId, PeerId)> {
+    /// Everything sent from a joiner to a joiner, with the bytes.
+    ///
+    /// **A `Hello` belongs in here and is not a fault.** Discovery in a room is
+    /// necessarily mesh-shaped: a joiner cannot tell a host from a bystander
+    /// until one of them answers, so it greets everybody it meets (M12.2). It
+    /// is the *game* traffic — turns, bundles, rosters — that must go through
+    /// the hub, and a caller that wants that question asks it by decoding.
+    pub fn broken_star(&self) -> Vec<(PeerId, PeerId, Vec<u8>)> {
         self.wire.borrow().broken_star.clone()
     }
 }
@@ -162,7 +192,7 @@ impl Peer for LoopbackPeer {
         }
         // The star: everything goes through the host.
         if self.id != HOST && to != HOST {
-            w.broken_star.push((self.id, to));
+            w.broken_star.push((self.id, to, bytes.to_vec()));
             return;
         }
         if !reliable {
@@ -178,10 +208,13 @@ impl Peer for LoopbackPeer {
 
     fn peers(&self) -> Vec<PeerId> {
         let w = self.net.wire.borrow();
+        // In `mesh` this is every peer, as a browser gives it. Otherwise the
+        // star: the host sees everybody and a joiner sees the host. See
+        // `Conditions::mesh` for why the difference matters.
         w.connected
             .iter()
             .copied()
-            .filter(|&p| p != self.id && (self.id == HOST || p == HOST))
+            .filter(|&p| p != self.id && (w.conditions.mesh || self.id == HOST || p == HOST))
             .collect()
     }
 

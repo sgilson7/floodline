@@ -612,8 +612,29 @@ impl Lockstep {
                 self.collected.entry(self.turn_tick).or_default().insert(self.me, commands);
                 self.reported.entry(checked_tick).or_default().insert(self.me, checksum);
                 self.seen_at.insert(self.me, checked_tick);
-            } else {
-                peer.broadcast(&encode(&turn), true);
+            } else if let Some(host) = self.host_peer {
+                // **To the host, not to everybody.**
+                //
+                // This was `broadcast`, and `Loopback` cannot tell the
+                // difference: its `peers()` filters so a joiner sees only the
+                // host, which *enforces* the star this is meant to keep.
+                // `WebPeer::peers()` returns the whole roster, because a
+                // Trystero room is a mesh and everybody is connected to
+                // everybody. So the same line meant "to the host" in every
+                // test in this crate and "to every other player, every tick"
+                // in a browser.
+                //
+                // With two players there is no difference, which is why it has
+                // never mattered. With three it is a wasted `Turn` a tick per
+                // joiner; with six it is four, twenty times a second, on the
+                // connections that also have to carry the game. The peers
+                // receiving them do nothing at all with them — `Message::Turn`
+                // is handled `if self.host` and falls through — so it is pure
+                // waste and it grows with the square of the table.
+                //
+                // `a_joiner_sends_its_turn_to_the_host_and_nobody_else` is the
+                // guard, and it needs a wire with no star in it.
+                peer.send(host, &encode(&turn), true);
             }
             self.turn_tick += 1;
         }

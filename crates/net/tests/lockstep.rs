@@ -227,7 +227,7 @@ fn everybody_gets_a_player_and_the_same_world() {
 /// checksums, all the way into age two.
 #[test]
 fn three_players_stay_in_step_through_two_ages_with_latency() {
-    let mut g = Game::new(3, Conditions { latency: 2, loss_percent: 0 });
+    let mut g = Game::new(3, Conditions { latency: 2, loss_percent: 0, mesh: false });
 
     // Somebody does something now and then, so the turns are not all empty.
     // Every city is founded through commands, or they all starve before age
@@ -592,7 +592,7 @@ fn commands_take_effect_after_the_input_delay_and_on_every_peer_at_once() {
 fn an_unreliable_channel_that_loses_messages_changes_nothing() {
     // Turns go on the reliable channel; only cursors and chat do not. A lossy
     // wire must not be able to desync a game.
-    let mut g = Game::new(3, Conditions { latency: 2, loss_percent: 30 });
+    let mut g = Game::new(3, Conditions { latency: 2, loss_percent: 30, mesh: false });
     g.run_to_tick(400);
     assert!(g.disagreements().is_empty(), "loss desynced the game");
     assert!(g.steps[0].tick() >= 400, "the game stalled");
@@ -1144,4 +1144,123 @@ fn six_players_stay_in_step() {
     let ticks = g.ticks();
     let behind = ticks.iter().max().unwrap() - ticks.iter().min().unwrap();
     assert!(behind < 20, "six peers drifted apart by {behind} ticks: {ticks:?}");
+}
+
+/// A joiner's turn goes to the host and to nobody else.
+///
+/// **`Loopback` cannot catch this and never could.** Its `peers()` filters —
+/// a joiner sees only `HOST` — so it *enforces* the star that the lockstep is
+/// supposed to keep. `WebPeer::peers()` returns the whole roster, because a
+/// Trystero room is a mesh and everybody is connected to everybody. So
+/// `peer.broadcast` in `send_turns` means "to the host" in every test in this
+/// file and "to every other player, every tick" in a browser.
+///
+/// With two players there is no difference and that is why it has never
+/// mattered. With three it is one wasted `Turn` a tick per joiner; with six it
+/// is four, twenty times a second, on connections that also have to carry the
+/// game. And the peers receiving them do nothing with them: `Message::Turn` is
+/// handled `if self.host` and falls through.
+///
+/// The test transport hiding the bug is the point worth keeping. This one uses
+/// a wire with no star in it.
+#[test]
+fn a_joiner_sends_its_turn_to_the_host_and_nobody_else() {
+    const OTHER: PeerId = PeerId(5);
+    let mut wire = LateHost {
+        inbox: std::collections::VecDeque::new(),
+        sent: Vec::new(),
+        connected: vec![HOST, OTHER],
+    };
+    let mut joiner = Lockstep::join(BUILD);
+
+    // Meets both, greets both — that part is right, and M12.2 is why.
+    wire.inbox.push_back(net::Event::Peer(HOST));
+    wire.inbox.push_back(net::Event::Peer(OTHER));
+    joiner.advance(&mut wire);
+
+    // The host gives it a city.
+    let world = sim::World::new(31, 3);
+    let players = world.players.clone();
+    wire.inbox.push_back(net::Event::Msg {
+        from: HOST,
+        reliable: true,
+        bytes: net::wire::encode(&net::Message::Welcome {
+            player: PlayerId(1),
+            seed: 31,
+            tick: 0,
+            players,
+            snapshot: Some(Box::new(world)),
+        }),
+    });
+    joiner.advance(&mut wire);
+    assert!(joiner.welcomed(), "the joiner was never welcomed");
+
+    // And the run begins, so it starts sending turns.
+    wire.inbox.push_back(net::Event::Msg {
+        from: HOST,
+        reliable: true,
+        bytes: net::wire::encode(&net::Message::Bundle { tick: 0, turns: Vec::new() }),
+    });
+    wire.sent.clear();
+    for _ in 0..8 {
+        joiner.advance(&mut wire);
+    }
+
+    let turns: Vec<PeerId> = wire
+        .sent
+        .iter()
+        .filter(|(_, bytes)| matches!(net::wire::decode(bytes), Some(net::Message::Turn { .. })))
+        .map(|(to, _)| *to)
+        .collect();
+    assert!(!turns.is_empty(), "the joiner never sent a turn at all");
+    let strays: Vec<PeerId> = turns.iter().copied().filter(|&p| p != HOST).collect();
+    assert!(
+        strays.is_empty(),
+        "a joiner sent {} of its {} turns to peers that are not the host: {strays:?}",
+        strays.len(),
+        turns.len()
+    );
+}
+
+/// The lockstep keeps the star even when the wire does not enforce one.
+///
+/// **This is the general guard for the whole class**, and its absence is why
+/// `send_turns` broadcast a joiner's turn to every peer for the life of the
+/// project. `Loopback` hands a joiner exactly one peer, which *enforces* the
+/// star rather than testing that the lockstep keeps it — so a message sent
+/// where it should not be went to the host anyway and no test could tell.
+///
+/// `Conditions::room` gives every peer every other peer, as a Trystero room
+/// does, and `broken_star` then records anything sent where the design says it
+/// may not. Three players, played, under latency and loss.
+#[test]
+fn the_star_holds_even_when_the_wire_does_not() {
+    let mut g = Game::new(3, Conditions::room());
+    g.run_to_tick(300);
+
+    // A `Hello` going joiner-to-joiner is expected and is not a fault:
+    // discovery in a room is mesh-shaped, because a joiner cannot tell a host
+    // from a bystander until one of them answers. Everything else must go
+    // through the hub.
+    let strays: Vec<String> = g
+        .net
+        .broken_star()
+        .into_iter()
+        .filter_map(|(from, to, bytes)| match net::wire::decode(&bytes) {
+            Some(net::Message::Hello { .. }) | None => None,
+            Some(m) => Some(format!("{from:?} -> {to:?}: {m:?}")),
+        })
+        .collect();
+    assert!(
+        strays.is_empty(),
+        "peers sent game traffic round the host {} times in a room that let them: {:?}",
+        strays.len(),
+        &strays[..strays.len().min(4)]
+    );
+    // And it still played: a star kept by choice rather than by the wire has
+    // to be a working one.
+    assert!(g.disagreements().is_empty(), "three peers in a room disagreed");
+    for (i, s) in g.steps.iter().enumerate() {
+        assert!(!s.status.is_stopped(), "peer {i} stopped: {:?}", s.status);
+    }
 }
