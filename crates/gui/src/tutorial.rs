@@ -130,6 +130,43 @@ pub fn next_thing(w: &World, me: PlayerId) -> Option<String> {
         );
     }
 
+    // **People still standing where they were sent.**
+    //
+    // This is why nobody has ever finished a wall. `MoveTo` - "choose
+    // everybody, send them uphill", which is the order this very ladder gives
+    // when the water comes - sets `held`, and a held citizen is never given
+    // work again until the player says so. That is deliberate and right: an
+    // order to stand on a hill must not be quietly undone by the work loop.
+    //
+    // What was missing is anybody saying so. City 0 in the M12.11 run
+    // evacuated, went back to its business, and found four of its seven people
+    // still on the rock three game-days later - by opening the people tab out
+    // of curiosity. Its fifteen dike segments sat fully supplied and unbuilt
+    // for two ages beside those idle hands, and this ladder spent the time
+    // recommending a trading post.
+    //
+    // Above the bootstrap, and not only above the shortages: a city whose
+    // every hand is standing still cannot act on any other advice this ladder
+    // could give it. Below the water, because the water is the one thing that
+    // is worse than doing nothing.
+    let waiting = w
+        .citizens
+        .iter()
+        .filter(|c| c.owner == me && c.alive() && !c.is_child() && c.held)
+        .count();
+    if waiting > 0 {
+        return Some(if waiting == 1 {
+            "somebody is still waiting where you sent them: choose them, then \
+             back to hauling"
+                .to_owned()
+        } else {
+            format!(
+                "{waiting} of your people are still waiting where you sent them: \
+                 choose all, then back to hauling"
+            )
+        });
+    }
+
     // Food, in the order it can go wrong.
     if !placed(Kind::Granary) {
         return Some("press 3, click the ground: a granary. food is kept there, and eaten there".to_owned());
@@ -421,5 +458,42 @@ mod tests {
         assert_eq!(w.omen(), sim::Omen::Impact);
         let line = super::next_thing(&w, me).unwrap_or_default();
         assert!(line.contains("uphill"), "the water is here and the panel said: {line:?}");
+    }
+
+    /// A city that evacuated and never called its people back is told.
+    ///
+    /// The trap that cost four playtests a wall. `MoveTo` holds everybody it
+    /// moves and nothing releases them but the player; the panel used to say
+    /// nothing at all about it, and both M12.11 players lost days to hands
+    /// that were standing still beside work that was ready.
+    #[test]
+    fn a_city_still_standing_where_it_was_sent_is_told() {
+        let mut w = World::new(31, 2);
+        let me = PlayerId(0);
+        for c in &mut w.citizens {
+            c.food = sim::balance::NEED_FULL;
+        }
+
+        // Before: whatever it says, it is about buildings.
+        let before = super::next_thing(&w, me).unwrap_or_default();
+        assert!(!before.contains("waiting"), "nobody is held yet: {before:?}");
+
+        for c in &mut w.citizens {
+            if c.owner == me {
+                c.held = true;
+            }
+        }
+        let line = super::next_thing(&w, me).unwrap_or_default();
+        assert!(
+            line.contains("waiting where you sent them"),
+            "a city standing idle on a hill was told: {line:?}"
+        );
+        assert!(
+            line.contains("back to hauling"),
+            "it should say the gesture that fixes it: {line:?}"
+        );
+        // And it fits the two rows the panel keeps.
+        let rows = crate::ui::wrapped_words(&line, 52);
+        assert!(rows.len() <= 2, "{line:?} needs {} rows", rows.len());
     }
 }

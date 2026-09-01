@@ -1178,3 +1178,294 @@ fn somebody_both_hungry_and_tired_goes_to_one_of_them() {
         "it changed its mind {flips} times getting there - that is the gyration"
     );
 }
+
+#[test]
+fn a_supplied_site_with_nobody_on_it_gets_built() {
+    // Both M12.11 players poured hundreds of stone into dike segments that
+    // read `being built` for two entire ages and never finished one. City 0
+    // put 440 stone into fifteen of them, had idle hands beside them the whole
+    // time, and was told at the end that a wall it had never owned had given
+    // way. Four playtests have now asked whether a wall is worth building and
+    // nobody has ever owned one.
+    //
+    // **What this arranges**: a city with a working farm - so there is always
+    // something to carry, which is the ordinary state of a city and the whole
+    // point - and dike sites that already have every stone they need, so the
+    // only thing standing between them and a wall is somebody's hands.
+    // Nobody is assigned to anything; these are the unassigned citizens whose
+    // rule says they build when there is nothing to haul.
+    use sim::balance::{NEED_FULL, TICKS_PER_DAY};
+    use sim::building::{Facing, Good, Kind};
+    use sim::command::Command;
+    use sim::nav::Nav;
+    use sim::world::World;
+    use sim::PlayerId;
+
+    let me = PlayerId(0);
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+
+    // A granary and a manned farm: an ordinary city with hauling to do.
+    let granary = site_near_hearth(&mut w, me, Kind::Granary);
+    assert!(w.build_at(granary, Kind::Granary.build_ticks()));
+    let farm = site_near_hearth(&mut w, me, Kind::Farm);
+    assert!(w.build_at(farm, Kind::Farm.build_ticks()));
+    let three: Vec<sim::CitizenId> = w
+        .citizens
+        .iter()
+        .filter(|c| c.owner == me && !c.is_child())
+        .map(|c| c.id)
+        .take(3)
+        .collect();
+    w.apply(me, &Command::Assign { citizens: three, building: farm }).unwrap();
+
+    // Four dike segments, every stone delivered, nobody assigned.
+    let (hx, hy) = w.map.hearth_sites[0];
+    let mut dikes = Vec::new();
+    'ring: for r in 5..40i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (x, y) = (hx + dx, hy + dy);
+                if w.can_place(me, Kind::Dike, Facing::EastWest, x, y).is_ok() {
+                    w.apply(
+                        me,
+                        &Command::Place {
+                            kind: Kind::Dike,
+                            facing: Facing::EastWest,
+                            x: x as u8,
+                            y: y as u8,
+                        },
+                    )
+                    .unwrap();
+                    let id = w.buildings.last().unwrap().id;
+                    for g in Good::ALL {
+                        let want = w.buildings[id.0 as usize].outstanding().get(g);
+                        if want > 0 {
+                            w.deliver_to(id, g, want);
+                        }
+                    }
+                    assert!(w.buildings[id.0 as usize].outstanding().is_empty());
+                    dikes.push(id);
+                    if dikes.len() == 4 {
+                        break 'ring;
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(dikes.len(), 4, "nowhere for the wall");
+
+    // A day. Hunger held off, so this is a question about what people choose
+    // to do and not about whether they can stay upright.
+    for _ in 0..TICKS_PER_DAY {
+        for c in &mut w.citizens {
+            c.food = NEED_FULL;
+            c.rest = NEED_FULL;
+        }
+        w.tick(&mut nav, &[]);
+    }
+
+    let built = dikes.iter().filter(|id| w.buildings[id.0 as usize].standing_now()).count();
+    let progress: u32 = dikes.iter().map(|id| w.buildings[id.0 as usize].progress).sum();
+    let need = Kind::Dike.build_ticks();
+    println!(
+        "  after a day: {built} of 4 segments standing, {progress} builder-ticks of the \
+         {} one segment needs",
+        need
+    );
+
+    assert!(
+        progress > 0,
+        "a whole day, five idle citizens, four segments with every stone \
+         already delivered, and not one builder-tick was applied to any of them"
+    );
+    assert!(
+        built > 0,
+        "a day of an unattended city and not one of four fully supplied \
+         segments was finished ({progress} builder-ticks against {need} for one)"
+    );
+}
+
+#[test]
+#[ignore]
+fn what_happens_to_a_wall_a_player_actually_draws() {
+    // The M12.11 reproduction, and unlike the test above it does *not* hand
+    // the stone to the sites. Both players drew a long wall with the drag
+    // gesture, had plenty of stone at the hearth, and watched the segments sit
+    // on `being built` for two ages. City 1 hovered one and read
+    // `dike: waiting for 30 stone - nobody is carrying to it` while it had 620
+    // stone in the bank.
+    //
+    // **What this arranges**: a city as a player leaves it - a granary, a
+    // manned farm, the starting stone at the hearth - and a fifteen-segment
+    // wall ordered in one gesture, which is what the drag tool produces.
+    // Nobody is assigned to build. Everything else is the game.
+    use sim::balance::{NEED_FULL, TICKS_PER_DAY};
+    use sim::building::{Facing, Kind};
+    use sim::command::Command;
+    use sim::nav::Nav;
+    use sim::world::World;
+    use sim::PlayerId;
+
+    let me = PlayerId(0);
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+
+    let granary = site_near_hearth(&mut w, me, Kind::Granary);
+    assert!(w.build_at(granary, Kind::Granary.build_ticks()));
+    let farm = site_near_hearth(&mut w, me, Kind::Farm);
+    assert!(w.build_at(farm, Kind::Farm.build_ticks()));
+    let three: Vec<sim::CitizenId> = w
+        .citizens
+        .iter()
+        .filter(|c| c.owner == me && !c.is_child())
+        .map(|c| c.id)
+        .take(3)
+        .collect();
+    w.apply(me, &Command::Assign { citizens: three, building: farm }).unwrap();
+
+    let (hx, hy) = w.map.hearth_sites[0];
+    let mut dikes = Vec::new();
+    'ring: for r in 6..40i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (x, y) = (hx + dx, hy + dy);
+                if w.can_place(me, Kind::Dike, Facing::EastWest, x, y).is_ok() {
+                    if w.apply(me, &Command::Place { kind: Kind::Dike,
+                            facing: Facing::EastWest, x: x as u8, y: y as u8 }).is_ok() {
+                        dikes.push(w.buildings.last().unwrap().id);
+                        if dikes.len() == 15 {
+                            break 'ring;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    println!("  {} segments ordered, stone in hand {}", dikes.len(), w.treasury(me).stone);
+
+    for day in 1..=4 {
+        for _ in 0..TICKS_PER_DAY {
+            for c in &mut w.citizens {
+                c.food = NEED_FULL;
+                c.rest = NEED_FULL;
+            }
+            w.tick(&mut nav, &[]);
+        }
+        let standing = dikes.iter().filter(|id| w.buildings[id.0 as usize].standing_now()).count();
+        let supplied = dikes
+            .iter()
+            .filter(|id| w.buildings[id.0 as usize].outstanding().is_empty())
+            .count();
+        let ticks: u32 = dikes.iter().map(|id| w.buildings[id.0 as usize].progress).sum();
+        let building = w
+            .citizens
+            .iter()
+            .filter(|c| c.alive() && c.workplace.is_some_and(|b| dikes.contains(&b)))
+            .count();
+        println!(
+            "  day {day}: {standing} standing, {supplied} fully supplied, \
+             {ticks} builder-ticks, {building} on the wall, stone left {}",
+            w.treasury(me).stone
+        );
+    }
+}
+
+#[test]
+fn a_city_that_evacuated_is_told_its_people_are_still_standing_there() {
+    // **This is why nobody has ever finished a wall.**
+    //
+    // `MoveTo` - "choose everybody, send them uphill", which is the order the
+    // panel itself tells a player to give when the water comes - sets `held`
+    // on every citizen it moves. A held citizen is skipped by `find_work`
+    // entirely and is never given anything to do again until the player says
+    // so. That is deliberate and it is right: an order to stand on a hill must
+    // not be quietly undone by the ordinary work loop.
+    //
+    // What is not right is that **nothing tells the player**. City 0 in the
+    // M12.11 run evacuated, went back to its business, and found four of its
+    // seven citizens still standing on the rock three game-days later - by
+    // opening the people tab out of curiosity. Its fifteen dike segments sat
+    // fully supplied and unbuilt for two ages beside idle hands, and the amber
+    // line spent that time recommending a trading post.
+    //
+    // **What this arranges**: a city with a supplied wall and every citizen
+    // sent somewhere, which is a city one tick after an evacuation.
+    use sim::balance::{NEED_FULL, TICKS_PER_DAY};
+    use sim::building::{Facing, Good, Kind};
+    use sim::command::Command;
+    use sim::nav::Nav;
+    use sim::world::World;
+    use sim::PlayerId;
+
+    let me = PlayerId(0);
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+
+    let granary = site_near_hearth(&mut w, me, Kind::Granary);
+    assert!(w.build_at(granary, Kind::Granary.build_ticks()));
+
+    let (hx, hy) = w.map.hearth_sites[0];
+    let mut dikes = Vec::new();
+    'ring: for r in 5..40i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (x, y) = (hx + dx, hy + dy);
+                if w.can_place(me, Kind::Dike, Facing::EastWest, x, y).is_ok()
+                    && w.apply(me, &Command::Place { kind: Kind::Dike,
+                        facing: Facing::EastWest, x: x as u8, y: y as u8 }).is_ok()
+                {
+                    let id = w.buildings.last().unwrap().id;
+                    for g in Good::ALL {
+                        let want = w.buildings[id.0 as usize].outstanding().get(g);
+                        if want > 0 {
+                            w.deliver_to(id, g, want);
+                        }
+                    }
+                    dikes.push(id);
+                    if dikes.len() == 4 {
+                        break 'ring;
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(dikes.len(), 4);
+
+    // The evacuation the panel asks for.
+    let everybody: Vec<sim::CitizenId> =
+        w.citizens.iter().filter(|c| c.owner == me && c.alive()).map(|c| c.id).collect();
+    w.apply(me, &Command::MoveTo { citizens: everybody.clone(), x: hx as u8, y: (hy - 3) as u8 })
+        .unwrap();
+
+    for _ in 0..TICKS_PER_DAY * 2 {
+        for c in &mut w.citizens {
+            c.food = NEED_FULL;
+            c.rest = NEED_FULL;
+        }
+        w.tick(&mut nav, &[]);
+    }
+
+    let standing = dikes.iter().filter(|id| w.buildings[id.0 as usize].standing_now()).count();
+    let waiting = w.citizens.iter().filter(|c| c.owner == me && c.alive() && c.held).count();
+    println!("  two days after an evacuation: {standing} of 4 supplied segments built, {waiting} still waiting where they were sent");
+
+    // The behaviour itself, pinned. It is correct and it is the trap.
+    assert_eq!(waiting, everybody.len(), "an evacuation should hold everybody it moved");
+    assert_eq!(
+        standing, 0,
+        "held citizens should not go back to work on their own - that is the whole point of `held`"
+    );
+
+    // **And the city must be told**, which is the part that was missing and
+    // which lives in `gui`: see `tutorial::tests::a_city_still_standing_where_it_was_sent_is_told`.
+}

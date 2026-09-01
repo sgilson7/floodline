@@ -141,7 +141,16 @@ the panel:
   and come back with gold. They need a way across.
 * **9 nursery** — no nursery, no children.
 * **b builders hut** — free, and a roster rather than a workplace: nobody
-  stands in it. **Put people in it before you draw a wall.** A construction
+  stands in it. **Put people in it before you draw a wall.**
+
+  And know this whichever building you are waiting on: **`right-click the
+  ground` holds the people you sent.** They stand where you put them and are
+  never given work again until you choose them and press `back to hauling`.
+  That is the order the panel itself asks for when the water comes, so after
+  every evacuation your whole city is idle until you call it back. The panel
+  now says so; before it did, one player found four of its seven still on a
+  rock three days later, beside a wall that had every stone it needed.
+ A construction
   site with nobody assigned to it never finishes and says only that it is
   being built: in the M12.11 run one player put 440 stone into fifteen dike
   segments that were never anything but holes, and was told at the end that a

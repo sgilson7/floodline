@@ -3217,3 +3217,53 @@ and it preserves the case the sentence exists for: when `nearest_food` gives
 `idle` 0→0, `grow` 8→7, `dike` 6→7, `flee` 12→10, `both` 8→8. Citizens that
 finish a meal instead of oscillating spend their days differently and the
 timing moves; nothing here is a strategy changing its answer.
+
+---
+
+## 2026-09-01 — Why nobody has ever finished a wall: an evacuation holds everybody
+
+Four playtests have asked whether a dike is worth building and not one player
+has ever owned a finished one. M12.11 gave the clearest picture — city 0 put
+440 stone into fifteen segments across two ages, every one fully supplied,
+with idle hands beside them, and every one still reading `being built` at the
+end of the run.
+
+**It is not the hauling and it is not `take_a_site`.** Both were suspected and
+both are innocent, and the tests say so. `a_supplied_site_with_nobody_on_it_gets_built`
+puts four supplied segments in a working city with a manned farm — so there is
+always something to carry, which is the ordinary state — and unassigned
+citizens build all four inside a day. `what_happens_to_a_wall_a_player_actually_draws`
+orders fifteen segments the way the drag tool does, hands out no stone, and the
+city supplies and finishes the whole wall by day two.
+
+**It is `MoveTo`.** *"Choose everybody, send them uphill"* — the order this
+game's own amber line gives when the water comes — sets `held` on every citizen
+it moves, and a held citizen is skipped by `find_work` entirely. Nothing
+releases them but the player, through `Unassign` or `Assign`.
+
+That behaviour is right and is not changing. Design §3.2 makes "get uphill" the
+one order that matters, and M9 put `held` in precisely because a citizen that
+walked to where it was sent turned round and went back to the farm it had been
+told to leave. An order must not be quietly undone by the work loop.
+
+**What was missing is that nothing said so.** After every evacuation a city's
+entire workforce is standing still, indefinitely, and until M12 the only place
+that fact appeared anywhere was the people tab — which is why city 0 found it
+by opening that tab out of curiosity, three game-days late. The households
+roster counted held citizens as *hauling* until earlier in M12, and the amber
+line spent those days recommending a trading post.
+
+So the ladder gains a rung: **`N of your people are still waiting where you
+sent them: choose all, then back to hauling`.** It sits above the bootstrap and
+below the water — a city whose every hand is standing still cannot act on any
+other advice this ladder could give it, and the water is the one thing worse
+than doing nothing.
+
+`a_city_that_evacuated_is_told_its_people_are_still_standing_there` pins the
+behaviour in `sim` (two days, four supplied segments, nought built, eight
+still held) and `a_city_still_standing_where_it_was_sent_is_told` pins the
+sentence in `gui`.
+
+The strategy table does not move: `three_full_runs_of_each_strategy` un-holds
+its people as part of the `flee` script, so this only ever caught a player who
+forgot — which is to say, every player.
