@@ -565,3 +565,79 @@ fn the_ground_drinks_and_the_map_dries() {
         "the ground drank water it is not allowed to reach"
     );
 }
+
+#[test]
+fn the_mark_still_says_where_the_water_got_to_on_the_day_you_plan() {
+    // City 0 in the M12.11 run parked its last two citizens on rock at height
+    // 35 that was **unmarked** by `the water reached here` after *both*
+    // previous floods, and the third flood covered them.
+    //
+    // > I used the game's own evidence, correctly, and it killed my last two
+    // > people.
+    //
+    // It read "no mark" as "the water never came here". It meant "no data".
+    // `forget_the_mark` clears the whole bitset the instant an age turns - and
+    // a flood happens on the *last* day of an age, so the record of the flood
+    // that just happened is erased about a tick after it finishes. A player
+    // then spends days one to five of the next age looking at a blank map,
+    // which is exactly the window in which a wall gets sited and a refuge
+    // chosen.
+    //
+    // The comment on `forget_the_mark` said this was "only ever a difference
+    // during a flood". That was the mistake: it is a difference on every day
+    // that is *not* a flood, which is five days in six.
+    //
+    // **What this arranges**: the world is put at the end of an age so the
+    // flood is reached in a few hundred ticks rather than six days. The flood
+    // and the age roll are the game's own.
+    use sim::balance::{DAYS_PER_AGE, TICKS_PER_DAY};
+    use sim::nav::Nav;
+    use sim::world::World;
+
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+
+    // The last day of age 1, just before the surge.
+    w.age_start_tick = 0;
+    w.tick = (World::IMPACT_DAY - 1) * TICKS_PER_DAY;
+    assert_eq!(w.age(), 1);
+
+    // Through the flood to the end of the age.
+    let end = DAYS_PER_AGE * TICKS_PER_DAY;
+    let mut marked_in_age_one = 0usize;
+    while w.tick < end - 2 {
+        w.tick(&mut nav, &[]);
+        let n = (0..sim::map::MAP_W)
+            .flat_map(|x| (0..sim::map::MAP_H).map(move |y| (x, y)))
+            .filter(|&(x, y)| w.water.reached_at(x, y))
+            .count();
+        marked_in_age_one = marked_in_age_one.max(n);
+    }
+    assert!(marked_in_age_one > 0, "the age-one flood marked nothing at all");
+
+    // Over the age boundary, and one day into the next - the day a player
+    // starts deciding where the wall goes.
+    while w.age() == 1 {
+        w.tick(&mut nav, &[]);
+    }
+    for _ in 0..TICKS_PER_DAY {
+        w.tick(&mut nav, &[]);
+    }
+    assert_eq!(w.age(), 2);
+    assert_eq!(w.day_of_age(), 2, "the test did not reach the day it needed");
+
+    let marked_now = (0..sim::map::MAP_W)
+        .flat_map(|x| (0..sim::map::MAP_H).map(move |y| (x, y)))
+        .filter(|&(x, y)| w.water.reached_at(x, y))
+        .count();
+    println!(
+        "  age 1's flood marked {marked_in_age_one} cells; on age 2 day 2 the map shows {marked_now}"
+    );
+
+    assert!(
+        marked_now >= marked_in_age_one,
+        "the map forgot where the water got to: {marked_in_age_one} cells were \
+         marked during the flood and {marked_now} are marked on the day somebody \
+         would use them to choose where to stand"
+    );
+}

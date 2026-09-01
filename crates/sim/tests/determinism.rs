@@ -659,8 +659,17 @@ fn two_peers_remember_the_same_high_water_mark() {
     assert!(marked > 100, "a flood should leave a mark, and left {marked} cells");
     println!("  the age-one flood reached {marked} cells");
 
-    // And an age turning forgets it, so the mark is always the *last* flood
-    // rather than every flood there has ever been.
+    // **And an age turning keeps it.** This asserted the opposite, and the
+    // opposite is the fault: a flood lands on the *last* day of an age, so
+    // forgetting at the age roll erased the mark a tick after it was written
+    // and left days one to five of the next age - the days a wall is sited in
+    // - showing a blank map. City 0 in the M12.11 run chose its final refuge
+    // as ground unmarked after two floods and lost its last two citizens to
+    // the third, because "no mark" meant "no data" and read as "never wet".
+    //
+    // Cumulative costs nothing, and since floods escalate the newest is also
+    // the largest - so the mark still shows the last flood, and now shows it
+    // on the days somebody would use it.
     a.tick = DAYS_PER_AGE * TICKS_PER_DAY - 1;
     a.tick(&mut na, &[]);
     a.tick(&mut na, &[]);
@@ -669,5 +678,8 @@ fn two_peers_remember_the_same_high_water_mark() {
         .flat_map(|y| (0..sim::MAP_W).map(move |x| (x, y)))
         .filter(|&(x, y)| a.water.reached_at(x, y))
         .count();
-    assert!(still < marked, "the new age kept the old age's mark: {still} of {marked}");
+    assert!(
+        still >= marked,
+        "the new age threw away the old age's mark: {still} of {marked}"
+    );
 }

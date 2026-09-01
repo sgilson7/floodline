@@ -3267,3 +3267,48 @@ sentence in `gui`.
 The strategy table does not move: `three_full_runs_of_each_strategy` un-holds
 its people as part of the `flee` script, so this only ever caught a player who
 forgot — which is to say, every player.
+
+---
+
+## 2026-09-01 — The high-water mark remembers every flood, and says what it cannot promise
+
+City 0 in the M12.11 run parked its last two citizens on rock at height 35 that
+was unmarked by `the water reached here` after **both** previous floods, and
+the third covered them.
+
+> I used the game's own evidence, correctly, and it killed my last two people.
+
+Two faults, and the first one is not the one that was reported.
+
+**The mark was being erased almost the moment it was written.**
+`forget_the_mark` cleared the whole bitset when an age turned, on the reasoning
+that the mark should show the most recent flood, and that doing so *"is only
+ever a difference during a flood"*. That reasoning is wrong in a way that is
+easy to miss: **a flood lands on the last day of an age**, so clearing at the
+age roll erased the record about a tick after it finished. A player then spent
+days one to five of the next age looking at a blank map — which is the entire
+window in which a wall is sited and a refuge chosen. It is a difference on
+every day that is *not* a flood, which is five days in six.
+
+Measured: age one's flood marked 9 378 cells, and 6 532 were still showing on
+age 2 day 2 — the rest erased, and only partly re-marked by water that had not
+drained. **The missing third is the *edge* of the flood**, which is precisely
+the line somebody is looking for. So city 0 was not reading a stale mark. It
+was reading a hole.
+
+The mark is cumulative now. It costs nothing — the same bitset, never cleared,
+snapshot unchanged at 118 867 bytes — and since floods escalate the newest is
+also the largest, so it still shows the last flood and now shows it on the days
+somebody would use it.
+
+**And the second fault, which was the one reported: it under-reports the next
+flood, and cannot do otherwise.** Every age's surge goes further than the one
+before, so the mark is a record and never a promise. That is not something the
+mark can fix, so the panel says it: an unmarked cell now reads **`not yet -
+each flood comes higher`**, once a flood has happened. Before the first one
+there is no mark at all and the sentence would be noise on a reading nobody has
+reason to distrust yet.
+
+`the_mark_still_says_where_the_water_got_to_on_the_day_you_plan` is the guard.
+`two_peers_remember_the_same_high_water_mark` asserted the *old* rule — "an age
+turning forgets it" — and now asserts the new one; it was encoding the fault.

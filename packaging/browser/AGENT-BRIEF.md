@@ -93,10 +93,17 @@ have:
 
 * **height** is how high that cell stands, on the same scale everywhere, so you
   can compare one cell with another. Higher is safer.
-* **the water reached here** means the last flood covered this cell deep enough
-  to wade in. **The map is shaded, faintly, wherever that is true** — so after
-  the first flood you can see where the water goes and plan against it. Before
-  the first flood there is no mark, and height is all you have.
+* **the water reached here** means the water has covered this cell deep enough
+  to wade in, at some point in this run. **The map is shaded wherever that is
+  true** — so after the first flood you can see where the water goes and plan
+  against it. Before the first flood there is no mark, and height is all you
+  have.
+* **not yet - each flood comes higher** is what an unmarked cell says once a
+  flood has happened, and it is a warning rather than a reassurance. **The mark
+  is a record, never a promise.** Every age's flood goes further than the last,
+  so ground that survived two of them can still go under the third — which is
+  exactly how a player in the previous run lost its final two citizens on
+  ground it had checked and was right about.
 * **water:** *underfoot*, *wading* or *out of your depth* says what is standing
   there right now. It appears on buildings too, so you can ask whether your own
   granary is under water.

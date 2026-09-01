@@ -248,11 +248,11 @@ impl World {
             }
             self.age += 1;
             self.age_start_tick = self.tick;
-            // The high-water mark shows the *last* flood, so it is forgotten
-            // when a new age begins. Floods escalate, so this is only ever a
-            // difference during a flood — but during a flood is exactly when
-            // somebody is watching it.
-            self.water.forget_the_mark();
+            // **The high-water mark is not forgotten here, and used to be.**
+            // See `Water::reached`: a flood lands on the last day of an age, so
+            // clearing at the age roll erased it a tick after it was written
+            // and left the next five days - the days a wall is sited in -
+            // showing a blank map.
             // Drawn at age start, from the one Rng, and not shown.
             self.disaster = Disaster::draw(self.age, &self.map, &mut self.rng);
         }

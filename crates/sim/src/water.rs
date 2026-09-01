@@ -38,13 +38,40 @@ pub struct Water {
     pub drained: u64,
     /// Everything the sea has pushed *in* over the edges during a surge.
     pub poured: u64,
-    /// Where the water got to this age, one bit a cell.
+    /// Where the water has **ever** got to, one bit a cell.
     ///
     /// The high-water mark, and the thing both players in the M10.6 run asked
     /// for above everything else — in a game entirely about water height there
     /// was no way to ask where the water had been. One of them planned a whole
     /// age by screenshotting the previous flood at its peak and noting which
     /// pixels stayed green.
+    ///
+    /// **Ever, and not this age.** It was cleared when an age turned, on the
+    /// reasoning that the mark should show the most recent flood and that
+    /// doing so "is only ever a difference during a flood". That was the
+    /// mistake: a flood lands on the *last* day of an age, so clearing at the
+    /// age roll erased the record about a tick after it was written, and a
+    /// player then spent days one to five of the next age looking at a blank
+    /// map — which is the whole window in which a wall is sited and a refuge
+    /// chosen. It is a difference on every day that is *not* a flood, which is
+    /// five days in six.
+    ///
+    /// Measured: age one's flood marked 9 378 cells, and 6 532 were still
+    /// showing on age 2 day 2 — the rest erased and only partly re-marked by
+    /// water that had not drained. The missing third is the *edge* of the
+    /// flood, which is exactly the line somebody is looking for.
+    ///
+    /// City 0 in the M12.11 run parked its last two citizens on ground that
+    /// was unmarked after both previous floods, and the third took them. It
+    /// read "no mark" as *the water never came here*; it meant *no data*.
+    ///
+    /// Cumulative costs nothing — the same bitset, never cleared — and since
+    /// floods escalate the newest is also the largest, so this is what the
+    /// original intent wanted in the first place.
+    ///
+    /// **It still under-reports the next flood**, because they escalate. That
+    /// is not something the mark can fix and the panel says it instead: see
+    /// `input::under_the_cursor`.
     ///
     /// **A bit and not a depth.** A `Welcome` with a snapshot was already
     /// 100 369 bytes against design §8's 150 KB, so the width had to be priced
@@ -139,10 +166,10 @@ impl Water {
         self.reached[i / 8] & (1 << (i % 8)) != 0
     }
 
-    /// Forget the last flood. Called when an age turns, so the mark always
-    /// shows the most recent one rather than every one that ever happened.
-    pub fn forget_the_mark(&mut self) {
-        self.reached.fill(0);
+    /// How many cells the water has ever reached. For the tests and the
+    /// probes; a player reads the map.
+    pub fn marked_cells(&self) -> usize {
+        self.reached.iter().map(|b| b.count_ones() as usize).sum()
     }
 
 

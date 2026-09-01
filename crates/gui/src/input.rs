@@ -1429,11 +1429,28 @@ impl Input {
             // planned a whole age by noting which pixels had stayed green
             // through the last flood — "that is reading the renderer, not
             // playing the game". `Map::height` has been there since phase 1.
+            // **And what an unmarked cell does and does not mean.**
+            //
+            // Every flood comes higher than the last, so the mark is a record
+            // and never a promise. City 0 in the M12.11 run chose its final
+            // refuge as ground the water had not reached in two ages, checked
+            // it, acted on it, and lost its last two citizens to the third
+            // flood: *"I used the game's own evidence, correctly, and it
+            // killed my last two people."*
+            //
+            // Said only once a flood has happened. Before that there is no
+            // mark on the map at all and the sentence would be noise on a
+            // reading nobody has any reason to distrust yet.
+            let seen_a_flood = w.water.marked_cells() > 0;
             return format!(
                 "{}  height {}{}",
                 ground_name(w.map.ground_at(x, y)),
                 w.map.height_at(x, y),
-                if w.water.reached_at(x, y) { "  the water reached here" } else { "" },
+                match (w.water.reached_at(x, y), seen_a_flood) {
+                    (true, _) => "  the water reached here",
+                    (false, true) => "  not yet - each flood comes higher",
+                    (false, false) => "",
+                },
             );
         };
         let name = kind_name(b.kind);
