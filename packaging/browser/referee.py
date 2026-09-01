@@ -57,10 +57,17 @@ FILMSTRIP = 15.0    # how often to keep the picture
 DAY_SECONDS = 60.0
 
 
-def rows_box(which):
-    """The crop each question is asked of, in logical canvas coordinates."""
+def rows_box(which, cities=2):
+    """The crop each question is asked of, in logical canvas coordinates.
+
+    **Takes the city count**, because the panel's rows move with it: the cities
+    list is above the status row and the tab row, and a third city puts both a
+    row further down. Asked at two while three were playing, this sampled blank
+    panel and reported that nobody was ticking - which is exactly the failure
+    `two_agents.py` had in M11.2 and the reason `panel.py` exists.
+    """
     return {
-        "status": (P.LEFT - 6.0, P.status() - 18.0, P.RIGHT, P.status() + 6.0),
+        "status": (P.LEFT - 6.0, P.status(cities) - 18.0, P.RIGHT, P.status(cities) + 6.0),
         "tick": (P.LEFT - 6.0, P.TICK - 16.0, P.LEFT + 180.0, P.TICK + 6.0),
         "peers": (P.LEFT - 6.0, P.PEERS - 16.0, P.RIGHT, P.PEERS + 6.0),
         "day": (P.LEFT - 6.0, P.AGE_DAY - 18.0, P.RIGHT, P.AGE_DAY + 6.0),
@@ -74,7 +81,12 @@ def rows_box(which):
         # it — but a player who is merely *looking at the households tab* has
         # no build menu either, and calling that "the game has ended" would be
         # worse than the fault it is meant to catch.
-        "tabs": (P.LEFT - 6.0, P.fixed_ends() + 6.0, P.RIGHT, P.fixed_ends() + 42.0),
+        "tabs": (
+            P.LEFT - 6.0,
+            P.fixed_ends(cities) + 6.0,
+            P.RIGHT,
+            P.fixed_ends(cities) + 42.0,
+        ),
     }[which]
 
 
@@ -121,38 +133,53 @@ def main():
         log.flush()
 
     with sync_playwright() as p:
+        # **However many are actually seated.** This walked `table.PORTS` and
+        # kept two-element lists beside it; the moment a third player sat down
+        # the lists ran out. Ports that nobody is on are skipped rather than
+        # crashed on, so watching a two-player game with a three-port table.py
+        # still works.
         pages, views = [], []
         for port in table.PORTS:
-            b = p.chromium.connect_over_cdp(f"http://localhost:{port}")
+            try:
+                b = p.chromium.connect_over_cdp(f"http://localhost:{port}")
+            except Exception:
+                continue
             page = b.contexts[0].pages[0]
             w, h = page.evaluate("[window.innerWidth, window.innerHeight]")
             pages.append(page)
             views.append(View(w, h, page.evaluate("window.devicePixelRatio")))
+        if not pages:
+            print("nobody is at the table - run table.py first")
+            raise SystemExit(1)
 
-        who = ("city 0", "city 1")
-        last = [None, None]
-        last_day = [None, None]
-        days = [0, 0]
-        stalls = [0, 0]
-        alarms = [0, 0]
+        n = len(pages)
+        # The panel's rows move with the number of cities, so every crop below
+        # has to be told how many there are.
+        cities = n
+        who = tuple(f"city {i}" for i in range(n))
+        last = [None] * n
+        last_day = [None] * n
+        days = [0] * n
+        stalls = [0] * n
+        alarms = [0] * n
         say(f"watching {len(pages)} peers for {SECONDS:.0f}s, "
             f"a look every {SAMPLE:.0f}s")
 
         started = time.time()
         next_film = started
-        over = [False, False]
+        over = [False] * n
         while time.time() - started < SECONDS:
             note = []
             for i, (page, V) in enumerate(zip(pages, views)):
                 img = Image.open(io.BytesIO(page.screenshot())).convert("RGB")
-                tick = crop(img, V, rows_box("tick")).tobytes()
-                day = crop(img, V, rows_box("day")).tobytes()
-                red = alarm_pixels(crop(img, V, rows_box("status")))
+                tick = crop(img, V, rows_box("tick", cities)).tobytes()
+                day = crop(img, V, rows_box("day", cities)).tobytes()
+                red = alarm_pixels(crop(img, V, rows_box("status", cities)))
 
                 # An ended game and a stopped page both stop the tick row, and
                 # calling the first one a stall is how a soak reports twenty-six
                 # failures for a run that finished normally.
-                if not still_playing(crop(img, V, rows_box("tabs"))):
+                if not still_playing(crop(img, V, rows_box("tabs", cities))):
                     if not over[i]:
                         note.append(f"{who[i]} IS OVER - the score screen is up")
                         over[i] = True
@@ -179,9 +206,9 @@ def main():
 
             if time.time() >= next_film:
                 next_film += FILMSTRIP
-            say("; ".join(note) if note else "both ticking, nothing red")
+            say("; ".join(note) if note else f"all {n} ticking, nothing red")
             if all(over):
-                say("both games have ended; there is nothing left to watch")
+                say("every game has ended; there is nothing left to watch")
                 break
             time.sleep(SAMPLE)
 
