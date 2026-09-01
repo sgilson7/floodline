@@ -38,8 +38,8 @@ TREASURY = 148.0        # "food N  wood N  stone N  gold N" + "  meals N"
 # content that varies inside a row that does not, which is the only safe way
 # to make this panel conditional.
 CITIES = 188.0          # the "CITIES" label
-FIRST_CITY = 211.0      # "city 0 (you): 8 souls"
-CITY_STEP = 24.0
+FIRST_CITY = 211.0      # "city 0 (you): 8   city 1: 5" - two to a row
+CITY_STEP = 24.0        # per *row*, which is per two seats
 
 # ---- draw.rs, the bottom three ------------------------------------------
 # Pinned to the foot of the window rather than to the running total, so these
@@ -56,8 +56,17 @@ FOOT = LOGICAL_H - 70.0         # nothing variable may be drawn below this
 
 
 def after_cities(cities=2):
-    """The y the city list ends at. Everything below it moves with a seat."""
-    return FIRST_CITY + CITY_STEP * cities
+    """The y the city list ends at. Everything below it moves with a seat.
+
+    **Two cities to a row since M12**, so this grows by a row per *pair* of
+    seats rather than per seat. `draw.rs` has the arithmetic and the reason:
+    one per row put the fixed part of the panel 24 px further down for every
+    seat, and the variable stack underneath - the level/move row, road-joins
+    and incoming trade offers - is what got squeezed out. At three cities with
+    a building selected an offer had nine pixels and needed thirty-eight.
+    """
+    import math
+    return FIRST_CITY + CITY_STEP * math.ceil(cities / 2)
 
 
 def tutorial(cities=2):

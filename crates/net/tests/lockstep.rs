@@ -1082,3 +1082,66 @@ fn a_joiner_in_a_room_with_churn_is_still_told_about_the_silence() {
          the player about it"
     );
 }
+
+// ---- more than two ---------------------------------------------------------
+
+/// Every seat the lobby offers, actually seated.
+///
+/// The lobby's `+` goes to `MAX_PLAYERS` and nothing has ever sat down at more
+/// than three. This walks the whole handshake at every size the game claims to
+/// support: everybody gets a city, everybody gets the same world, and the
+/// roster agrees on all of them.
+#[test]
+fn every_size_the_lobby_offers_can_actually_sit_down() {
+    for n in 2..=net::lockstep::MAX_PLAYERS as u32 {
+        let net_ = Loopback::new(n, Conditions::realistic());
+        let mut peers: Vec<LoopbackPeer> = (0..n).map(|i| net_.peer(PeerId(i))).collect();
+        let mut steps = vec![Lockstep::host(31, n, BUILD)];
+        for _ in 1..n {
+            steps.push(Lockstep::join(BUILD));
+        }
+        for _ in 0..60 {
+            for (i, ls) in steps.iter_mut().enumerate() {
+                ls.advance(&mut peers[i]);
+            }
+            net_.step();
+        }
+
+        assert_eq!(steps[0].connected(), n as usize, "{n} seats: not everybody connected");
+        for (i, ls) in steps.iter().enumerate() {
+            assert!(ls.welcomed(), "{n} seats: peer {i} was never given a city");
+            assert_eq!(ls.me, PlayerId(i as u8), "{n} seats: peer {i} got the wrong seat");
+            assert_eq!(
+                ls.world.players.len(),
+                n as usize,
+                "{n} seats: peer {i} has a world built for a different number"
+            );
+            assert_eq!(ls.roster().len(), n as usize, "{n} seats: peer {i}'s roster is short");
+        }
+        // And the same world, not merely the same size.
+        let host_sum = steps[0].world.checksum();
+        for (i, ls) in steps.iter().enumerate().skip(1) {
+            assert_eq!(ls.world.checksum(), host_sum, "{n} seats: peer {i} has a different world");
+        }
+    }
+}
+
+/// Six of them, playing, staying in step.
+///
+/// `three_players_stay_in_step_through_two_ages_with_latency` is the existing
+/// check and stops at three. The star has five edges at six players and the
+/// host bundles five turns a tick, which is the most this game ever asks of
+/// it.
+#[test]
+fn six_players_stay_in_step() {
+    let mut g = Game::new(net::lockstep::MAX_PLAYERS as u32, Conditions::realistic());
+    g.run_to_tick(400);
+    let out = g.disagreements();
+    assert!(out.is_empty(), "six peers disagreed about the world: {out:?}");
+    for (i, s) in g.steps.iter().enumerate() {
+        assert!(!s.status.is_stopped(), "peer {i} stopped: {:?}", s.status);
+    }
+    let ticks = g.ticks();
+    let behind = ticks.iter().max().unwrap() - ticks.iter().min().unwrap();
+    assert!(behind < 20, "six peers drifted apart by {behind} ticks: {ticks:?}");
+}

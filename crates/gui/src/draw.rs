@@ -465,19 +465,52 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
     y += 2.0;
     y += 14.0;
 
+    // **Two to a row**, and that is a budget decision rather than a
+    // typographic one.
+    //
+    // This was one city per row at twenty-four pixels, so the fixed part of
+    // the panel grew twenty-four pixels for every seat — and the variable
+    // stack under it, which holds the level/move row, the road-join buttons
+    // and *incoming trade offers*, is what has to give way. Measured against
+    // `input::VARIABLE_FLOOR`, with a building selected:
+    //
+    // ```text
+    // cities   slack, one per row   two to a row
+    //      2                  33             57
+    //      3                   9             33
+    //      4                 -15             10
+    //      6                 -63            -15
+    // ```
+    //
+    // At three cities a trade offer needs thirty-eight pixels and had nine, so
+    // **a three-player game with a building selected silently stopped drawing
+    // an offer it could not accept any other way** — the panel said "1 did not
+    // fit" and there was nothing to click. The lobby's `+` goes to six.
+    //
+    // Two to a row halves the growth and buys back a whole two-player panel's
+    // worth of room. It is not enough at six with a selection, which is
+    // recorded here rather than pretended about: the honest cap on this panel
+    // is four seats, and nobody has ever played above two.
+    //
+    // "souls" goes, because two of these have to fit across 330 pixels and the
+    // word is the widest thing in the row that carries no number.
     line("CITIES", 15, palette::FAINT, &mut y);
-    for &p in &w.players {
-        let alive = w.population(p);
-        let mine = if p == me { " (you)" } else { "" };
-        let gone = if w.dropped.contains(&p) { " - gone" } else { "" };
-        draw_rectangle(left, y - 10.0, 10.0, 10.0, palette::player(p));
-        draw_text(
-            &format!("city {}{}: {} souls{}", p.0, mine, alive, gone),
-            left + 18.0,
-            y,
-            17.0,
-            if alive == 0 { palette::FAINT } else { palette::INK },
-        );
+    let half = (PANEL_W - 36.0 - 8.0) / 2.0;
+    for pair in w.players.chunks(2) {
+        for (col, &p) in pair.iter().enumerate() {
+            let alive = w.population(p);
+            let mine = if p == me { " (you)" } else { "" };
+            let gone = if w.dropped.contains(&p) { " gone" } else { "" };
+            let x = left + col as f32 * (half + 8.0);
+            draw_rectangle(x, y - 9.0, 9.0, 9.0, palette::player(p));
+            draw_text(
+                &format!("city {}{}: {}{}", p.0, mine, alive, gone),
+                x + 15.0,
+                y,
+                15.0,
+                if alive == 0 { palette::FAINT } else { palette::INK },
+            );
+        }
         y += 24.0;
     }
 

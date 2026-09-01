@@ -3312,3 +3312,45 @@ reason to distrust yet.
 `the_mark_still_says_where_the_water_got_to_on_the_day_you_plan` is the guard.
 `two_peers_remember_the_same_high_water_mark` asserted the *old* rule — "an age
 turning forgets it" — and now asserts the new one; it was encoding the fault.
+
+---
+
+## 2026-09-01 — The panel could not seat the players the lobby offers
+
+Triage for three players. **The lockstep is not the problem**: two new tests
+walk every seat count the lobby's `+` button offers.
+`every_size_the_lobby_offers_can_actually_sit_down` runs the whole handshake at
+two through six — everybody welcomed, everybody in the right seat, every world
+the same checksum — and `six_players_stay_in_step` plays six of them through
+four hundred ticks under realistic latency with no disagreement and under
+twenty ticks of drift. The star holds.
+
+**The panel was the problem.** The cities list drew one city per row at
+twenty-four pixels, so the *fixed* part of the panel grew twenty-four pixels
+per seat — and what gives way is the variable stack underneath it, which holds
+the level/move row, the road-join buttons and **incoming trade offers**.
+Measured against `VARIABLE_FLOOR`, room left with a building selected:
+
+    cities   one per row   two to a row
+         2            33             57
+         3             9             33
+         4           -15             10
+         6           -63            -15
+
+A trade offer needs thirty-eight pixels. **At three cities with a building
+selected it had nine**, so the panel dropped it, said "1 did not fit", and left
+the player with an offer they could not accept by any other route — trade being
+the whole of design §6. At four the level/move row was already below the floor.
+
+Two cities to a row halves the growth and buys back a whole two-player panel's
+worth of room; the two-player case improves as well, from 33 to 57. "souls"
+goes from the row, because two of these have to fit across 330 pixels and it is
+the widest thing there carrying no number.
+
+**It is not enough at six**, and that is recorded rather than pretended about.
+The honest cap on this panel is four seats. `MAX_PLAYERS` stays at six because
+the lockstep genuinely supports six and the map generator places six hearths;
+what does not is the right-hand column. A game of five or six can still be
+played — the rows that overflow are announced, not silently dropped — but
+somebody who wants six comfortably has to give the variable stack a home of its
+own rather than the bottom of a pile.
