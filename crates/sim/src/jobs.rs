@@ -43,7 +43,32 @@ impl World {
                     continue;
                 }
             }
-            if self.citizens[i].tired() && !self.heading_to_bed(i) {
+            // **And not while it is already on its way to eat.**
+            //
+            // Without that second guard the two branches take it in turns. A
+            // citizen that is hungry *and* tired sets `ToEat` on one tick; on
+            // the next, hunger is skipped because `heading_to_eat` is true,
+            // and this fires because its errand is `ToEat` rather than
+            // `ToSleep` - so it abandons the meal and turns toward a bed. On
+            // the tick after that hunger fires again for the same reason. It
+            // flips every tick, walks a fraction of a cell each way, and
+            // arrives nowhere. Reported from a played game as people
+            // "gyrating in place"; measured at 235 changes of mind in 600
+            // ticks, in `somebody_both_hungry_and_tired_goes_to_one_of_them`.
+            //
+            // Worse than the standing still: `abandon` puts down whatever is
+            // being carried, so a hauler caught in this drops its load on the
+            // floor once a tick.
+            //
+            // The comment above says hunger outranks tiredness when there is
+            // somewhere to eat. This is the line that makes that true. When
+            // there is nowhere - `nearest_food` gives `None` - no errand is
+            // set, `heading_to_eat` stays false, and sleep still wins, which
+            // is the case that comment exists for.
+            if self.citizens[i].tired()
+                && !self.heading_to_bed(i)
+                && !self.heading_to_eat(i)
+            {
                 if let Some(bed) = self.bed_for(i) {
                     self.citizens[i].abandon();
                     self.citizens[i].errand = Some(Errand::ToSleep(bed));

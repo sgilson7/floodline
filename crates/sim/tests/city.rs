@@ -1083,3 +1083,98 @@ fn a_cookery_turns_food_into_meals_and_a_meal_feeds_twice_as_far() {
         "{on_meals} meals against {on_food} food: a meal is not worth {MEAL_WORTH} of it"
     );
 }
+
+#[test]
+fn somebody_both_hungry_and_tired_goes_to_one_of_them() {
+    // Reported from a played game: *"a bunch of citizens start getting caught
+    // in a loop where they bounce back and forth between going to eat and
+    // going to bed, they just end up gyrating in place."*
+    //
+    // `assign_errands` checks hunger, then tiredness, and each branch only
+    // guards against the errand it sets itself. So a citizen that is hungry
+    // **and** tired sets `ToEat` on one tick; on the next, `heading_to_eat` is
+    // true so hunger is skipped, and `tired() && !heading_to_bed` is true
+    // because its errand is `ToEat` - so it abandons the meal and walks toward
+    // a bed. On the tick after that, hunger fires again for the same reason.
+    // It flips every tick and never covers the ground to either.
+    //
+    // `abandon()` puts down whatever is being carried, so a hauler caught in
+    // this drops its load on the floor every tick as well.
+    //
+    // **What this arranges**: one citizen, both needs below their thresholds,
+    // a standing granary with food in it and a standing cottage to sleep in,
+    // and nothing else to do. That is the state; the loop is the game's.
+    use sim::balance::{HUNGRY, NEED_FULL, TIRED};
+    use sim::building::{Good, Kind};
+    use sim::nav::Nav;
+    use sim::world::World;
+    use sim::PlayerId;
+
+    let me = PlayerId(0);
+    let mut w = World::new(31, 2);
+    let mut nav = Nav::new();
+
+    let granary = site_near_hearth(&mut w, me, Kind::Granary);
+    assert!(w.build_at(granary, Kind::Granary.build_ticks()));
+    w.deliver_to(granary, Good::Food, 200);
+    w.buildings[granary.0 as usize].store.set(Good::Food, 200);
+
+    let cottage = site_near_hearth(&mut w, me, Kind::Cottage);
+    assert!(w.build_at(cottage, Kind::Cottage.build_ticks()));
+
+    let who = w.citizens.iter().position(|c| c.owner == me && !c.is_child()).unwrap();
+    // Everybody else out of the way, so nothing else competes for the granary
+    // or the bed and this is one citizen's decision.
+    for (i, c) in w.citizens.iter_mut().enumerate() {
+        if i != who {
+            c.held = true;
+        }
+    }
+    w.citizens[who].food = HUNGRY - 1;
+    w.citizens[who].rest = TIRED - 1;
+
+    // **Standing between them, with the two in different directions.** With
+    // the granary and the bed both a step away the citizen arrives before it
+    // can change its mind, which is why this did not reproduce at first. The
+    // report is of people *gyrating in place*, and gyration needs somewhere
+    // else to be pulled toward.
+    let (gx, gy) = w.buildings[granary.0 as usize].centre();
+    let (cx, cy) = w.buildings[cottage.0 as usize].centre();
+    let away = (gx + (gx - cx) * 6, gy + (gy - cy) * 6);
+    let away = (away.0.clamp(2, sim::map::MAP_W - 3), away.1.clamp(2, sim::map::MAP_H - 3));
+    w.citizens[who].pos = sim::fx::V2::cell_centre(away.0, away.1);
+    println!("  granary at {gx},{gy}  cottage at {cx},{cy}  citizen at {},{}", away.0, away.1);
+
+    let mut flips = 0;
+    let mut last = w.citizens[who].errand;
+    let mut arrived = false;
+    for _ in 0..600 {
+        w.tick(&mut nav, &[]);
+        let now = w.citizens[who].errand;
+        if now != last {
+            flips += 1;
+            last = now;
+        }
+        let s = w.citizens[who].state;
+        if s == sim::State::Eating || s == sim::State::Sleeping {
+            arrived = true;
+            break;
+        }
+        // Held off the other way: if it is fed and rested it stopped needing
+        // either and the question is moot.
+        if w.citizens[who].food >= NEED_FULL && w.citizens[who].rest >= NEED_FULL {
+            break;
+        }
+    }
+
+    println!("  errand changed {flips} times before arriving: {arrived}");
+    assert!(
+        arrived,
+        "a citizen that was hungry and tired never reached a granary or a bed \
+         in six hundred ticks; its errand changed {flips} times"
+    );
+    assert!(
+        flips < 20,
+        "it changed its mind {flips} times getting there - that is the gyration"
+    );
+}

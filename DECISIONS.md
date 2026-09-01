@@ -3175,3 +3175,45 @@ behind it.
 stable pair rather than a query over whoever is sleeping there, and a run long
 enough for a child to grow up in. Neither is a balance constant and neither
 belongs in a milestone that was asked to decide whether to keep asking for it.
+
+---
+
+## 2026-09-01 — Hunger outranks tiredness, and now actually does
+
+Reported from a played game: *"a bunch of citizens start getting caught in a
+loop where they bounce back and forth between going to eat and going to bed,
+they just end up gyrating in place."*
+
+`assign_errands` checks hunger, then tiredness, and each branch guarded only
+against the errand it sets itself. So a citizen that is hungry **and** tired
+sets `ToEat` on one tick; on the next, hunger is skipped because
+`heading_to_eat` is true, and the tired branch fires because the errand is
+`ToEat` rather than `ToSleep` — so it abandons the meal and turns toward a bed.
+On the tick after that, hunger fires again for the same reason. It flips every
+tick, walks a fraction of a cell each way, and arrives nowhere.
+
+**Measured: 235 changes of mind in 600 ticks.** With the guard, one.
+
+It did not reproduce at first, and why is worth keeping. Placed next to a
+granary and a cottage the citizen simply arrives, in a tick or two, before it
+can change its mind. **Gyration needs somewhere else to be pulled toward**, so
+the test stands the citizen well away with the two destinations in different
+directions. A bug about oscillation cannot be reproduced without a lever arm.
+
+`abandon()` also puts down whatever is being carried, so a hauler caught in
+this dropped its load on the floor once a tick. That is the part that would
+have been hardest to diagnose from the outside: goods going missing, with no
+message and nothing on any roster to say why.
+
+The comment above the hunger branch already said hunger outranks tiredness
+*when there is somewhere to eat*, and explained at length why the two are in
+that order — a city that runs out of food must not have citizens who are
+permanently hungry and therefore never sleep. **The comment was right and the
+code did not implement it.** The added guard is what makes the sentence true,
+and it preserves the case the sentence exists for: when `nearest_food` gives
+`None` no errand is set, `heading_to_eat` stays false, and sleep still wins.
+
+`three_full_runs_of_each_strategy` either side, survivors across all seeds:
+`idle` 0→0, `grow` 8→7, `dike` 6→7, `flee` 12→10, `both` 8→8. Citizens that
+finish a meal instead of oscillating spend their days differently and the
+timing moves; nothing here is a strategy changing its answer.
