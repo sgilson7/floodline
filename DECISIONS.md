@@ -3400,3 +3400,88 @@ and prove nothing. `Loopback`'s docstring says it is "a real transport, not a
 stub — it has one-way latency, it drops unreliable messages", and it is; it was
 also quietly more disciplined than any browser, in the one dimension that
 mattered.
+
+---
+
+## 2026-09-01 — What three players found, and the harness fault that shaped it
+
+The first three-player run. Referee **CLEAN** — three peers, 11 days each in
+12.6 minutes, zero samples with no tick, zero red. The lockstep held perfectly
+at three, which is what it was there to show.
+
+**All three cities died, two of them in age 1.** `PLAYTEST-M12-THREE.md` is the
+account.
+
+### The harness fault, first, because it shaped everything else
+
+`driver.py`'s button table called `panel.py` with the default `cities=2`. The
+panel's rows move with the city count — the CITIES block sits above the tabs
+and everything under them — so at three cities **every named button missed by
+twenty-four logical pixels and did nothing, silently, while reporting
+success.** All three players lost time to it; one lost the run to it.
+
+> I lost roughly two game days [...] with all seven of my people standing idle
+> on a hill while the amber line said "7 of your people are still waiting where
+> you sent them: choose all, then back to hauling", and pressing the button it
+> named did nothing at all. — city 2
+
+> I gave the correction the manual told me to give, the tool reported success,
+> and the number that would tell me it worked never moved. — city 1
+
+`panel.py`'s own docstring predicted it: *"an agent that mis-clicks for a whole
+run has no way to tell."* It was introduced by making `after_cities` city-aware
+and not following it into `driver.py` — a mirror updated at one end.
+
+`table.py` now writes `/tmp/floodline-table.json` with what it seated and
+`driver.py` reads it. An agent's hands should not have to be told how many
+people are playing.
+
+**The run is therefore partly compromised and is reported as such.** Two of
+three cities died inside the bootstrap, and at least one of those deaths is
+attributable to a button that did nothing.
+
+### The game faults, which are real
+
+**Deaths that end a run were never reported.** The minders lived in
+`map_layer`, which `main.rs` skips once the run is over — so the last thing
+that happens to a city, which is the thing it most wants named, was the one
+thing never said. Two of three cities lost all eight people at once and saw
+only *"your city is gone"*.
+
+> Eight people died and the game never said so. [...] I am fairly confident it
+> was starvation, but **I am guessing**, on the one question the game
+> explicitly promised to answer. — city 1
+
+`Input::watch` and `Input::messages` are split out and run every frame there is
+a world at all.
+
+**A wall that was never built was announced as giving way**, and this is the
+M11.9 report that could never be reproduced. `mind_the_wall` counted dikes in
+`Rubble`, and a *site* the flood destroys becomes `Rubble` exactly as a
+finished segment does. City 0 owned twelve segments, every one at 0% and every
+one reading *nobody is carrying to it*, placed by a city with no living people
+— and was told a stretch of its wall had given way.
+
+> So: did I build a wall? No. Did the game tell me one of mine collapsed? Yes.
+
+Only a fall in the *standing* count is a collapse now. The same counter read
+from the other end is M11.9's "a wall vanished with no announcement".
+
+**A city could starve to death inside the tutorial.** The larder check sat
+below the bootstrap rungs, so a city whose farm was placed but unstaffed was
+told *"drag to choose your people, then right-click the farm"* — correct
+advice, not urgent advice — while its people died. Two of three cities went
+that way in age 1.
+
+The rung is above the bootstrap now and fires on somebody actually at nought
+food. `days_of_food == Some(0)` was tried and is wrong: a city's treasury holds
+no food until it has a granary, so it fires on the first frame of every game
+and would tell a new player their granary was empty before they knew what a
+granary was.
+
+**The panel ran off the right edge of the window.** Not the crop, the window.
+Every width guard in `input.rs` counts characters, which is a guess at a
+proportional font; `ui::fits` measures, and the tool hint and the hover row —
+the two longest lines in the panel — are clipped to it.
+
+**And "1 ages survived"**, which is the last sentence this game ever says.

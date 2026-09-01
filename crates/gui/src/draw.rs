@@ -596,7 +596,11 @@ pub fn score(w: &World) {
         None => "",
     };
     line(ending, 32, palette::INK, &mut y);
-    line(&format!("{} ages survived, over {} days", s.ages_survived, s.days), 20,
+    // "1 ages survived" is the last sentence this game ever says to a player,
+    // and an M12 player noticed. It is a small thing and it is the last thing.
+    let ages = if s.ages_survived == 1 { "1 age" } else { &format!("{} ages", s.ages_survived) };
+    let days = if s.days == 1 { "1 day".to_owned() } else { format!("{} days", s.days) };
+    line(&format!("{ages} survived, over {days}"), 20,
          palette::INK, &mut y);
     y += 10.0;
 

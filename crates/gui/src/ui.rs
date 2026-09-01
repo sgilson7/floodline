@@ -218,6 +218,35 @@ pub fn centred(text: &str, y: f32, size: f32, colour: Color) {
     draw_text(text, (crate::screen::LOGICAL_W - m.width) / 2.0, y, size, colour);
 }
 
+/// Trim a line until it fits `width` at `size`, and say so when it has.
+///
+/// **Measured, not counted.** Every other guard on panel text in this file
+/// counts characters, which is a guess at a proportional font and was wrong:
+/// an M12 player reported `drag to choose. right-click to send them. h for
+/// high ground` and `dike: waiting for 30 stone - nobody is carrying to it`
+/// both running off the right edge of the *window*, not the crop. "The panel
+/// does not have room for its own sentences."
+///
+/// Ends in `..` rather than an ellipsis, because
+/// `nothing_the_game_draws_is_outside_ascii` is real and macroquad's font
+/// draws a hollow box for anything else.
+pub fn fits(text: &str, width: f32, size: u16) -> String {
+    if measure_text(text, None, size, 1.0).width <= width {
+        return text.to_owned();
+    }
+    let mut cut: Vec<char> = text.chars().collect();
+    while !cut.is_empty() {
+        cut.pop();
+        let mut line: String = cut.iter().collect();
+        line = line.trim_end().to_owned();
+        line.push_str("..");
+        if measure_text(&line, None, size, 1.0).width <= width {
+            return line;
+        }
+    }
+    String::new()
+}
+
 /// Wrap prose on spaces. For sentences a person reads, unlike `wrapped`,
 /// which chops a base64 blob wherever it likes because nobody reads one.
 pub fn wrapped_words(text: &str, cols: usize) -> Vec<String> {

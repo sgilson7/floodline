@@ -39,19 +39,43 @@ import time
 from PIL import Image
 from playwright.sync_api import sync_playwright
 from view import View, LOGICAL_W, LOGICAL_H, PANEL_W
+import json
 import panel as P
+import table
+
+def seated():
+    """How many cities are in this game, so the panel's rows land right.
+
+    **The panel moves with the city count** — the CITIES block sits above the
+    tabs and everything under them — so a button addressed by name at the wrong
+    count lands in a gap and does nothing at all, silently. That happened to all
+    three players in the M12 three-player run: `choose all`, `back to hauling`
+    and `tab-people` each reported success and changed nothing, for four game
+    days, while the amber line was telling them to press exactly those buttons.
+
+    `table.py` writes what it seated. Two if it has not, which is what every
+    game before M12 was.
+    """
+    try:
+        with open(table.TABLE) as f:
+            return int(json.load(f).get("cities", 2))
+    except (OSError, ValueError, TypeError):
+        return 2
+
+
+CITIES = seated()
 
 BUTTONS = {
-    "road": P.road_button,
-    "point": P.point_button,
-    "choose-all": P.choose_all,
-    "back-to-hauling": P.back_to_hauling,
-    "trade": P.propose_a_trade,
-    "tab-build": lambda c=2: P.tab("build", c),
-    "tab-households": lambda c=2: P.tab("households", c),
-    "tab-people": lambda c=2: P.tab("people", c),
-    **{f"person-{n}": (lambda c=2, k=n: P.person_chip(k, c)) for n in range(12)},
-    **{name: (lambda c=2, n=name: P.build_button(n, c)) for name in P.BUILDS},
+    "road": lambda c=CITIES: P.road_button(c),
+    "point": lambda c=CITIES: P.point_button(c),
+    "choose-all": lambda c=CITIES: P.choose_all(c),
+    "back-to-hauling": lambda c=CITIES: P.back_to_hauling(c),
+    "trade": lambda c=CITIES: P.propose_a_trade(c),
+    "tab-build": lambda c=CITIES: P.tab("build", c),
+    "tab-households": lambda c=CITIES: P.tab("households", c),
+    "tab-people": lambda c=CITIES: P.tab("people", c),
+    **{f"person-{n}": (lambda c=CITIES, k=n: P.person_chip(k, c)) for n in range(12)},
+    **{name: (lambda c=CITIES, n=name: P.build_button(n, c)) for name in P.BUILDS},
 }
 
 
@@ -161,7 +185,7 @@ def main():
             # The game is not at fault: a human sees that the button is not
             # there. An agent addresses it by name and cannot.
             if name not in ("tab-build", "tab-households", "tab-people"):
-                tx, ty = P.tab("build")
+                tx, ty = P.tab("build", CITIES)
                 page.mouse.click(*V.css(tx, ty))
                 page.wait_for_timeout(120)
             lx, ly = BUTTONS[name]()

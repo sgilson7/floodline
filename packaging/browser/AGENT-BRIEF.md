@@ -13,15 +13,23 @@ whether this is *fun*, which nobody can answer from the answer key.
 **You may not look at the other player's screen.** You are given one port. The
 other one exists and is not yours.
 
-**Cities are told apart by colour on the map.** City 0 is yellow, city 1 is
-magenta. Both are legible against water, which the flood makes a lot of.
+**Cities are told apart by colour on the map.** City 0 is yellow, city 1
+magenta, city 2 green, and the rest follow. All are legible against water,
+which the flood makes a lot of — blue is deliberately not a city colour.
+
+**Reading your neighbours off the map is worth doing.** The panel gives you a
+colour and a soul count and nothing else, but their buildings are drawn and you
+can see what they chose. All three players in the last run said this was the
+most interesting thing on screen — one of them read two rival openings off the
+map and watched which was right.
 
 ---
 
 ## The game
 
-You are one of two cities on a river. Both banks, one city each, and there is
-one ford — water shallow enough to wade, slowly. It is the only crossing until
+You are one of **two to six** cities on a river — the panel's CITIES list says
+how many, and which one is you. There is one ford — water shallow enough to
+wade, slowly. It is the only crossing until
 somebody builds a bridge, and **it closes when the water comes**.
 
 There are three ages. Each age is six days, and a day is a minute. **On day six

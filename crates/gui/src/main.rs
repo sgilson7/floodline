@@ -204,6 +204,17 @@ async fn main() {
             let over = s.world().finished().is_some();
             let busy = over || welcome.showing();
 
+            // **What has happened to the city is noticed every frame**, not
+            // only on the frames it can be acted on. This was inside
+            // `map_layer`, which is skipped below when the run is over or the
+            // first-run card is up — so the deaths that *end* a run were never
+            // counted and never said. Two of the three cities in the M12
+            // three-player run lost all eight people at once and were told
+            // only "your city is gone"; one of them wrote that it was left
+            // *guessing* at the cause, on the one question the game promises
+            // to answer.
+            input.watch(s);
+
             // The map, through its own camera: clipped to its window, scaled
             // by the zoom, and drawn in map space. Everything the player draws
             // *on* the map goes here too, or the two would disagree the moment
@@ -236,6 +247,10 @@ async fn main() {
                 input.panel_layer(&ui, s, panel_ends, &map);
                 camera_controls(&ui, &mut map);
             }
+            // And the three lines under the map, over whatever is there. A
+            // score screen is exactly when a player wants to read what took
+            // them.
+            input.messages();
             let stopped = matches!(s.status(), net::Status::Ended(_));
             let back = (over || stopped)
                 && (is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Enter));

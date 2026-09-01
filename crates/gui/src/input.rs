@@ -121,6 +121,9 @@ pub struct Input {
     wall_hint: Option<(usize, u16)>,
     /// Rows the panel had no room for this frame. See `VARIABLE_FLOOR`.
     overflowed: usize,
+    /// How many stretches of this player's wall were *standing* last frame.
+    /// See `mind_the_wall`: only a fall in this is a collapse.
+    standing_dikes: usize,
     /// How many stretches of this player's wall were rubble last frame.
     ///
     /// Counted so that a wall giving way can be *said*. Both players in the
@@ -197,7 +200,7 @@ impl Default for Input {
                 notice: None, wall_hint: None, chosen: None,
                 tab: Tab::Tools, ringed: Vec::new(), overflowed: 0, ruins: 0,
                 buried: None, toll: None, report: None, wading: 0,
-                households_count: 0, show_high: false }
+                households_count: 0, show_high: false, standing_dikes: 0 }
     }
 }
 
@@ -273,6 +276,29 @@ impl Input {
     pub fn map_layer(&mut self, ui: &Ui, session: &mut Session, view: &MapView) {
         let me = session.me();
         self.keys();
+        if self.trade.open {
+            return;
+        }
+        self.map(ui, session, me, view);
+    }
+
+    /// Notice what has happened to the city, whatever else is on screen.
+    ///
+    /// **Split out of `map_layer` because `map_layer` stops.** `main.rs` skips
+    /// it once the run is over or while the first-run card is up — reasonably,
+    /// since both are states with nothing to command — and the minders were
+    /// inside it. So **the deaths that end a run were never counted and never
+    /// said.** Two of the three cities in the M12 three-player run lost all
+    /// eight people at once and were told only *"your city is gone"*:
+    ///
+    /// > Eight people died and the game never said so. [...] I am fairly
+    /// > confident it was starvation, but **I am guessing**, on the one
+    /// > question the game explicitly promised to answer. — city 1
+    ///
+    /// The last thing that happens to a city is the thing it most wants named.
+    /// This runs every frame there is a world at all.
+    pub fn watch(&mut self, session: &mut Session) {
+        let me = session.me();
         self.forget_the_dead(session.world());
         self.mind_the_wall(session.world(), me);
         self.mind_the_dead(session.world(), me);
@@ -283,10 +309,15 @@ impl Input {
             .iter()
             .filter(|h| h.owner == me && h.alive())
             .count();
-        if self.trade.open {
-            return;
-        }
-        self.map(ui, session, me, view);
+    }
+
+    /// The three lines under the map: news, the dead, and why the last order
+    /// was refused. Drawn whatever else is on screen, for the same reason
+    /// `watch` runs whatever else is on screen.
+    pub fn messages(&mut self) {
+        self.happened();
+        self.toll();
+        self.notice();
     }
 
     /// Everything drawn on the logical canvas: the tools, the dialog, and the
@@ -321,9 +352,6 @@ impl Input {
             Tab::Citizens => self.people(ui, session, me, top),
         }
         self.wall_cost(ui);
-        self.toll();
-        self.happened();
-        self.notice();
     }
 
     /// Notice who has died, and of what.
@@ -472,17 +500,30 @@ impl Input {
 
     /// Notice a stretch of wall giving way, and say so.
     fn mind_the_wall(&mut self, w: &World, me: PlayerId) {
-        let ruins = w
-            .buildings
-            .iter()
-            .filter(|b| {
-                b.owner == me
-                    && b.kind == Kind::Dike
-                    && b.state == sim::building::BuildState::Rubble
-            })
-            .count();
-        if ruins > self.ruins {
-            let n = ruins - self.ruins;
+        use sim::building::BuildState;
+        let mine = || w.buildings.iter().filter(|b| b.owner == me && b.kind == Kind::Dike);
+        let ruins = mine().filter(|b| b.state == BuildState::Rubble).count();
+        let standing = mine().filter(|b| b.state == BuildState::Standing).count();
+
+        // **A wall that was never built cannot give way**, and this said it
+        // did. A dike *site* the flood destroys becomes `Rubble` exactly as a
+        // finished segment does, so a player who ordered a wall and never
+        // staffed it was told the wall collapsed. City 0 in the M12
+        // three-player run owned twelve segments, every one at 0% and every
+        // one reading *nobody is carrying to it*, placed by a city with no
+        // living people — and was told a stretch of its wall had given way.
+        //
+        // > So: did I build a wall? No. Did the game tell me one of mine
+        // > collapsed? Yes.
+        //
+        // This is also the M11.9 report that could never be reproduced — "a
+        // wall vanished with no announcement" was the same counter read from
+        // the other end. Only a fall in the *standing* count is a collapse; a
+        // rise in rubble on its own is a site being washed off the map, which
+        // is a different sentence and for now no sentence at all.
+        let gone = self.standing_dikes.saturating_sub(standing);
+        if ruins > self.ruins && gone > 0 {
+            let n = gone.min(ruins - self.ruins);
             self.report(if n == 1 {
                 "a stretch of your wall has given way".to_owned()
             } else {
@@ -490,6 +531,7 @@ impl Input {
             });
         }
         self.ruins = ruins;
+        self.standing_dikes = standing;
     }
 
     fn keys(&mut self) {
@@ -1283,9 +1325,16 @@ impl Input {
         y += TOOL_PITCH * ((BUILDABLE.len() as f32 + 2.0 + 1.0) / 2.0).floor() + 8.0;
 
         draw_text(
-            match self.tool {
-                Tool::Select if self.show_high => "violet is higher than your hearth. h to hide",
-                Tool::Select => "drag to choose. right-click to send them. h for high ground",
+            &ui::fits(match self.tool {
+                // Clipped to the panel, because a sentence that runs off the
+                // right edge of the window is worse than one that stops. The
+                // second of these was
+                // "drag to choose. right-click to send them. h for high
+                // ground" and ran off the right edge of the window - not the
+                // crop, the window - which an M12 player reported as
+                // "the panel does not have room for its own sentences".
+                Tool::Select if self.show_high => "violet is above your hearth. h hides it",
+                Tool::Select => "drag to choose, right-click to send. h: high ground",
                 Tool::Build(_) => "click the ground. right-click to stop",
                 Tool::Moving { .. } => "click where it should stand. right-click to stop",
                 Tool::Wall { from: None } => "drag to draw a wall. click one to raise it",
@@ -1293,7 +1342,7 @@ impl Input {
                 Tool::Road { from: None } => "click where the road starts",
                 Tool::Road { from: Some(_) } => "click where it ends",
                 Tool::Ping => "click what you want them to look at",
-            },
+            }, wide, 14),
             left,
             y,
             14.0,
@@ -1306,7 +1355,10 @@ impl Input {
         // clear whether or not there is anything under the mouse, so nothing
         // below it moves as the cursor crosses a building.
         if let Some(line) = self.under_the_cursor(session.world(), me, ui, view) {
-            draw_text(&line, left, y, 15.0, palette::INK);
+            // The longest strings in the panel live here - a dike waiting for
+            // stone with nobody carrying to it is fifty-three characters - and
+            // they ran off the edge of the window.
+            draw_text(&ui::fits(&line, wide, 15), left, y, 15.0, palette::INK);
         }
         y += 22.0;
 

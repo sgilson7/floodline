@@ -167,6 +167,47 @@ pub fn next_thing(w: &World, me: PlayerId) -> Option<String> {
         });
     }
 
+    // **Starving outranks the bootstrap.**
+    //
+    // The larder check used to sit below all of this, so a city whose farm was
+    // placed but not yet staffed was told *"drag to choose your people, then
+    // right-click the farm"* — correct advice, and not urgent advice — while
+    // its people starved to death. Two of the three cities in the M12
+    // three-player run died that way in age 1, both with `food 0` on the panel
+    // from day one, and neither was ever warned:
+    //
+    // > There was never a hunger warning. [...] On day 4, with everyone about
+    // > to die of starvation, the amber line's advice was "drag to choose your
+    // > people, then right-click the farm". It was correct advice. It was not
+    // > *urgent* advice, and it did not read like the last thing I would ever
+    // > be told. — city 0
+    //
+    // Only when somebody is *actually* starving, which is a citizen at nought
+    // and on the clock. `days_of_food == Some(0)` was tried and is wrong: a
+    // city's treasury holds no food until it has a granary, so that fires on
+    // the first frame of every game and would tell a brand-new player their
+    // granary was empty before they had been told what a granary is.
+    //
+    // Everybody starts full, so this cannot fire on day one and cannot be
+    // reached without the player having already been through the bootstrap
+    // rungs at least once.
+    let starving = w
+        .citizens
+        .iter()
+        .filter(|c| c.owner == me && c.alive() && c.food == 0)
+        .count();
+    if starving > 0 {
+        return Some(if starving == 1 {
+            "somebody is starving. get food into a granary - they eat nowhere else"
+                .to_owned()
+        } else {
+            format!(
+                "{starving} of your people are starving. get food into a granary - \
+                 they eat nowhere else"
+            )
+        });
+    }
+
     // Food, in the order it can go wrong.
     if !placed(Kind::Granary) {
         return Some("press 3, click the ground: a granary. food is kept there, and eaten there".to_owned());
@@ -493,6 +534,49 @@ mod tests {
             "it should say the gesture that fixes it: {line:?}"
         );
         // And it fits the two rows the panel keeps.
+        let rows = crate::ui::wrapped_words(&line, 52);
+        assert!(rows.len() <= 2, "{line:?} needs {} rows", rows.len());
+    }
+
+    /// A city about to starve is told so, whatever else it has not built yet.
+    ///
+    /// The larder check sat below the bootstrap, so a city whose farm was
+    /// placed but unstaffed heard "right-click the farm" while its people
+    /// died. Two of three cities in the M12 three-player run went that way in
+    /// age 1 with `food 0` on the panel throughout.
+    #[test]
+    fn a_city_inside_its_last_day_is_told_before_anything_else() {
+        let mut w = World::new(31, 2);
+        let me = PlayerId(0);
+
+        // Day one: everybody is full, nothing is built. The ladder should be
+        // teaching, not shouting.
+        let day_one = super::next_thing(&w, me).unwrap_or_default();
+        assert!(
+            day_one.contains("press 3"),
+            "a new city should be told to build a granary: {day_one:?}"
+        );
+        assert!(
+            !day_one.contains("starving"),
+            "nobody is starving on the first frame: {day_one:?}"
+        );
+
+        // Now somebody actually is. This is squarely inside the bootstrap -
+        // no granary, no farm - which is the case that used to swallow it: two
+        // of three cities in the M12 three-player run died here being told to
+        // right-click a farm.
+        for c in w.citizens.iter_mut().filter(|c| c.owner == me).take(3) {
+            c.food = 0;
+        }
+        let line = super::next_thing(&w, me).unwrap_or_default();
+        assert!(
+            line.contains("starving"),
+            "three people at nought food and the panel said: {line:?}"
+        );
+        assert!(
+            !line.contains("press 3"),
+            "it was still doing the tutorial while people starved: {line:?}"
+        );
         let rows = crate::ui::wrapped_words(&line, 52);
         assert!(rows.len() <= 2, "{line:?} needs {} rows", rows.len());
     }

@@ -16,8 +16,22 @@ Each agent is told one port and never the other. That is what makes "neither
 may read the other's page" a property of the setup rather than a rule somebody
 has to keep.
 """
+import json
+import os
 import random
 import time
+
+# Where `sit_down` writes what it seated, for `driver.py` to read.
+#
+# **The panel's rows move with the number of cities**, so an agent's hands need
+# to know how many are playing and have no other way to find out. Without this
+# every named button in `driver.py` missed by twenty-four logical pixels in the
+# M12 three-player run - `choose all`, `back to hauling` and `tab-people` all
+# reported success and did nothing, for four game days, while the amber line
+# said "choose all, then back to hauling" and pressing it did nothing at all.
+# One of the three players worked it out and recovered by computing the
+# coordinate by hand; that is not a thing a player should have to do.
+TABLE = "/tmp/floodline-table.json"
 
 # Chromium's throttling, off. Playwright passes all three itself today; they
 # are named here anyway, because the reason we need them is ours.
@@ -124,6 +138,13 @@ def sit_down(p, url, dpr=1.0, room=None, ports=None, on_error=None):
         time.sleep(0.4)
     if not linked:
         return browsers, pages, None
+
+    # What was seated, so `driver.py` can put its clicks in the right place.
+    try:
+        with open(TABLE, "w") as f:
+            json.dump({"room": room, "cities": n, "ports": list(ports)}, f)
+    except OSError:
+        pass
 
     click(pages[0], *START_BTN)
     time.sleep(2.0)
