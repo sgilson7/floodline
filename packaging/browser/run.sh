@@ -88,6 +88,15 @@ say "two_agents.py"
 "$VENV/bin/python" "$ROOT/packaging/browser/two_agents.py" \
   "http://localhost:$PORT/index.html" || fail=1
 
+# Three cities in one game. The lobby's `+` goes to six and the lockstep plays
+# six; two is simply the only size anybody had ever seated, so a third player
+# was untestable rather than impossible. A third one also makes the room stop
+# being a star - the two joiners are connected to each other - which is where
+# `send_turns` was found broadcasting a joiner's turn to everybody.
+say "three_players.py"
+"$VENV/bin/python" "$ROOT/packaging/browser/three_players.py" \
+  "http://localhost:$PORT/index.html" || fail=1
+
 # An agent's hands: every verb it has, doing something visible. A verb that is
 # missing or wrong is otherwise found halfway through a run that cannot be
 # repeated cheaply.

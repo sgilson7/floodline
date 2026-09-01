@@ -27,8 +27,11 @@ FLAGS = [
     "--disable-renderer-backgrounding",
 ]
 
-# The two agents' debugging ports, in the order they are seated: host first.
-PORTS = (9222, 9223)
+# The agents' debugging ports, in the order they are seated: host first.
+#
+# Three of them, because two is the only size this game has ever been played
+# at and the lobby's `+` goes to six. `sit_down` takes as many as it is given.
+PORTS = (9222, 9223, 9224)
 
 W, H = 1400, 900
 
@@ -41,20 +44,33 @@ ROOM_FLD = (CX + 20.0, 512.0)    # its room field, which only relay mode has
 HOST_BTN = (CX - 170.0, 574.0)
 JOIN_BTN = (CX + 170.0, 574.0)
 START_BTN = (CX, 534.0)          # hosting_screen's running total, relay mode
+# `start_screen`'s seat stepper. `lobby.rs` draws it at `Rect::new(cx + 28, y,
+# 44, 38)` one row above the room field, which is the row this file already
+# knows the y of. One click is one more city on the map.
+SEATS_PLUS = (CX + 50.0, 451.0)
 CARD = (CX, 400.0)               # anywhere on the modal first-run card
 
 
 def sit_down(p, url, dpr=1.0, room=None, ports=None, on_error=None):
-    """Launch two browsers and take them both into one game.
+    """Launch a browser per port and take them all into one game.
 
     Returns `(browsers, pages, room)`. The pages are past the lobby and past
-    the modal first-run card, which covers the map on both.
+    the modal first-run card, which covers the map on all of them.
+
+    **As many as it is given.** This seated exactly two until M12: two browsers,
+    two tags, seats left at the lobby's default. The lobby's `+` goes to six and
+    the lockstep plays six - `six_players_stay_in_step` - so the harness was the
+    only thing insisting on two, and "three people cannot be got into a game"
+    was therefore untestable rather than untrue.
     """
     room = room or "fl-m10-" + str(random.randint(100000, 999999))
-    ports = ports if ports is not None else (None, None)
+    ports = tuple(ports) if ports is not None else (None, None)
+    n = len(ports)
+    assert 2 <= n <= 6, f"a game seats two to six, not {n}"
 
     browsers, pages = [], []
-    for port, tag in zip(ports, ("host", "join")):
+    tags = ["host"] + [f"join{i}" for i in range(1, n)]
+    for port, tag in zip(ports, tags):
         args = list(FLAGS)
         if port:
             args.append(f"--remote-debugging-port={port}")
@@ -84,11 +100,19 @@ def sit_down(p, url, dpr=1.0, room=None, ports=None, on_error=None):
         click(pg, *BY_ROOM)
         click(pg, *ROOM_FLD)
         pg.keyboard.type(room)
-    # Seats are left at two, which is what `Lobby::new` starts them at: a seat
-    # nobody takes is a city standing there with nobody commanding it.
+    # Seats. `Lobby::new` starts at two - a seat nobody takes is a city
+    # standing there with nobody commanding it - so the host presses `+` once
+    # per extra player before it hosts. The map is generated for this number
+    # and cannot be changed after, which is why it is the one thing that has to
+    # be right before anybody clicks Host.
+    for _ in range(n - 2):
+        click(pages[0], *SEATS_PLUS)
+        time.sleep(0.2)
     click(pages[0], *HOST_BTN)
     time.sleep(0.5)
-    click(pages[1], *JOIN_BTN)
+    for pg in pages[1:]:
+        click(pg, *JOIN_BTN)
+        time.sleep(0.4)
 
     end = time.time() + 60
     linked = False
@@ -115,16 +139,20 @@ if __name__ == "__main__":
 
     url = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8123/index.html"
     dpr = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
+    # How many sit down. Two unless asked otherwise; the lobby goes to six.
+    seats = int(sys.argv[3]) if len(sys.argv) > 3 else 2
+    ports = PORTS[:seats] if seats <= len(PORTS) else tuple(9222 + i for i in range(seats))
 
     with sync_playwright() as p:
-        browsers, pages, room = sit_down(p, url, dpr, ports=PORTS,
+        browsers, pages, room = sit_down(p, url, dpr, ports=ports,
                                          on_error=lambda m: print("ERROR", m))
         if room is None:
             print("the two browsers never found each other")
             raise SystemExit(1)
         print(f"room  {room}")
         print(f"url   {url}")
-        for who, port in zip(("city 0 (host)", "city 1 (joiner)"), PORTS):
+        for i, port in enumerate(ports):
+            who = f"city {i} (host)" if i == 0 else f"city {i} (joiner)"
             print(f"{who:16} http://localhost:{port}")
         print("\nthe table is set. ctrl-c to clear it.")
         try:
