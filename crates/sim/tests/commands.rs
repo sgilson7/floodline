@@ -792,3 +792,88 @@ fn a_refusal_says_which_problem_it_is() {
     // And somebody else's building is neither.
     assert_eq!(w.room_for(them, quarry, &more), Err(RuleError::NotYours));
 }
+
+#[test]
+fn a_city_with_nobody_left_cannot_build() {
+    // City 0 in the M12 three-player run, with all eight of its people dead:
+    // *"I can still build. With zero citizens I pressed 1 and dropped a
+    // cottage, then pressed 7 and dragged a twelve-cell dike. Both went down.
+    // Both took my treasury."* It was then told a stretch of its wall had
+    // given way.
+    //
+    // Materials are hauled and sites are raised by people, so a city of nought
+    // that orders a building has ordered something that can never happen.
+    //
+    // This is not reachable while the whole *run* is over - `main.rs` draws a
+    // score screen instead of the panel - but a city that dies while its
+    // neighbours play on keeps a full panel, and at two to six seats that is
+    // an ordinary state.
+    use sim::building::{Facing, Kind};
+    use sim::command::Command;
+    use sim::world::{RuleError, World};
+    use sim::PlayerId;
+
+    let me = PlayerId(0);
+    let mut w = World::new(31, 3);
+    let (hx, hy) = w.map.hearth_sites[0];
+
+    // Somewhere this city could build, while it still has people.
+    let mut spot = None;
+    'ring: for r in 3..40i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (x, y) = (hx + dx, hy + dy);
+                if w.can_place(me, Kind::Cottage, Facing::EastWest, x, y).is_ok() {
+                    spot = Some((x, y));
+                    break 'ring;
+                }
+            }
+        }
+    }
+    let (x, y) = spot.expect("nowhere for a cottage");
+
+    // The city dies. Its neighbours play on, so nothing else changes.
+    for c in w.citizens.iter_mut().filter(|c| c.owner == me) {
+        c.food = 0;
+        c.die();
+    }
+    assert_eq!(w.population(me), 0);
+    assert!(w.finished().is_none(), "the run should not be over: two cities are alive");
+
+    let before = w.treasury(me);
+    assert_eq!(
+        w.can_place(me, Kind::Cottage, Facing::EastWest, x, y),
+        Err(RuleError::NobodyLeft),
+        "a city with nobody left was allowed to order a building"
+    );
+    assert!(w
+        .apply(
+            me,
+            &Command::Place { kind: Kind::Cottage, facing: Facing::EastWest, x: x as u8, y: y as u8 }
+        )
+        .is_err());
+    assert_eq!(w.treasury(me), before, "it was charged for a building nobody can raise");
+    assert_eq!(RuleError::NobodyLeft.to_message(), "there is nobody left to do it");
+
+    // And a city that still has somebody is unaffected.
+    let them = PlayerId(1);
+    let (tx, ty) = w.map.hearth_sites[1];
+    let mut ok = false;
+    'ring2: for r in 3..40i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                if w.can_place(them, Kind::Cottage, Facing::EastWest, tx + dx, ty + dy).is_ok() {
+                    ok = true;
+                    break 'ring2;
+                }
+            }
+        }
+    }
+    assert!(ok, "a living city was refused as well");
+}

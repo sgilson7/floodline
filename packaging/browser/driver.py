@@ -58,8 +58,18 @@ def seated():
     """
     try:
         with open(table.TABLE) as f:
-            return int(json.load(f).get("cities", 2))
-    except (OSError, ValueError, TypeError):
+            seated_now = json.load(f)
+    except (OSError, ValueError):
+        return 2
+    # Only if this is *our* table. The file outlives the session that wrote it,
+    # so a two-player game run after a three-player one would otherwise inherit
+    # the wrong count and put every click twenty-four pixels out - which is the
+    # same fault this function exists to prevent, arriving from the other side.
+    try:
+        if int(sys.argv[1]) not in seated_now.get("ports", []):
+            return 2
+        return int(seated_now.get("cities", 2))
+    except (ValueError, IndexError, TypeError):
         return 2
 
 

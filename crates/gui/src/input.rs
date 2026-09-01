@@ -1759,6 +1759,25 @@ impl Input {
         self.trade.with %= others.len();
         let with = others[self.trade.with];
 
+        // **A scrim, because this dialog is modal and did not look it.**
+        //
+        // `map_layer` returns early while it is open, so *every* map click is
+        // swallowed - not just the ones on the card. City 2 in the M12
+        // three-player run had it open when the water arrived, could not
+        // right-click its own hearth to evacuate, and did not work out why
+        // until it looked at the screenshot afterwards. Its last two people
+        // drowned.
+        //
+        // The map is dimmed rather than the dialog moved: moving it only
+        // relocates the problem, and a player whose city happens to sit under
+        // the new position is in exactly the same trouble.
+        draw_rectangle(
+            0.0,
+            0.0,
+            LOGICAL_W - PANEL_W,
+            LOGICAL_H,
+            Color { a: 0.55, ..palette::BACKDROP },
+        );
         let card = Rect::new(340.0, 260.0, 620.0, 420.0);
         draw_rectangle(card.x, card.y, card.w, card.h, Color { a: 0.97, ..palette::PANEL });
         draw_rectangle_lines(card.x, card.y, card.w, card.h, 2.0, palette::RULE);

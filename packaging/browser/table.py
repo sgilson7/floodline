@@ -43,9 +43,17 @@ FLAGS = [
 
 # The agents' debugging ports, in the order they are seated: host first.
 #
-# Three of them, because two is the only size this game has ever been played
-# at and the lobby's `+` goes to six. `sit_down` takes as many as it is given.
+# Three of them, because two is the only size this game has ever been played at
+# and the lobby's `+` goes to six. `sit_down` takes as many as it is given.
+#
+# **A caller that wants two players must say `PORTS[:2]`.** This was a pair, and
+# widening it silently changed the player count of everything that passed it
+# whole - `driver_check.py` began seating three cities, on a map generated for
+# three, and its cell checks failed for reasons that had nothing to do with the
+# verbs it was testing. `TWO` is here so that wanting two is something a caller
+# states rather than inherits.
 PORTS = (9222, 9223, 9224)
+TWO = PORTS[:2]
 
 W, H = 1400, 900
 

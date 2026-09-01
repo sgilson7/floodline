@@ -18,7 +18,7 @@ import table
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8123/index.html"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DRIVER = os.path.join(HERE, "driver.py")
-PORT = table.PORTS[0]                      # the host's browser, and only that one
+PORT = table.TWO[0]                        # the host's browser, and only that one
 
 V = View(table.W, table.H)
 errors = []
@@ -40,7 +40,7 @@ def drive(*args):
 
 
 with sync_playwright() as p:
-    browsers, pages, room = table.sit_down(p, URL, ports=table.PORTS,
+    browsers, pages, room = table.sit_down(p, URL, ports=table.TWO,
                                            on_error=errors.append)
     check(room is not None, "the table was set")
     if room is None:

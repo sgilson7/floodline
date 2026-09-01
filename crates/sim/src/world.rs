@@ -82,6 +82,8 @@ pub enum RuleError {
     CannotMove,
     /// A child. It does not haul, farm or build.
     TooYoung,
+    /// A city with no living citizens, asked to do something people do.
+    NobodyLeft,
     /// A dike segment part-way through a course it has already been given.
     ///
     /// Not the same as `NotStanding`, and telling them apart is the whole
@@ -128,6 +130,7 @@ impl RuleError {
             RuleError::CannotMove => "that one stays where it is",
             RuleError::TooYoung => "too young to work",
             RuleError::StillRising => "that course is still going up",
+            RuleError::NobodyLeft => "there is nobody left to do it",
         }
     }
 }
@@ -316,6 +319,24 @@ impl World {
     ) -> Result<(), RuleError> {
         if !self.players.contains(&owner) {
             return Err(RuleError::NotYours);
+        }
+        // **A city with nobody left cannot build.** Materials are hauled and
+        // sites are raised by people, so a city of nought that orders a
+        // building has ordered something that can never happen — and until now
+        // it was charged for it.
+        //
+        // City 0 in the M12 three-player run did exactly this out of
+        // curiosity, with all eight of its people dead: *"I can still build.
+        // With zero citizens I pressed 1 and dropped a cottage, then pressed 7
+        // and dragged a twelve-cell dike. Both went down. Both took my
+        // treasury."* It was then told a stretch of its wall had given way.
+        //
+        // Not reachable while the *run* is over, because `main.rs` draws the
+        // score screen instead of the panel — but a city that dies while its
+        // neighbours play on keeps a full panel, and with two to six seats that
+        // is an ordinary state rather than an edge case.
+        if self.population(owner) == 0 {
+            return Err(RuleError::NobodyLeft);
         }
         if kind == Kind::Hearth {
             // The run starts with the only one a player gets.

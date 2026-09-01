@@ -112,6 +112,10 @@ have:
   so ground that survived two of them can still go under the third — which is
   exactly how a player in the previous run lost its final two citizens on
   ground it had checked and was right about.
+* **The hover row is not stale, your cursor is.** `hover-cell` parks the mouse
+  where you put it and leaves it there, so the row goes on reporting that cell
+  until you hover another one. Three players in the last run read it as a stuck
+  readout. It is showing you exactly what it says it is showing you.
 * **water:** *underfoot*, *wading* or *out of your depth* says what is standing
   there right now. It appears on buildings too, so you can ask whether your own
   granary is under water.
@@ -300,6 +304,16 @@ play, not afterwards:
   died and of what, what is in somebody's arms. If one of them changed a
   decision you made, say which. If one of them was noise, say that — it is just
   as useful.
+
+## Two things that will not answer you
+
+* **The trade dialog is modal.** While it is open *every* map click is
+  swallowed, not only the ones on the card - the map is dimmed to say so. Press
+  Escape or "never mind" to close it. A player in the last run had it open when
+  the water arrived, could not right-click its own hearth to evacuate, and lost
+  its last two people.
+* **A city with nobody left cannot build.** It says "there is nobody left to do
+  it" rather than taking your stone for a site no one can raise.
 
 ## What the panel says when something goes wrong
 

@@ -3485,3 +3485,95 @@ proportional font; `ui::fits` measures, and the tool hint and the hover row —
 the two longest lines in the panel — are clipped to it.
 
 **And "1 ages survived"**, which is the last sentence this game ever says.
+
+---
+
+## 2026-09-01 — A triage pass over what three players exposed
+
+Beyond the four faults already fixed, a pass over the code for the same class.
+
+**A city with nobody left could still build**, and was charged for it.
+Materials are hauled and sites are raised by people, so a city of nought that
+orders a building has ordered something that can never happen. City 0 in the
+three-player run did it with all eight of its people dead and was then told a
+stretch of its wall had given way. `RuleError::NobodyLeft`, "there is nobody
+left to do it".
+
+This is not reachable while the whole *run* is over — `main.rs` draws a score
+screen instead of the panel — but **a city that dies while its neighbours play
+on keeps a full panel**, and with two to six seats that is an ordinary state
+rather than an edge case. It could not happen at two players, because at two
+the first death is usually the last.
+
+**The status row said `playing` on a screen with a score card on it.**
+`playing` is the transport's word: the lockstep goes on running after the run
+ends, and it should. The row now reads "the run is over" when the world says
+so, rather than disagreeing with the omen line two rows above it.
+
+**The trade dialog was modal and did not look it.** `map_layer` returns early
+while it is open, so *every* map click is swallowed and not only the ones on
+the card. City 2 had it open when the water arrived, could not right-click its
+own hearth to evacuate, and did not work out why until it read the screenshot
+afterwards; its last two people drowned. The map is dimmed behind it now. It
+was dimmed rather than the card moved, because moving it only relocates the
+problem onto whoever's city sits under the new position.
+
+**The hover row is not sticky; the cursor is.** Three players reported a stale
+readout. `hover-cell` parks the mouse and leaves it there, so the row goes on
+reporting that cell. Recorded in `AGENT-BRIEF.md` rather than changed, because
+the row is doing exactly what it says.
+
+**And a panic audit, which came back clean.** Four `expect`s in production
+`sim` and `net` — the map's site pool, `World::checksum`, `Message` encoding,
+and `free_seat` — and every one is either guarded on the line above it or
+infallible in practice. A panic in `sim` is a desync that looks like a crash,
+so this is worth having checked and worth checking again after anything that
+touches map generation.
+
+## 2026-09-01 — What three players is actually for, which nobody designed
+
+All three players said the same unprompted thing, and it is the most useful
+design finding of the run.
+
+> Could I tell what they were doing? Yes, but only by looking at their
+> buildings on the map, not from any panel text. — city 0
+
+> What actually told me what my neighbours were doing was **looking at the
+> map**. That was genuinely interesting and it's the only reason I have an
+> opinion about them at all. — city 2
+
+> I could read three different openings off the map and see which one was
+> right. That was the most interesting thing in the run, and it cost the game
+> nothing to provide. — city 1
+
+The panel gives you a colour and a soul count. Everything a player actually
+learned about a neighbour came from their *buildings*, drawn on shared ground —
+one city reaching for trade, one playing the food game, one walling. Watching
+which was right, in real time, on one screen, is the thing a third player adds
+that a second does not.
+
+**Nothing has been built for this and nothing should be yet.** It is recorded
+because the next run should be pointed at it: the question is not "does trade
+work with three" but "is watching two rivals resolve the same flood the reason
+to play with more than one person". Three accounts say it might be.
+
+## 2026-09-01 — Widening a constant changed every caller's meaning
+
+Found by the browser suite immediately after the three-player work, and it is
+the same shape as the `driver.py` fault it followed.
+
+`table.PORTS` was a pair. Making it a triple silently changed the *player
+count* of everything that passed it whole: `driver_check.py` began seating
+three cities on a map generated for three, and its cell-verb checks failed for
+reasons that had nothing to do with the verbs it was testing. The check was
+right and the message was unreadable.
+
+`table.TWO` exists now, and a caller that wants two players states it. A shared
+constant that encodes "how many" must not be the same object as one that
+encodes "which".
+
+And `driver.py` only trusts `/tmp/floodline-table.json` when its own port is in
+it. The file outlives the session that wrote it, so a two-player game run after
+a three-player one would otherwise inherit the wrong count and put every click
+twenty-four pixels out — the very fault the file was added to prevent, arriving
+from the other side.

@@ -548,6 +548,14 @@ pub fn panel(w: &World, me: PlayerId, status: &net::Status, build: &str, ticks: 
 
     let (text, colour) = match status {
         net::Status::Lobby => ("in the lobby - press SPACE to start".to_owned(), palette::WARNING),
+        // **`playing` is the transport's word, not the world's.** The lockstep
+        // goes on running after the run ends - peers keep exchanging turns, and
+        // they should - so this row read `playing` beside an omen row reading
+        // `it is over`, on a screen with a score card on it. An M12 player
+        // noticed and reasonably did not trust either.
+        net::Status::Playing if w.finished().is_some() => {
+            ("the run is over".to_owned(), palette::FAINT)
+        }
         net::Status::Playing => ("playing".to_owned(), palette::FAINT),
         net::Status::WaitingOn(who) => (
             format!("waiting on {}", who.iter().map(|p| format!("city {}", p.0))
