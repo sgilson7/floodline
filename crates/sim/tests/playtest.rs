@@ -75,6 +75,13 @@ struct Report {
     /// a player who had to pay for them.
     wall: usize,
     wall_cost: u16,
+    /// Cells from the hearth to the middle of the wall, which is the length of
+    /// every trip that supplies it. The number M13 could not explain a wall
+    /// without: at sixty-four cells from the corner a city got its whole wall
+    /// up and at a hundred and sixty-eight not one segment was standing, and
+    /// distance from the *corner* is not the same thing as distance from the
+    /// *store*.
+    wall_walk: i32,
     /// Water at the hearth itself, deepest in each age.
     at_the_fire: Vec<u16>,
     /// Stone in hand on the day the water came.
@@ -178,6 +185,7 @@ fn play(run: Run) -> Report {
         standing: Vec::new(),
         wall: 0,
         wall_cost: 0,
+        wall_walk: 0,
         at_the_fire: Vec::new(),
         stone_on_the_day: Vec::new(),
         born: 0,
@@ -294,14 +302,14 @@ fn play(run: Run) -> Report {
         };
         if (play == Play::Dike || play == Play::Both) && !diked && day >= 2 && fed(&w) {
             diked = true;
-            report.wall = order_a_wall(&mut w, hx, hy);
+            (report.wall, report.wall_walk) = order_a_wall(&mut w, hx, hy);
         }
         // The same wall, on the same day, for nothing. Nobody is taken off a
         // farm and no stone leaves the store, so what this measures is the
         // wall itself rather than what a city gives up for it.
         if run.wall_by_fiat && !diked && day >= 2 && fed(&w) {
             diked = true;
-            report.wall = order_a_wall(&mut w, hx, hy);
+            (report.wall, report.wall_walk) = order_a_wall(&mut w, hx, hy);
             finish_the_wall(&mut w, 2);
         }
         if (play == Play::Dike || play == Play::Both) && diked && day >= 3 {
@@ -651,7 +659,7 @@ fn assign_to_farms(w: &mut World) {
 /// started with. The first version of this built the wall by fiat, which was
 /// the right way to find out whether a wall in the right place changes the
 /// outcome and no way at all to find out whether anybody could have one.
-fn order_a_wall(w: &mut World, hx: i32, hy: i32) -> usize {
+fn order_a_wall(w: &mut World, hx: i32, hy: i32) -> (usize, i32) {
     let dikes = |w: &World| {
         w.buildings.iter().filter(|b| b.owner == ME && b.kind == Kind::Dike).count()
     };
@@ -698,7 +706,11 @@ fn order_a_wall(w: &mut World, hx: i32, hy: i32) -> usize {
     );
     let _ = w.apply(ME, &Command::DikeLine { from, to });
 
-    dikes(w) - before
+    // How far the stone has to come, which is the trip every load makes. The
+    // hearth is where a city's stone is: `Kind::Hearth` is the only store it
+    // has until it builds a stockpile, and neither of these strategies does.
+    let walk = (hx - cx).abs() + (hy - cy).abs();
+    (dikes(w) - before, walk)
 }
 
 /// Raise every finished dike toward `want`, while there is stone for it.
@@ -750,14 +762,15 @@ fn three_full_runs_of_each_strategy() {
     const SEEDS: [u64; 3] = [31, 1_000_003, 0xF100_D11E];
     println!();
     println!(
-        "  seed        play   ages  alive by age   at the hearth     in the quarter      wall   stone  out"
+        "  seed        play   ages  alive by age   at the hearth     in the quarter      \
+         wall   stone  haul  out"
     );
     let mut reports = Vec::new();
     for seed in SEEDS {
         for p in Play::ALL {
             let r = play(Run::new(seed, p));
             println!(
-                "  {:<11} {:<6} {:>4}   {:<13} {:<17} {:<17} {:>5} {:>6} {:>4}",
+                "  {:<11} {:<6} {:>4}   {:<13} {:<17} {:<17} {:>5} {:>6} {:>5} {:>4}",
                 r.seed,
                 r.play.name(),
                 r.ages,
@@ -766,6 +779,7 @@ fn three_full_runs_of_each_strategy() {
                 format!("{:?}", r.soaked),
                 r.wall,
                 r.wall_cost,
+                r.wall_walk,
                 r.from_the_corner,
             );
             reports.push(r);

@@ -3853,3 +3853,43 @@ thirty for the whole of age one, with everybody either farming or hauling, and
 before this session it starved to death for it. **Food is not a clock for a city
 that does nothing; it is the price of doing anything.** The line should go on
 saying so.
+
+## 2026-09-01 — Twelve cells or eighteen: what a wall's distance actually decides
+
+The wall entry above ended with a claim that needed one more measurement:
+*"how far the wall is from the store decides whether a city can build one"*. The
+strategy table now carries the number — `haul`, the cells from the hearth to the
+middle of the wall `order_a_wall` draws — and the claim was half right and
+wrongly explained.
+
+| seed | haul | wall standing at the age-one flood | ended |
+|---|---|---|---|
+| 31 | 12 | eleven segments, level two, 660 stone | 8 of 8, three ages |
+| 4043362590 | 19 | none | 1 of 8 |
+| 1000003 | 18 | none | 0 of 8 |
+
+The distances are twelve against eighteen and nineteen — half again as far, and
+the outcome flips from the whole wall to not one segment. But `out`, the hearth's
+distance from the corner the water comes from, is 64, 124 and 168 on those same
+seeds, and it is **not** the same number: a wall's haul is set by where the river
+runs past the city, not by where the flood comes from.
+
+**And the mechanism is not that the city runs out of time.** The day-by-day says
+what happens on the far seed: by the impact day the wall is at 22 per cent with
+three of eleven segments up, and then **five of the eight people drown** — the
+five who were carrying stone to a wall nineteen cells away, in the floodplain,
+when the surge landed. What is left is three farmers, nobody unassigned, and a
+wall that goes 3 → 2 → 1 → 0 segments over the next two ages as the floods take
+what nobody is maintaining.
+
+So the real sentence is: **a wall far from home is built by people standing in
+the water's way, and a city that does not also evacuate pays for it with them.**
+That is design §5's drama working, not a fault — and the table says the game
+already rewards the answer, because `both` on that seed keeps six of eight where
+`dike` keeps one.
+
+Nothing changes in `sim` for this. What it changes is the question for the next
+run: not "can a city afford a wall" but **"does a player, told what the wall
+costs to carry, put their people where the water is going?"** The price sentence
+now says `24 cells each way`, which is the number that decides it, and no player
+has ever seen it.

@@ -4,6 +4,118 @@ Where the last session ended. Short enough to read in a minute.
 
 ---
 
+## Session 6 — 2026-09-01 (M13: a city finishes a wall)
+
+**The question the last three milestones exist for is answered.** 318 cargo
+tests, no warnings. Two commits: the wall, and the five things the game knew
+and would not say.
+
+Earlier the same day, before this session: **the first three-player run**, whose
+account is in `DECISIONS.md` under "What three players found" and "What three
+players is actually for" and never reached this file. Referee CLEAN, three peers,
+eleven days each. The lockstep held; a `driver.py` fault that put every named
+button twenty-four pixels out did not.
+
+### Why nobody had ever finished a wall
+
+Not one of the three reasons was about walls, and none had been guessed in three
+milestones of handovers. `what_a_walling_city_spends_its_days_on` — a line a day
+— found all three in one run:
+
+* **Hunger and exhaustion destroyed whatever a citizen was carrying.** 710 stone
+  of 720, in one day: the day a starving city's granary first has food in it,
+  when every hungry hauler drops its load at once. `Citizen::pause` keeps the
+  arms; `abandon` stays for orders.
+* **An assigned builder at an unsupplied site worked at nothing for ever.**
+  `build` returns false while materials are outstanding, `work_at` did not look,
+  and `busy()` then kept `find_work` from ever running again. Five of eight
+  people stood at seven segments for four days at `0% done` with six hundred
+  stone in a store twenty cells away.
+* **A city that employed everybody starved beside its own farm.** Hunger
+  outranks the job, and could not: a citizen with nowhere to eat now fetches the
+  food itself. Without it, a city of farmers is nought of eight in four days.
+* And a leak: every `Assign` went through `unassign_one`, which abandoned, so
+  "you four, build the wall" burned a load of stone per hauler holding one.
+
+A fourth change — the harvest outranking construction below a day's food — was
+written, measured, and **taken back out**: with the three above in place it
+changes no test and no run.
+
+### The answer
+
+| play | before | after |
+|---|---|---|
+| grow | 7 | 5 |
+| dike | 7 | **9** |
+| flee | 10 | **12** |
+| both | 8 | **14** |
+
+`both` — a wall and the sense to get behind it — is now the best play in the
+game; it was worse than running away. On seed 31 the `dike` script got eleven
+segments to level two standing before the age-one flood, paid for and hauled by
+the eight people feeding themselves, and finished three ages with all eight
+alive against `[8, 8, 4]` with no wall. **That is the first finished wall in this
+project's history.**
+
+`whether_a_finished_wall_changes_a_flood` hands a city one free and separates the
+two questions four runs ran together: **23 alive against 17**, over six paired
+runs of forty-eight people. It is worth having.
+
+### What it cost, and what the distance decides
+
+660 stone of 720 — ninety-two per cent of everything a city will ever have —
+and it went up because that wall is **twelve cells from the hearth**. On the two
+seeds where the wall is eighteen and nineteen cells out, no segment was standing
+when the water came; the table carries `haul` now so this is a number rather
+than a guess.
+
+The reason is not the clock. On the far seed the wall is at 22 per cent on the
+impact day and then **five of the eight drown** — the five carrying stone to it,
+standing in the floodplain, nineteen cells from home. A wall far from home is
+built by people in the water's way, and a city that does not also evacuate pays
+for it with them. `both` keeps six of eight on that seed where `dike` keeps one,
+so the game already rewards the answer; the price sentence now says `24 cells
+each way`, and no player has ever seen it.
+
+### And the panel pass
+
+The wall's price counts the hauling now (twice the building, and the unmentioned
+half was the larger one) and is written in the panel, not only in a map tooltip.
+A disabled button says why. A building in transit says what is inside it, and the
+ladder says where the food went. A dead city can read the ground and move the
+camera again. `not on that ground` says *that is rock*.
+
+**The selection box was accused and is innocent**: macroquad's `Rect::contains`
+includes all four edges, so a drag along a row of people does take the row. The
+fix was written, the test passed without it, and the fix came out.
+
+### Not done
+
+- [x] ~~`make browser-test` after this session's `gui` changes.~~ Green, exit 0,
+      including `driver_check.py`'s hover row and the three-player checks. No
+      panel row moved, and `panel.py`'s literals held.
+- [ ] **A finished wall meeting a flood in a *played* game.** `sim` has now seen
+      one. No person has.
+- [x] ~~Why a far wall cannot be built.~~ Measured: twelve cells of haul gets
+      the whole wall up, eighteen or nineteen gets none of it — and the reason
+      is not the clock but that the five people carrying to it drown in the
+      floodplain on the impact day. The game already rewards the answer (`both`
+      keeps six of eight there where `dike` keeps one); what nobody has seen is
+      a *player* being told the carrying distance before they commit.
+- [ ] The author playing two games in a row, laptop to desktop.
+- [ ] City 1's *"a line is the wrong shape, you would need a ring"*.
+- [ ] `box-select`, still unexplained: an armed tool or a moved camera, neither
+      reproduced.
+
+### Next action
+
+**Run `make browser-test`, then play it.** The wall is worth building and a city
+can build one; nobody has ever watched that happen. The run to point at it is a
+two-agent run where both players are told there is a wall worth having and
+neither is told how much it costs to carry.
+
+---
+
 ## Session 5 — 2026-08-31 (M12)
 
 **Part I, Part I-A and Parts II-IV of `PLAN-M12.md` are done.** 298 cargo
