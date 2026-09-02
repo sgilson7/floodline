@@ -239,6 +239,14 @@ async fn main() {
                 // Nothing left to command, and a build menu over a score
                 // screen would only invite clicks that fail.
                 draw::score(s.world());
+                // But the map is still there, and "how deep did it get" is the
+                // only question left. Reading it was switched off with the
+                // panel: an M12.11 player reported that "once a city is dead,
+                // hovering returns nothing at all", and the camera stopped
+                // moving too, so the last thing a player could do about the
+                // flood that beat them was look away from it.
+                input.read_the_ground(&ui, s, panel_ends, &map);
+                camera_controls(&ui, &mut map);
             } else if welcome.showing() {
                 // The card is modal: a click that dismisses it must not also
                 // put a building down behind it.

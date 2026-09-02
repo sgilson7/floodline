@@ -106,6 +106,21 @@ impl Ui {
         enabled && over && self.clicked
     }
 
+    /// Whether a button that is *not* enabled was clicked.
+    ///
+    /// **No gesture in this game may fail without a word**, and a disabled
+    /// button is the one place that rule had no way to be kept: `button`
+    /// returns `enabled && over && clicked`, so a click on a greyed one was
+    /// swallowed whole. City 1 in the M12.11 run pressed `back to hauling`
+    /// with nobody chosen and reported that it "writes nothing anywhere" -
+    /// the right-click path answers that exact mistake in words, and the
+    /// button beside it did not.
+    ///
+    /// The caller supplies the reason, because only the caller knows it.
+    pub fn refused(&self, r: Rect, enabled: bool) -> bool {
+        !enabled && self.over(r) && self.clicked
+    }
+
     /// A one-line text box. Editing is the caller's job; this draws it.
     pub fn field(&self, r: Rect, text: &str, hint: &str, focused: bool) {
         draw_rectangle(r.x, r.y, r.w, r.h, palette::FIELD);

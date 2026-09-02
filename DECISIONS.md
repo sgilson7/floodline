@@ -3732,3 +3732,124 @@ of this: its comment said "recorded once, on the first flood" and the code
 overwrote it every impact day, so what the table called the age-one wall was
 whatever was left standing after the age-three one. Seed 31's `dike` row said
 sixty stone. It was six hundred and sixty.
+
+## 2026-09-01 — Five things the game knew and would not say, and one it was wrongly accused of
+
+`HANDOFF-M12.md`'s list B was four faults "reported, not reproduced", and its
+list C four design questions. This is that pass, and the rule it followed is the
+handover's own: **reproduce before touching**.
+
+### The price of a wall now counts the carrying
+
+City 1 in the M12.11 run: *"that number is a lie of omission, and it's the
+reason I committed."* The tooltip said `0.1 days of one pair of hands`, which
+counted `build_ticks` and nothing else — and the hauling is the part that costs
+a city its people, because the hands carrying stone are the hands carrying
+grain.
+
+M13 measured the two halves. Eleven segments at level one is three hundred and
+thirty stone, seventeen loads at `CARRY_CAPACITY`, and at `WALK_SPEED`'s four
+ticks a cell, twenty-four cells each way, **the carrying is 3 264 ticks against
+1 650 of building**. Twice the work, and it was the half that was not mentioned.
+
+So the sentence carries both, and the distance: `11 x dike - 330 stone, 4.1 days
+of one pair of hands (2.7 of it carrying, 24 cells each way)`. Distance is in it
+because of the other thing M13 measured — a city sixty-four cells from the
+corner gets its wall up and a city a hundred and sixty-eight cells away never
+finishes a segment, and the difference is the length of the walk.
+
+**And it is in the panel, not only on the map.** The tooltip follows the cursor
+over the map; every other price in this game is written in the panel. While the
+wall tool is armed the panel's hover row is the price, which is the row a player
+reads before spending. `a_wall_is_priced_with_the_hauling_in_it` does the
+arithmetic by hand from the constants, and asserts the carrying is the larger
+half — if it ever stops being, the sentence stops being worth its width.
+
+### A disabled button says why
+
+`Ui::button` returns `enabled && over && clicked`, so a click on a greyed button
+was swallowed whole. **No gesture in this game may fail without a word** — the
+right-click path answers "nobody chosen - drag over your people first" and the
+`back to hauling` button beside it said nothing at all, which is what city 1
+reported as "writes nothing anywhere". `Ui::refused` is the other half of
+`Ui::button`; the caller supplies the reason, because only the caller knows it.
+Two buttons in the game are ever disabled and both have one now.
+
+### A building in transit says what is inside it
+
+`move_building` keeps a building's store and puts it back to a site, and
+`treasury` counts standing stores — so moving your only granary reads `food 0`,
+and city 1 believed it had destroyed 369 food and its last three citizens.
+
+A site with goods in its store can only be a building somebody picked up: a site
+that was never a building has an empty one. So the hover row says `granary:
+being built, 0%, 369 food inside`, before the pairs of hands, because a player
+watching a building walk away with their winter in it is not asking who is on
+it. And the amber ladder gains a rung above `they are being built` — *"369 food
+is inside the building you are moving. finish it and the food is yours again"* —
+which is what that city needed at the moment it panicked.
+
+### A dead city can still read the ground
+
+`main.rs` skips the panel and the camera when the run is over, which switched
+off the hover row and the zoom **at the moment a player most wants to ask how
+deep it got**. The map is still drawn, the high-water mark is still on it, and
+"how far did it come" is the only question left. `Input::read_the_ground` takes
+`&Session` rather than `&mut`, so it cannot issue anything onto a finished
+world, and the camera moves again.
+
+### `not on that ground` says which ground
+
+City 1 worked out for itself that rock at 30 to 35 was the only ground either
+flood had left dry, that grass tops out around 29, and therefore that a city
+must live in the floodplain and evacuate every age for ever. **That is coherent
+and the game never said it**; the refusal it met on the way up the hill was
+`not on that ground`.
+
+`RuleError::to_message` is one `&'static str` per variant and cannot look at a
+map, so the naming is `gui`'s: it reads the cell the command was aimed at before
+spending the command. `not on that ground - that is rock`. The rule does not
+move — whether rock can be built on is a design question, and this is the
+sentence that lets a player *ask* it.
+
+### And the accusation: the selection box is innocent
+
+City 0 reported twice that `box-select` over four visible people chose nobody,
+and it went into the handover as "not explained". The obvious suspect is the
+geometry: people stand at cell *centres*, so a drag along a row of them is a
+rectangle of zero height.
+
+It is not the geometry. **macroquad's `Rect::contains` is inclusive on all four
+edges**, so a flat box takes the row and a box dragged from one person to
+another takes both. That was checked by writing the fix, watching the test pass
+without it, and reading the crate — and the half-cell margin that had been
+written was taken back out, because a box that chooses differently from the box
+it draws is the fault this file spends most of its comments avoiding.
+`a_drag_along_a_row_of_people_takes_the_row` stays, to keep somebody else's
+crate honest and to stop the next session convicting this again.
+
+What is left is two candidates, neither reproduced. **A tool still armed** —
+`Tool::Build` and `Tool::Wall` stay armed after use, and a drag with one of them
+armed places a building or draws a wall instead of choosing anybody; city 0 was
+laying fifteen dike segments at the time. That refusal would have been written
+on the line under the map that `driver.py panel` was cropping away in that same
+run, which is fault 1 of M12.11 and is already fixed. **Or the camera** —
+`view.py` computes every cell click from `MapView::default()` and cannot know if
+the camera moved, so an agent that zooms makes every `*-cell` verb land
+somewhere else in silence. The brief already forbids it. Neither is worth code
+until somebody reproduces it.
+
+### The food clock: left alone, and now with a reason
+
+M12's question was whether the day-one food panic should still shout, since
+M12.A's farm made food a two-minute tutorial: *"from that moment to the end of
+the run — sixteen minutes — food was never again a consideration. I died with
+349 in the granary."*
+
+It stays, because M13's diary says the premise has changed. A city that farms
+and does nothing else does indeed sit at five hundred food for the rest of the
+run. A city that decides to build a wall lives at nought to two hundred and
+thirty for the whole of age one, with everybody either farming or hauling, and
+before this session it starved to death for it. **Food is not a clock for a city
+that does nothing; it is the price of doing anything.** The line should go on
+saying so.

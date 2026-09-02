@@ -215,6 +215,29 @@ pub fn next_thing(w: &World, me: PlayerId) -> Option<String> {
     if !placed(Kind::Farm) {
         return Some("press 2, click the ground: a farm. nothing else grows food".to_owned());
     }
+    // **Food inside a building that is walking.** `treasury` counts standing
+    // stores, which is the right answer to "what can I spend" and reads as a
+    // catastrophe: move your only granary and the panel says `food 0`. City 1
+    // in the M12.11 run believed it had destroyed 369 food and its last three
+    // citizens, and the game had no way to tell it otherwise.
+    //
+    // Above `they are being built - your people fetch the wood themselves`,
+    // which is what a city moving its only granary used to be told, and above
+    // the larder, because every sentence below this one would be a lie to a
+    // city whose food is merely in transit. Below starving, which outranks
+    // everything that is not the water.
+    let packed: u16 = w
+        .buildings
+        .iter()
+        .filter(|b| b.owner == me && !b.standing_now())
+        .map(|b| b.store.food)
+        .sum();
+    if packed > 0 && w.treasury(me).food == 0 {
+        return Some(format!(
+            "{packed} food is inside the building you are moving. finish it \
+             and the food is yours again"
+        ));
+    }
     if !standing(Kind::Granary) || !standing(Kind::Farm) {
         return Some("they are being built - your people fetch the wood themselves".to_owned());
     }
@@ -402,6 +425,80 @@ mod tests {
         // And `next_thing` still says nothing, which is the right answer to
         // "what should I do next" and the reason this function exists.
         assert_eq!(super::next_thing(&w, me), None);
+    }
+
+    /// Somewhere legal for `kind`, standing, near player 0's hearth.
+    fn built(w: &mut World, kind: sim::building::Kind) -> sim::BuildingId {
+        use sim::building::{Facing, Good};
+        let me = PlayerId(0);
+        let (hx, hy) = w.map.hearth_sites[0];
+        for r in 3..40i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (x, y) = (hx + dx, hy + dy);
+                    if w.can_place(me, kind, Facing::EastWest, x, y).is_ok() {
+                        let id = w.place(me, kind, Facing::EastWest, x, y).unwrap();
+                        for g in Good::ALL {
+                            let want = w.buildings[id.0 as usize].outstanding().get(g);
+                            if want > 0 {
+                                w.deliver_to(id, g, want);
+                            }
+                        }
+                        assert!(w.build_at(id, kind.build_ticks()));
+                        return id;
+                    }
+                }
+            }
+        }
+        panic!("nowhere for a {kind:?}");
+    }
+
+    /// A city that moves its granary is told where its food went.
+    ///
+    /// `treasury` counts standing stores, so picking up a granary reads as
+    /// `food 0` on the panel. City 1 in the M12.11 run believed it had
+    /// destroyed 369 food and its last three citizens.
+    #[test]
+    fn a_city_whose_food_is_walking_is_told_where_it_is() {
+        use sim::building::{Good, Kind};
+        let mut w = World::new(7, 2);
+        let me = PlayerId(0);
+        let granary = built(&mut w, Kind::Granary);
+        let farm = built(&mut w, Kind::Farm);
+        let three: Vec<sim::CitizenId> = w
+            .citizens
+            .iter()
+            .filter(|c| c.owner == me && !c.is_child())
+            .map(|c| c.id)
+            .take(3)
+            .collect();
+        w.apply(me, &sim::Command::Assign { citizens: three, building: farm }).unwrap();
+        w.deliver_to(granary, Good::Food, 0);
+        w.buildings[granary.0 as usize].store.add(Good::Food, 369);
+        assert_eq!(w.treasury(me).food, 369);
+
+        // Somewhere else to put it, one step over.
+        let (x, y) = (w.buildings[granary.0 as usize].x as i32,
+                      w.buildings[granary.0 as usize].y as i32);
+        let mut moved = false;
+        for step in 1..12i32 {
+            if w.move_building(me, granary, x + step, y).is_ok() {
+                moved = true;
+                break;
+            }
+        }
+        assert!(moved, "nowhere to move the granary to");
+        assert_eq!(w.treasury(me).food, 0, "a granary in transit is not a standing store");
+
+        let line = super::next_thing(&w, me).expect("a city with its food walking is told");
+        assert!(
+            line.contains("369 food is inside the building you are moving"),
+            "the panel said {line:?} to a city whose whole larder is in transit"
+        );
+        assert!(crate::ui::wrapped_words(&line, 52).len() <= 2, "too wide: {line:?}");
     }
 
     #[test]

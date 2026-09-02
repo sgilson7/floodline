@@ -118,7 +118,7 @@ pub struct Input {
     show_high: bool,
     /// How many segments the wall under the cursor would be, and what they
     /// would cost. Worked out with the ghost, drawn with the panel.
-    wall_hint: Option<(usize, u16)>,
+    wall_hint: Option<WallHint>,
     /// Rows the panel had no room for this frame. See `VARIABLE_FLOOR`.
     overflowed: usize,
     /// How many stretches of this player's wall were *standing* last frame.
@@ -261,6 +261,16 @@ const TOOL_PITCH: f32 = 36.0;
 const TOOL_BUTTON_H: f32 = 33.0;
 
 /// Whether a row of this height still fits above the foot.
+/// What the wall under the cursor would cost: how many segments, the stone,
+/// and how far the stone has to be carried.
+#[derive(Copy, Clone)]
+struct WallHint {
+    segments: usize,
+    stone: u16,
+    /// Cells from the nearest store that keeps stone to the middle of the run.
+    walk: i32,
+}
+
 fn room_for(y: f32, height: f32) -> bool {
     y + height <= VARIABLE_FLOOR
 }
@@ -309,6 +319,26 @@ impl Input {
             .iter()
             .filter(|h| h.owner == me && h.alive())
             .count();
+    }
+
+    /// The ground under the cursor, when there is nothing left to command.
+    ///
+    /// The run being over closes the panel and with it the row that says what
+    /// a cell is and how deep the water got - **at the moment a player most
+    /// wants to ask**. City 1 in the M12.11 run reported it: "once a city is
+    /// dead, hovering returns nothing at all". The map is still drawn, the
+    /// high-water mark is still on it, and the question "how deep did it get"
+    /// is the only one left.
+    ///
+    /// Read-only by construction: it takes `&Session`, so nothing here can
+    /// issue a command onto a world that has finished.
+    pub fn read_the_ground(&mut self, ui: &Ui, session: &Session, top: f32, view: &MapView) {
+        let me = session.me();
+        let left = LOGICAL_W - PANEL_W + 18.0;
+        let wide = PANEL_W - 36.0;
+        if let Some(line) = self.under_the_cursor(session.world(), me, ui, view) {
+            draw_text(&ui::fits(&line, wide, 15), left, top + 22.0, 15.0, palette::INK);
+        }
     }
 
     /// The three lines under the map: news, the dead, and why the last order
@@ -592,7 +622,22 @@ impl Input {
     }
 
     fn issue(&mut self, session: &mut Session, cmd: Command) {
+        // The ground the refusal is about, before the command is spent, so
+        // `not on that ground` can say which ground.
+        let ground = ground_of(session.world(), &cmd);
         match session.issue(cmd) {
+            // **Which ground.** `RuleError::to_message` is one `&str` per
+            // variant and cannot look at a map, so the one refusal a player
+            // meets most often said only that the answer was no.
+            //
+            // City 1 in the M12.11 run worked out for itself that rock at 30
+            // to 35 was the only ground either flood had left dry and that
+            // grass tops out around 29 - which means a city has to live in the
+            // floodplain and evacuate every age, for ever. That is coherent,
+            // and the game never said it: the refusal it got while trying to
+            // move up there was `not on that ground`, with no hint that the
+            // ground in question was the dry kind.
+            Err(sim::world::RuleError::WrongGround) => self.say(wrong_ground(ground)),
             Err(e) => self.say(e.to_message()),
             // A command that worked answers the question the last refusal was
             // still sitting there asking.
@@ -787,14 +832,7 @@ impl Input {
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0 / view.zoom, palette::INK);
             if ui.released {
                 self.drag = None;
-                // A click is a drag of no size, and picking the one citizen
-                // under the cursor wants a little tolerance rather than an
-                // exact hit on a body a cell wide.
-                let r = if r.w < CELL / 2.0 && r.h < CELL / 2.0 {
-                    Rect::new(start.x - CELL, start.y - CELL, CELL * 2.0, CELL * 2.0)
-                } else {
-                    r
-                };
+                let r = selection_box(start, here);
                 self.selected = session
                     .world()
                     .citizens
@@ -905,10 +943,36 @@ impl Input {
                         Color { a: 0.35, ..palette::ALARM },
                     );
                 }
-                self.wall_hint = Some((
-                    plan.len(),
-                    Kind::Dike.cost().stone.saturating_mul(plan.len() as u16),
-                ));
+                // **What it costs to carry**, which is the part that costs a
+                // city its people and the part this used to leave out. City 1
+                // in the M12.11 run committed to a wall on the old figure and
+                // called it "a lie of omission, and it's the reason I
+                // committed": `days of one pair of hands` counted the building
+                // and not the hauling.
+                //
+                // M13 measured the difference. Eleven segments at level one is
+                // three hundred and thirty stone, which is seventeen loads at
+                // `CARRY_CAPACITY`; the walk is two ways, at `WALK_SPEED`'s four
+                // ticks a cell. On the one seed where a city has ever got a wall
+                // up, the carrying was four times the building — and on the two
+                // seeds whose hearths are further from the water, no segment was
+                // ever finished at all. **How far the stone has to come is the
+                // number the decision turns on**, so it is in the sentence.
+                let stone = Kind::Dike.cost().stone.saturating_mul(plan.len() as u16);
+                let mid = plan
+                    .get(plan.len() / 2)
+                    .map(|&(sx, sy)| (sx as i32, sy as i32))
+                    .unwrap_or((x, y));
+                let walk = w
+                    .stores_for(me, Good::Stone, mid.0, mid.1)
+                    .first()
+                    .and_then(|id| w.buildings.get(id.0 as usize))
+                    .map(|b| {
+                        let (bx, by) = b.centre();
+                        (bx - mid.0).abs() + (by - mid.1).abs()
+                    })
+                    .unwrap_or(0);
+                self.wall_hint = Some(WallHint { segments: plan.len(), stone, walk });
             }
             Tool::Build(kind) => {
                 let (bw, bh) = kind.size(Facing::EastWest);
@@ -1354,7 +1418,15 @@ impl Input {
         // the click rather than as a refusal after it. Its own line, kept
         // clear whether or not there is anything under the mouse, so nothing
         // below it moves as the cursor crosses a building.
-        if let Some(line) = self.under_the_cursor(session.world(), me, ui, view) {
+        // **The wall's price, in the panel and not only on the map.** The
+        // tooltip follows the cursor over the map, so the one number the wall
+        // decision turns on was invisible to a player reading the panel — which
+        // is where every other price in this game is written. While the wall
+        // tool is armed this row is the price; the ground under the cursor is
+        // what it says the rest of the time.
+        if let Some(line) = self.wall_line(true).or_else(|| {
+            self.under_the_cursor(session.world(), me, ui, view)
+        }) {
             // The longest strings in the panel live here - a dike waiting for
             // stone with nobody carrying to it is fifty-three characters - and
             // they ran off the edge of the window.
@@ -1378,9 +1450,15 @@ impl Input {
         );
         y += 12.0;
         let chosen = !self.selected.is_empty();
-        if ui.button(Rect::new(left, y, half, 34.0), "back to hauling", chosen) {
+        let back = Rect::new(left, y, half, 34.0);
+        if ui.button(back, "back to hauling", chosen) {
             let citizens = self.selected.clone();
             self.issue(session, Command::Unassign { citizens });
+        } else if ui.refused(back, chosen) {
+            // The same sentence the right-click path gives, because it is the
+            // same mistake. It answered there and said nothing here, and an
+            // M12.11 player reported the button as writing "nothing anywhere".
+            self.say("nobody chosen - drag over your people first");
         }
         if ui.button(Rect::new(left + half + 8.0, y, half, 34.0), "choose all", true) {
             self.selected = session
@@ -1397,8 +1475,11 @@ impl Input {
         draw_line(left, y, left + wide, y, 1.0, palette::RULE);
         y += 22.0;
         let others = session.world().players.len() > 1;
-        if ui.button(Rect::new(left, y, wide, 34.0), "propose a trade", others) {
+        let trade = Rect::new(left, y, wide, 34.0);
+        if ui.button(trade, "propose a trade", others) {
             self.trade.open = true;
+        } else if ui.refused(trade, others) {
+            self.say("there is nobody else in this game to trade with");
         }
         y += 42.0;
         y = self.offers(ui, session, me, left, wide, y);
@@ -1543,8 +1624,27 @@ impl Input {
                     .filter(|c| c.alive() && c.workplace == Some(b.id))
                     .count();
                 let pct = (b.progress * 100 / b.kind.build_ticks().max(1)).min(100);
+                // **What is still inside it.** A site with goods in its store
+                // can only be a building somebody picked up: `move_building`
+                // keeps the store and puts the building back to a site, and a
+                // site that was never a building has an empty one. So this is
+                // a granary in transit, and the 369 food in it is the most
+                // important fact on the screen.
+                //
+                // City 1 in the M12.11 run moved its granary, read `food 0` on
+                // the panel and this row saying only `being built`, and
+                // believed it had destroyed 369 food and its last three
+                // people: "everywhere else the panel is careful about this, it
+                // writes wood 40+130". Before the hands, because a player
+                // watching a building walk away with their winter in it is not
+                // asking how many pairs of hands are on it.
+                let inside = if b.store.total() > 0 {
+                    format!(", {} inside", goods_line(b.store))
+                } else {
+                    String::new()
+                };
                 return format!(
-                    "{name}: {level}being built, {pct}%{}",
+                    "{name}: {level}being built, {pct}%{inside}{}",
                     match hands {
                         0 => " - nobody is building it".to_owned(),
                         1 => ", 1 pair of hands".to_owned(),
@@ -1860,24 +1960,45 @@ impl Input {
     /// Drawn here rather than with the ghost because the ghost is in map
     /// space, where the camera would blow this up or shrink it away; a label
     /// is the same size at every zoom.
-    fn wall_cost(&self, ui: &Ui) {
-        let Some((segments, stone)) = self.wall_hint else { return };
+    /// What a wall would cost, in stone and in somebody's whole day.
+    ///
+    /// The M10.6 run's finding about the wall was not that it was expensive:
+    /// one player spent 220 stone of 648 and never noticed the cost. It was
+    /// that the wall is paid for in food, invisibly — the people carrying
+    /// stone to it are the people who carry grain, and building it caused the
+    /// famine that killed five of its eight. Days-of-one-worker is the unit
+    /// that says so before the stone is spent rather than after.
+    ///
+    /// Both halves of the day, since M13: the carrying as well as the building.
+    /// See `hover`.
+    /// `short` for the panel row, which has about fifty characters; the long
+    /// form is for the tooltip beside the ghost, which has the width of the
+    /// map. One function either way, so the two cannot come to disagree.
+    fn wall_line(&self, short: bool) -> Option<String> {
+        let WallHint { segments, stone, walk } = self.wall_hint?;
         if segments == 0 {
-            return;
+            return None;
         }
-        // What it costs in *hands*, beside what it costs in stone.
-        //
-        // The M10.6 run's finding about the wall was not that it was expensive:
-        // one player spent 220 stone of 648 and never noticed the cost. It was
-        // that the wall is paid for in food, invisibly — the people carrying
-        // stone to it are the people who carry grain, and building it caused
-        // the famine that killed five of its eight. Days-of-one-worker is the
-        // unit that says so before the stone is spent rather than after.
-        let ticks = segments as u32 * Kind::Dike.build_ticks();
-        let days = ticks as f32 / sim::balance::TICKS_PER_DAY as f32;
-        let text = format!(
-            "{segments} x dike - {stone} stone, {days:.1} days of one pair of hands"
-        );
+        let building = segments as u32 * Kind::Dike.build_ticks();
+        let loads = stone.div_ceil(sim::balance::CARRY_CAPACITY) as u32;
+        // Both ways, and `WALK_SPEED` is in 256ths of a cell a tick.
+        let carrying = loads * 2 * walk.max(0) as u32 * 256 / sim::balance::WALK_SPEED as u32;
+        let day = sim::balance::TICKS_PER_DAY as f32;
+        let all = (building + carrying) as f32 / day;
+        let hauling = carrying as f32 / day;
+        Some(if short {
+            format!(
+                "{segments} dikes: {stone} stone, {all:.1} days of work ({hauling:.1} hauling)"
+            )
+        } else {
+            format!(
+                "{segments} x dike - {stone} stone, {all:.1} days of one pair of hands ({hauling:.1} of it carrying, {walk} cells each way)"
+            )
+        })
+    }
+
+    fn wall_cost(&self, ui: &Ui) {
+        let Some(text) = self.wall_line(false) else { return };
         let m = measure_text(&text, None, 16, 1.0);
         let x = (ui.mouse.x + 14.0).min(LOGICAL_W - PANEL_W - m.width - 8.0);
         let y = (ui.mouse.y - 10.0).max(m.height + 4.0);
@@ -1920,8 +2041,58 @@ fn citizen_at(c: &sim::Citizen) -> Vec2 {
     vec2(c.pos.x.raw() as f32 / 256.0 * CELL, c.pos.y.raw() as f32 / 256.0 * CELL)
 }
 
+/// `not on that ground`, and which ground.
+fn wrong_ground(ground: Option<sim::Ground>) -> String {
+    match ground {
+        Some(g) => format!("not on that ground - that is {}", ground_name(g)),
+        None => sim::world::RuleError::WrongGround.to_message().to_owned(),
+    }
+}
+
+/// The cell a command is aimed at, and what is under it.
+///
+/// Only the commands that can be refused for the ground they land on. A
+/// `DikeLine` is asked about its far end, which is where the ghost stops.
+fn ground_of(w: &World, cmd: &Command) -> Option<sim::Ground> {
+    let (x, y) = match cmd {
+        Command::Place { x, y, .. } => (*x as i32, *y as i32),
+        Command::Move { x, y, .. } => (*x as i32, *y as i32),
+        Command::DikeLine { to, .. } => (to.0 as i32, to.1 as i32),
+        Command::Road { to, .. } => (to.0 as i32, to.1 as i32),
+        _ => return None,
+    };
+    sim::Map::contains(x, y).then(|| w.map.ground_at(x, y))
+}
+
 fn rect_between(a: Vec2, b: Vec2) -> Rect {
     Rect::new(a.x.min(b.x), a.y.min(b.y), (a.x - b.x).abs(), (a.y - b.y).abs())
+}
+
+/// What a drag chooses from: the rectangle it draws, and no more.
+///
+/// Extracted so it can be tested, because it was **the leading suspect for
+/// city 0's "box-select over four visible people chose nobody", and it is
+/// innocent.** The reasoning that convicted it was: people stand at cell
+/// centres, so a drag along a row of them is a rectangle of zero height, and
+/// a rectangle of zero height contains nothing. The first half is true. The
+/// second is not — macroquad's `Rect::contains` is inclusive on all four
+/// edges, so a flat box still takes the row and a box dragged from one person
+/// to another still takes them both.
+///
+/// That is load-bearing behaviour in somebody else's crate, so
+/// `a_drag_along_a_row_of_people_takes_the_row` pins it. Adding half a cell of
+/// margin here was tried and taken out: it makes the box that chooses differ
+/// from the box that is drawn, which is the fault this file spends most of its
+/// comments avoiding.
+fn selection_box(start: Vec2, here: Vec2) -> Rect {
+    let r = rect_between(start, here);
+    // A click is a drag of no size, and picking the one citizen under the
+    // cursor wants a little tolerance rather than an exact hit on a body a
+    // cell wide.
+    if r.w < CELL / 2.0 && r.h < CELL / 2.0 {
+        return Rect::new(start.x - CELL, start.y - CELL, CELL * 2.0, CELL * 2.0);
+    }
+    r
 }
 
 /// The digit on a build button, read off the key that picks it.
@@ -2059,3 +2230,157 @@ pub fn ringed(input: &Input) -> &[CitizenId] {
     &input.ringed
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::{Input, WallHint};
+
+    /// The price of a wall counts the carrying.
+    ///
+    /// `0.1 days of one pair of hands` counted the building and nothing else,
+    /// and city 1 in the M12.11 run committed to a wall on that number:
+    ///
+    /// > That number is a lie of omission, and it's the reason I committed.
+    ///
+    /// It is worse than an omission: M13 measured the two halves and the
+    /// carrying is the larger one. Eleven segments is three hundred and thirty
+    /// stone, seventeen loads at `CARRY_CAPACITY`, and at twenty-four cells
+    /// each way that is two thousand seven hundred and twenty ticks of walking
+    /// against one thousand six hundred and fifty of building.
+    #[test]
+    fn a_wall_is_priced_with_the_hauling_in_it() {
+        let mut input = Input::default();
+        input.wall_hint = Some(WallHint { segments: 11, stone: 330, walk: 24 });
+
+        // Worked by hand from the constants: 11 x 150 building ticks, and
+        // ceil(330 / 20) = 17 loads x 2 x 24 cells x 4 ticks a cell.
+        let building = 11 * 150;
+        let carrying = 17 * 2 * 24 * 4;
+        let day = sim::balance::TICKS_PER_DAY as f32;
+        let long = input.wall_line(false).expect("a wall with segments has a price");
+        assert!(
+            long.contains(&format!("{:.1} days", (building + carrying) as f32 / day)),
+            "the whole cost is missing from {long:?}"
+        );
+        assert!(
+            long.contains(&format!("{:.1} of it carrying", carrying as f32 / day)),
+            "the carrying is missing from {long:?}"
+        );
+        assert!(long.contains("24 cells each way"), "how far is missing from {long:?}");
+        assert!(
+            carrying > building,
+            "if the building were the larger half this sentence would not matter"
+        );
+    }
+
+    /// And the panel's form of it fits the row the panel keeps.
+    ///
+    /// About fifty characters, measured the way `tutorial`'s tests measure:
+    /// counting them, which is a guess at a proportional font that has been
+    /// close enough five times. `ui::fits` does the real measuring at draw
+    /// time and truncates with `..`, so being wrong here is ugly rather than
+    /// dangerous — but the numbers are at the front of the sentence on purpose.
+    #[test]
+    fn the_panels_form_of_the_price_fits_the_panel() {
+        let mut input = Input::default();
+        for (segments, stone, walk) in
+            [(1usize, 30u16, 4i32), (11, 330, 24), (14, 420, 40), (20, 600, 60)]
+        {
+            input.wall_hint = Some(WallHint { segments, stone, walk });
+            let line = input.wall_line(true).expect("a price");
+            assert!(
+                line.chars().count() <= 53,
+                "{line:?} is {} characters and the row holds about fifty",
+                line.chars().count()
+            );
+        }
+    }
+
+    /// Four people in a row, and a drag along the row.
+    ///
+    /// The M12.11 report that went down as "not explained": `box-select` over
+    /// four visible people chose nobody, twice. This is the geometry of it,
+    /// and the geometry is sound — a flat box takes the row, and a box dragged
+    /// from one person to another takes them both — because macroquad's
+    /// `Rect::contains` includes all four edges. **This test exists to keep
+    /// that true**, since it is a promise made by somebody else's crate, and
+    /// to stop the next session convicting the selection box again.
+    #[test]
+    fn a_drag_along_a_row_of_people_takes_the_row() {
+        use super::{citizen_at, selection_box, CELL};
+        use macroquad::math::vec2;
+
+        let row: Vec<macroquad::math::Vec2> =
+            (10..14).map(|x| vec2((x as f32 + 0.5) * CELL, 10.5 * CELL)).collect();
+        let r = selection_box(row[0], row[3]);
+        for (n, p) in row.iter().enumerate() {
+            assert!(r.contains(*p), "the {n}th of four people in a row was not chosen");
+        }
+
+        // And the far corner of an ordinary box, which `Rect::contains`
+        // excludes: a drag from one person to another is the obvious gesture.
+        let corner = vec2(20.5 * CELL, 30.5 * CELL);
+        let box_to_them = selection_box(vec2(10.5 * CELL, 10.5 * CELL), corner);
+        assert!(box_to_them.contains(corner), "the person you dragged to was not chosen");
+
+        // A click is still a click, and still takes whoever is under it.
+        let one = vec2(40.5 * CELL, 40.5 * CELL);
+        assert!(selection_box(one, one).contains(one), "a click chose nobody");
+
+        // And a body is where `sim` says it is, which is what the box is
+        // measured against.
+        let mut c = sim::Citizen::new(
+            sim::CitizenId(0),
+            sim::PlayerId(0),
+            0,
+            sim::fx::V2::cell_centre(10, 10),
+        );
+        c.pos = sim::fx::V2::cell_centre(11, 10);
+        assert!(
+            selection_box(row[0], row[3]).contains(citizen_at(&c)),
+            "somebody standing in the middle of the drag was not chosen"
+        );
+    }
+
+    /// A refusal about the ground says which ground.
+    ///
+    /// City 1 in the M12.11 run worked out that rock is the only ground either
+    /// flood had left dry and that nothing can be built on it, so a city has to
+    /// live in the floodplain and evacuate for ever. `RuleError::to_message` is
+    /// one string per variant and cannot look at a map, so the refusal it met
+    /// on the way up the hill was `not on that ground` and nothing else.
+    #[test]
+    fn a_refusal_about_the_ground_says_which_ground() {
+        use super::{ground_of, wrong_ground};
+        use sim::building::{Facing, Kind};
+        use sim::{Command, World};
+
+        assert_eq!(wrong_ground(Some(sim::Ground::Rock)), "not on that ground - that is rock");
+        assert_eq!(wrong_ground(None), "not on that ground");
+
+        // And the cell it asks about is the cell the command lands on.
+        let w = World::new(31, 2);
+        let (x, y) = (20u8, 30u8);
+        let place = Command::Place { kind: Kind::Farm, facing: Facing::EastWest, x, y };
+        assert_eq!(
+            ground_of(&w, &place),
+            Some(w.map.ground_at(x as i32, y as i32)),
+            "the refusal asked about the wrong cell"
+        );
+        // A wall is asked about its far end, which is where the ghost stops.
+        let line = Command::DikeLine { from: (10, 10), to: (x, y) };
+        assert_eq!(ground_of(&w, &line), Some(w.map.ground_at(x as i32, y as i32)));
+        // And a command that is not about ground has no ground to name.
+        assert_eq!(ground_of(&w, &Command::Unassign { citizens: Vec::new() }), None);
+    }
+
+    /// Nothing to price when the run is empty, which is what a wall tool over
+    /// water or off the map produces.
+    #[test]
+    fn no_segments_is_no_price() {
+        let mut input = Input::default();
+        assert_eq!(input.wall_line(true), None, "a hint nobody set has no price");
+        input.wall_hint = Some(WallHint { segments: 0, stone: 0, walk: 12 });
+        assert_eq!(input.wall_line(true), None, "an empty run has no price");
+    }
+}
