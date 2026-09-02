@@ -3577,3 +3577,158 @@ it. The file outlives the session that wrote it, so a two-player game run after
 a three-player one would otherwise inherit the wrong count and put every click
 twenty-four pixels out — the very fault the file was added to prevent, arriving
 from the other side.
+
+## 2026-09-01 — A city has finished a wall, and it took three faults out of the way
+
+Four playtests asked whether a dike is worth building. None could answer,
+because in four runs **no player had ever owned a finished one** — and every
+diagnosis of that had been confident, plausible and about the wrong thing. The
+M11.9 handover blamed a footprint offset; `sim` puts every building exactly
+where it is clicked. The M12.11 handover blamed `take_a_site`; two tests say it
+is innocent. The last session found `MoveTo`'s `held`, which is real, is now
+said out loud, and was not the whole of it.
+
+So this time the instrument came first, which is what
+`HANDOFF-M12.md`'s *"before you act on a finding from a run, ask what would
+measure it"* is for. **`what_a_walling_city_spends_its_days_on`** plays the
+`dike` script and prints a line a day: who is alive, what is in the store, who
+is farming, building and idle, what the wall owes, how far along it is, and how
+much of the city's stone is unaccounted for. On the two seeds where the strategy
+table said a walling city dies, it died on **day four of age one — eight
+starved, none drowned**, with a three-of-three farm working and hundreds of
+units of food standing in its fields.
+
+Three faults and one leak. None of them is about walls.
+
+### 1. Seven hundred and ten stone of seven hundred and twenty, in one day
+
+`Citizen::abandon` clears `carrying`, and both body-interrupts in
+`assign_errands` called it: every time hunger or exhaustion overruled a
+delivery, **the load stopped existing**. `jobs.rs`'s own header called that "the
+real cost of having left it too late", and nothing had ever put a number on it.
+
+The number, from the diary: on **the day a starving city's granary first has
+food in it** — the day every hungry hauler in it finally has somewhere to go —
+the store went from 710 stone to nought, the sites still owed the whole two
+hundred and ten they had started owing, and nothing was in anybody's arms. The
+panel would have read `stone 0` with no explanation available anywhere. City 0
+in the M12.11 run reported putting "440 stone" into fifteen segments; a good
+part of that stone was never delivered to anything, and this is where it went.
+
+`Citizen::pause` gives up the errand and keeps the arms. The cost of leaving it
+too late is now the honest one — the walk, and a load that arrives later than it
+was wanted — because `find_haul` looks at what is in a citizen's arms before
+anything else, so the delivery resumes after the meal. `abandon` stays for
+orders and losses: `MoveTo` still drops what you are carrying, deliberately.
+
+`a_hungry_hauler_keeps_what_it_is_carrying` arranges the exact moment rather
+than waiting for it, which matters: the previous test on this behaviour ran
+three days hoping hunger and a full load would coincide, and on that seed they
+never did.
+
+### 2. An assigned builder at an unsupplied site works at nothing for ever
+
+`Building::build` returns false while anything is outstanding. `work_at`'s site
+arm did not look: it set the citizen to `Working`, left the errand as `ToWork`,
+and `busy()` then kept `find_work` from ever running again. **An assigned
+builder at a site with no materials was removed from the city's labour force
+permanently** — and because the hands it took were the city's haulers, nothing
+was left to bring the stone that would have released it.
+
+In the diary that is five of eight people standing at seven dike segments for
+four days at `0% done`, with ninety stone owed and six hundred in a store twenty
+cells away, while the city starved around them.
+
+It now lets go of the *site* and keeps the *job*: `find_work` sends a builder to
+the next site that is supplied, and failing that to `find_haul`, which fetches
+exactly what the site was waiting for. A builder supplies its own wall, which is
+what anybody watching one would expect.
+
+`a_builder_at_a_site_with_no_stone_goes_and_gets_it` puts every non-farmer on
+the wall so there is not one unassigned hauler in the city. Without the fix:
+nothing delivered, nothing built, in two days.
+
+### 3. A city that employs everybody starves beside its own farm
+
+A farm fills a sixty-unit buffer and stops; a citizen can only eat at a granary;
+a citizen with a job never hauls. So a city with everybody employed starves with
+food in the fields. Both M12.11 players hit it. M12 answered it with a sentence
+in the panel — *the shortage is haulers* — which is true, useful, and not
+enough.
+
+Hunger outranks the job. That is `jobs.rs`'s own first paragraph and design
+§3.2's order, and it cannot outrank the job only when somebody else has already
+done the carrying. The hunger branch now has a second half: no granary to eat
+at, but food standing at a producer, and the citizen fetches it itself —
+whatever its job, and then eats. `heading_for_food` guards it, because a rule
+that re-decides every tick is the gyrating fault of
+`somebody_both_hungry_and_tired_goes_to_one_of_them` in a third place.
+
+`a_city_that_employs_everybody_does_not_starve_beside_its_own_farm` makes every
+citizen a farmer, so nobody can reach `find_haul` at all. Without the fix: nought
+of eight alive after four days, and nought food ever in the granary.
+
+### And the leak: a new job destroyed what somebody was carrying
+
+`unassign_one` abandoned, and **every `Assign` goes through it**, so "you four,
+build the wall" burned a load of stone for each hauler that happened to be
+holding one. Measured at forty to fifty stone a run — invisible, and out of a
+supply of seven hundred and twenty that nothing in a run replaces. It pauses
+now, and `find_work` takes what is in the arms somewhere it is wanted before it
+starts anything new.
+
+### One rule was written, measured, and taken back out
+
+A fourth change gave the harvest priority over construction whenever a city had
+less than a day's food. It is not here. With the three above in place, turning
+it off changes no test and no run: identical survivors, identical ages,
+identical causes of death. An unearned rule that reorders hauling is a liability,
+so `find_haul` keeps construction-first — and its doc comment stops claiming
+that "a full farm counts as construction's equal", which the code has never
+done. What keeps a walling city alive is fault 3's fix, not a priority.
+
+### The table, before and after
+
+Survivors across three seeds and three ages, `three_full_runs_of_each_strategy`:
+
+| play | before | after |
+|---|---|---|
+| idle | 0 | 0 |
+| grow | 7 | 5 |
+| dike | 7 | **9** |
+| flee | 10 | **12** |
+| both | 8 | **14** |
+
+`both` — a wall *and* the sense to get behind it — is now the best play in the
+game. It was worse than running away.
+
+### So: does a finished wall change the outcome of a flood?
+
+**Yes, and a city can now get one.** On seed 31 the `dike` script got eleven
+segments to level two standing before the age-one flood, paid for and hauled by
+the same eight people who were feeding themselves, and finished all three ages
+with all eight alive — against `[8, 8, 4]` for the same city with no wall. The
+water at its hearth read 31, 58 and 103 sixteenths against 49, 67 and 105. That
+is the first finished wall in this project's history and it did what design §5.3
+says a wall does.
+
+`whether_a_finished_wall_changes_a_flood` separates the two questions the
+previous four runs ran together, by handing a city a level-two wall free on the
+day it would have ordered one: **23 alive against 17**, across six paired runs
+of forty-eight people. It is worth having.
+
+**What it cost, on the seed where it worked: 660 stone of 720** — eleven
+segments at level two, ninety-two per cent of everything the city will ever
+have, and thirty-three hauler-trips of twenty. That is the wall the drag tool
+draws, and it is affordable only because seed 31's hearth is sixty-four cells
+from the corner the water comes from. On the two seeds at 124 and 168 cells, no
+segment was standing when the water came. **How far the wall is from the store
+decides whether a city can build one**, and nothing in the game says so. That is
+the next question, and it is a question about `SITE_RING_OFFSET` and the length
+of a wall, not about dikes.
+
+`wall_cost` in the strategy table was also wrong, in the direction that hid all
+of this: its comment said "recorded once, on the first flood" and the code
+overwrote it every impact day, so what the table called the age-one wall was
+whatever was left standing after the age-three one. Seed 31's `dike` row said
+sixty stone. It was six hundred and sixty.

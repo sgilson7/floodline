@@ -1569,7 +1569,19 @@ impl World {
         // stand on a hill starts finding its own work again. `MoveTo` calls
         // this and then sets the flag, so the order of those two matters.
         c.held = false;
-        c.abandon();
+        // `pause`, not `abandon`: a change of job is not a reason to destroy
+        // what somebody is holding. Every `Assign` comes through here too, so
+        // "you four, build the wall" used to burn a load of stone for each
+        // hauler that happened to be carrying one — invisibly, and measured at
+        // forty to fifty stone a run in
+        // `what_a_walling_city_spends_its_days_on`, out of a supply of seven
+        // hundred and twenty that nothing in a run replaces. `find_work` takes
+        // what is in the arms somewhere it is wanted before it starts anything
+        // new, so the load still arrives and the order still takes effect.
+        //
+        // `MoveTo` calls this and *then* abandons, deliberately: getting uphill
+        // means dropping what you are carrying.
+        c.pause();
     }
 
     /// A tick with no commands and a throwaway cache. For tests, and for

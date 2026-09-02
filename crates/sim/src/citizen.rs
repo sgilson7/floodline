@@ -107,9 +107,9 @@ impl Job {
 ///
 /// Kept as one small enum rather than as flags, because the alternative is a
 /// citizen that is somehow both eating and hauling and the tick order decides
-/// which. An errand is abandoned wholesale when something more urgent comes
-/// up — hunger interrupts hauling, and the load gets dropped where it is
-/// standing, which is a real cost of leaving it too late.
+/// which. An errand is given up wholesale when something more urgent comes up —
+/// hunger interrupts hauling — but what is in the arms stays there and the
+/// delivery resumes after the meal. See `Citizen::pause`.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Errand {
     /// On the way to `from` to pick up `good`, bound for `to`.
@@ -308,9 +308,38 @@ impl Citizen {
     /// Give up whatever this was doing. Anything being carried is put down
     /// where the citizen stands, which is to say lost — there is nowhere else
     /// for it to go.
+    ///
+    /// For orders and for losses: `MoveTo`, `Unassign`, a dropped player, a
+    /// workplace that has become rubble. **Not for hunger or exhaustion** —
+    /// see `pause`, and the seven hundred and ten stone that went with it.
     pub fn abandon(&mut self) {
         self.errand = None;
         self.carrying = Goods::NONE;
+        self.halt();
+    }
+
+    /// Stop what you are doing, but keep hold of it.
+    ///
+    /// What a body's interruption does. `assign_errands` used `abandon` here,
+    /// so every time hunger or exhaustion overruled a delivery **the load was
+    /// destroyed**, and the module's own note called that "the real cost of
+    /// having left it too late".
+    ///
+    /// Measured, it is not a cost, it is a leak that empties a city:
+    /// `what_a_walling_city_spends_its_days_on` watched a city with a wall
+    /// ordered lose **seven hundred and ten stone of the seven hundred and
+    /// twenty it started with, in one day**, on the day its granary first had
+    /// food in it — because that is the day every starving hauler in the city
+    /// had somewhere to eat, and each one dropped its load to go. Nothing
+    /// anywhere said so; the panel read `stone 0` and the wall read
+    /// `waiting for 210 stone`.
+    ///
+    /// The cost of leaving it too late is still there and is now the honest
+    /// one: the walk, and a load that arrives later than it was wanted.
+    /// `find_haul` looks at what is in a citizen's arms before anything else,
+    /// so the delivery resumes after the meal.
+    pub fn pause(&mut self) {
+        self.errand = None;
         self.halt();
     }
 

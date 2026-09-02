@@ -92,6 +92,44 @@ struct Report {
     toward: u32,
     made: u32,
     ages: u32,
+    /// How everybody who died, died. Read off the body the way the panel's
+    /// toll reads it: `drowning_for` above nought is water, an empty stomach
+    /// is hunger.
+    drowned: u32,
+    starved: u32,
+    otherwise: u32,
+}
+
+/// One run of the table: a seed, a strategy, and whatever it was handed.
+///
+/// A struct rather than four arguments, because two of them are `bool` and
+/// `play(seed, p, false, true)` is a call nobody can read.
+#[derive(Copy, Clone)]
+struct Run {
+    seed: u64,
+    play: Play,
+    /// A finished level-two wall on the line `order_a_wall` draws, given free
+    /// on the day the paid strategies order theirs. **Not something a player
+    /// can have.** It is here to separate the two questions four playtests
+    /// have run together: whether a finished wall changes the outcome of a
+    /// flood, and whether a city of eight can get one up.
+    wall_by_fiat: bool,
+    /// Print a line a day.
+    diary: bool,
+}
+
+impl Run {
+    fn new(seed: u64, play: Play) -> Run {
+        Run { seed, play, wall_by_fiat: false, diary: false }
+    }
+    fn walled(mut self) -> Run {
+        self.wall_by_fiat = true;
+        self
+    }
+    fn watched(mut self) -> Run {
+        self.diary = true;
+        self
+    }
 }
 
 const ME: PlayerId = PlayerId(0);
@@ -124,7 +162,8 @@ fn deepest_near(w: &World, hx: i32, hy: i32) -> u16 {
     deepest
 }
 
-fn play(seed: u64, play: Play) -> Report {
+fn play(run: Run) -> Report {
+    let Run { seed, play, .. } = run;
     let mut w = World::new(seed, 2);
     let mut nav = Nav::new();
     let (hx, hy) = w.map.hearth_sites[0];
@@ -152,6 +191,9 @@ fn play(seed: u64, play: Play) -> Report {
         toward: 0,
         made: 0,
         ages: 0,
+        drowned: 0,
+        starved: 0,
+        otherwise: 0,
     };
 
     // What the strategy intends to put down, in order, one per day. Spread out
@@ -230,6 +272,9 @@ fn play(seed: u64, play: Play) -> Report {
             if play == Play::Dike || play == Play::Both {
                 man_the_wall(&mut w);
             }
+            if run.diary {
+                diary(&w, hx, hy);
+            }
         }
 
         // The wall is ordered on the second day, after the farm and the
@@ -250,6 +295,14 @@ fn play(seed: u64, play: Play) -> Report {
         if (play == Play::Dike || play == Play::Both) && !diked && day >= 2 && fed(&w) {
             diked = true;
             report.wall = order_a_wall(&mut w, hx, hy);
+        }
+        // The same wall, on the same day, for nothing. Nobody is taken off a
+        // farm and no stone leaves the store, so what this measures is the
+        // wall itself rather than what a city gives up for it.
+        if run.wall_by_fiat && !diked && day >= 2 && fed(&w) {
+            diked = true;
+            report.wall = order_a_wall(&mut w, hx, hy);
+            finish_the_wall(&mut w, 2);
         }
         if (play == Play::Dike || play == Play::Both) && diked && day >= 3 {
             // Two, and no higher: `which_dikes_break` says level two is where
@@ -361,33 +414,157 @@ fn play(seed: u64, play: Play) -> Report {
         );
         deepest_this_age = deepest_this_age.max(deepest_near(&w, hx, hy));
         at_the_fire = at_the_fire.max(w.water.depth_at(hx, hy));
-        // Recorded once, on the first flood. It used to be assigned on every
-        // impact day, so what the table called "the wall at the age-one flood"
-        // was actually the wall left standing after the age-three one — which
-        // on a level-one wall is nothing at all.
+        // Stone in hand, once an age. The wall, once a run — **on the first
+        // flood, which is what this has always claimed and not what it did.**
+        // The guard put one figure in the list per age and then overwrote
+        // `wall_cost` every time, so "the wall at the age-one flood" was the
+        // wall left standing after the age-three one: on seed 31 the `dike`
+        // script read sixty stone, meaning one segment, when what it had on the
+        // day that mattered was three hundred.
         if w.day_of_age() == World::IMPACT_DAY && report.stone_on_the_day.len() < w.age() as usize {
+            let first_flood = report.stone_on_the_day.is_empty();
             report.stone_on_the_day.push(w.treasury(ME).stone);
-            report.wall_cost = w
-                .buildings
-                .iter()
-                .filter(|b| b.owner == ME && b.kind == Kind::Dike && b.standing_now())
-                .map(|b| b.level as u16 * Kind::Dike.cost().stone)
-                .sum();
+            if first_flood {
+                report.wall_cost = w
+                    .buildings
+                    .iter()
+                    .filter(|b| b.owner == ME && b.kind == Kind::Dike && b.standing_now())
+                    .map(|b| b.level as u16 * Kind::Dike.cost().stone)
+                    .sum();
+            }
         }
         if w.age() != age_before || w.finished().is_some() {
             report.alive.push(w.population(ME));
             report.soaked.push(deepest_this_age);
             report.at_the_fire.push(at_the_fire);
             at_the_fire = 0;
+            // **Not counting the wall's own segments.** A walled run has eleven
+            // more buildings than a bare one the moment the wall is up, so
+            // `standing` was measuring the wall rather than what the wall
+            // saved.
             report.standing.push(
-                w.buildings.iter().filter(|b| b.owner == ME && b.standing_now()).count(),
+                w.buildings
+                    .iter()
+                    .filter(|b| b.owner == ME && b.standing_now() && b.kind != Kind::Dike)
+                    .count(),
             );
             deepest_this_age = 0;
             fled = false;
         }
     }
     report.ages = w.score().ages_survived;
+    // Read off the bodies, the way `Input::mind_the_dead` reads them: nothing
+    // new in `sim`, and the same answer a player is given on the screen.
+    for c in w.citizens.iter().filter(|c| c.owner == ME && !c.alive()) {
+        if c.drowning_for > 0 {
+            report.drowned += 1;
+        } else if c.food == 0 {
+            report.starved += 1;
+        } else {
+            report.otherwise += 1;
+        }
+    }
     report
+}
+
+/// One line a day: what the city has, who is on what, and how the wall is
+/// coming along.
+///
+/// The strategy table says a walling city dies on two seeds in three and says
+/// nothing about what it died of. This is that.
+fn diary(w: &World, hx: i32, hy: i32) {
+    let mine = |f: &dyn Fn(&sim::Citizen) -> bool| {
+        w.citizens.iter().filter(|c| c.owner == ME && c.alive() && f(c)).count()
+    };
+    let dikes: Vec<&sim::Building> =
+        w.buildings.iter().filter(|b| b.owner == ME && b.kind == Kind::Dike).collect();
+    let standing = dikes.iter().filter(|b| b.standing_now()).count();
+    let owed: u16 = dikes.iter().map(|b| b.outstanding().stone).sum();
+    let effort: u32 = dikes
+        .iter()
+        .filter(|b| !b.standing_now())
+        .map(|b| b.progress * 100 / Kind::Dike.build_ticks().max(1))
+        .sum();
+    let sites = dikes.len() - standing;
+    let store = w.treasury(ME);
+    // **Where the stone went.** Nothing in this plan quarries, so a city has
+    // `STARTING_STONE` and that is all the stone there will ever be: whatever
+    // is not in a store, in somebody's arms or delivered to a site has left
+    // the game. `Citizen::abandon` clears `carrying`, and hunger and
+    // exhaustion both call it.
+    let hand = w.in_hand(ME);
+    let delivered: u16 =
+        w.buildings.iter().filter(|b| b.owner == ME).map(|b| b.delivered.stone).sum();
+    let lost = STARTING_STONE
+        .saturating_sub(store.stone)
+        .saturating_sub(hand.stone)
+        .saturating_sub(delivered);
+    // Where the day goes. The wall was rising at twenty stone a day with five
+    // builders on it, which the length of the walk does not explain, so count
+    // the errands rather than reason about them.
+    let after_food = mine(&|c| {
+        matches!(c.errand, Some(sim::citizen::Errand::Collect { good: sim::building::Good::Food, .. }))
+            || c.carrying.food > 0
+    });
+    let after_stone = mine(&|c| {
+        matches!(c.errand, Some(sim::citizen::Errand::Collect { good: sim::building::Good::Stone, .. }))
+            || c.carrying.stone > 0
+    });
+    let resting = mine(&|c| {
+        matches!(
+            c.errand,
+            Some(sim::citizen::Errand::ToEat(_)) | Some(sim::citizen::Errand::ToSleep(_))
+        ) || c.state == sim::citizen::State::Eating
+            || c.state == sim::citizen::State::Sleeping
+    });
+    println!(
+        "  age {} day {}  {} alive  food {:>3}  stone {:>3}+{:<3} {:>3} gone  \
+         {} farm {} build {} idle  [{} fetching food, {} fetching stone, \
+         {} eating or asleep]  wall {}/{} up, {} owed, {}% done  water {}",
+        w.age(),
+        w.day_of_age(),
+        w.population(ME),
+        store.food,
+        store.stone,
+        hand.stone,
+        lost,
+        mine(&|c| c.job == Some(sim::citizen::Job::Farmer)),
+        mine(&|c| c.job == Some(sim::citizen::Job::Builder)),
+        mine(&|c| c.job.is_none()),
+        after_food,
+        after_stone,
+        resting,
+        standing,
+        dikes.len(),
+        owed,
+        if sites == 0 { 0 } else { effort as usize / sites },
+        deepest_near(w, hx, hy),
+    );
+}
+
+/// Hand the city a finished wall: every segment it has ordered, raised to
+/// `levels` and built, with nobody carrying to it and nothing paid for it.
+///
+/// The same fiat `dikes.rs` uses in `wall_the_bank`, and for the same reason
+/// stated there — mixing "does the water take it down" with "can anybody
+/// afford it" is how a threshold gets tuned against a shortage of stone.
+fn finish_the_wall(w: &mut World, levels: u8) {
+    let ids: Vec<sim::BuildingId> = w
+        .buildings
+        .iter()
+        .filter(|b| b.owner == ME && b.kind == Kind::Dike)
+        .map(|b| b.id)
+        .collect();
+    for id in ids {
+        for _ in 0..levels {
+            let owed = w.buildings[id.0 as usize].outstanding().stone;
+            w.deliver_to(id, sim::building::Good::Stone, owed);
+            w.build_at(id, Kind::Dike.build_ticks());
+            if w.buildings[id.0 as usize].level < levels {
+                let _ = w.raise_dike(ME, id);
+            }
+        }
+    }
 }
 
 /// Fill every farm's slots from whoever has no job, which is what a player
@@ -578,7 +755,7 @@ fn three_full_runs_of_each_strategy() {
     let mut reports = Vec::new();
     for seed in SEEDS {
         for p in Play::ALL {
-            let r = play(seed, p);
+            let r = play(Run::new(seed, p));
             println!(
                 "  {:<11} {:<6} {:>4}   {:<13} {:<17} {:<17} {:>5} {:>6} {:>4}",
                 r.seed,
@@ -775,8 +952,8 @@ fn whether_growing_pays_inside_three_ages() {
     println!("  seed          homed   households   settled   nur/beds  toward/made   born   ended   without");
     let mut any_worked = 0u32;
     for seed in SEEDS {
-        let grown = play(seed, Play::Grow);
-        let bare = play(seed, Play::Idle);
+        let grown = play(Run::new(seed, Play::Grow));
+        let bare = play(Run::new(seed, Play::Idle));
         // A child born at tick t works from t + COMING_OF_AGE. The run is
         // MAX_AGE * DAYS_PER_AGE * TICKS_PER_DAY long, so anybody born after
         // that minus COMING_OF_AGE never lifts anything.
@@ -854,4 +1031,117 @@ fn pair_them_up(w: &mut World) {
             let _ = w.apply(ME, &Command::SetHome { citizens: homeless, cottage: c });
         }
     }
+}
+
+/// **Does a finished wall change the outcome of a flood?**
+///
+/// Four playtests have asked whether a dike is worth building and not one has
+/// answered, because in four runs no player has ever owned a finished wall:
+/// M12.11's city 0 put four hundred and forty stone into fifteen segments
+/// across two ages and not one reached `level 1 of 4`. The strategy table has
+/// the same hole from the other side — the tallest wall its own `dike` script
+/// ever got standing by the age-one flood was sixty stone of the seven hundred
+/// and twenty a city starts with, and on two seeds in three the walling city
+/// is dead before the water arrives.
+///
+/// So the question was never measured. It was two questions:
+///
+/// 1. **Is a wall worth having?** Give the city one, free, on the day it would
+///    have ordered it, and take nobody off the fields for it.
+/// 2. **Can a city of eight get one up?** That is the `dike` column of
+///    `three_full_runs_of_each_strategy`, and it is a different answer.
+///
+/// This measures the first. Four cells to a seed: the two plays that survive
+/// (`grow` and `flee`), each with and without a wall it did not have to earn.
+/// If the wall changes nothing here it is not worth building at any price, and
+/// three milestones of legibility work have been spent on a decision that does
+/// not exist. If it changes a great deal, the fault is affordability, and
+/// `DIKE_BUILD_TICKS` and the hauling are where to look.
+///
+///     cargo test -p sim --release --test playtest finished_wall -- --ignored --nocapture
+#[test]
+#[ignore = "a measurement, not an assertion: run it with --nocapture"]
+fn whether_a_finished_wall_changes_a_flood() {
+    const SEEDS: [u64; 3] = [31, 1_000_003, 0xF100_D11E];
+    println!();
+    println!(
+        "  seed        play          ages  alive by age   at the hearth     in the quarter    \
+         standing  wall  would cost"
+    );
+    let (mut walled_lived, mut bare_lived) = (0i32, 0i32);
+    for seed in SEEDS {
+        for how in [Play::Grow, Play::Flee] {
+            for walled in [false, true] {
+                let run = if walled { Run::new(seed, how).walled() } else { Run::new(seed, how) };
+                let (_, lived) = play_and_name(run);
+                if walled {
+                    walled_lived += lived;
+                } else {
+                    bare_lived += lived;
+                }
+            }
+        }
+        println!();
+    }
+    println!(
+        "  walled runs ended with {walled_lived} people alive, bare ones with \
+         {bare_lived}, out of {} who ever lived.",
+        FOUNDING_CITIZENS * 2 * SEEDS.len() as u32
+    );
+    println!();
+}
+
+/// One row of the table above, printed, returning the survivors it ended with.
+fn play_and_name(run: Run) -> (Report, i32) {
+    let r = play(run);
+    println!(
+        "  {:<11} {:<13} {:>4}   {:<13} {:<17} {:<17} {:>8}  {:>4}  {:>10}",
+        r.seed,
+        format!("{}{}", r.play.name(), if run.wall_by_fiat { " + wall" } else { "" }),
+        r.ages,
+        format!("{:?}", r.alive),
+        format!("{:?}", r.at_the_fire),
+        format!("{:?}", r.soaked),
+        format!("{:?}", r.standing),
+        r.wall,
+        r.wall_cost,
+    );
+    let survivors = r.alive.last().copied().unwrap_or(0) as i32;
+    (r, survivors)
+}
+
+/// What a walling city actually spends its days on, and what kills it.
+///
+/// The strategy table says the `dike` script dies in age one on two seeds in
+/// three, with nought stone of wall standing on the impact day, while `grow`
+/// and `flee` on the same seeds live two and three ages. It does not say what
+/// the city died of, and every previous guess about a wall that never got
+/// built has been wrong — the M11.9 handover blamed a footprint offset, the
+/// M12.11 handover blamed `take_a_site`, and the answer was an evacuation that
+/// holds everybody.
+///
+///     cargo test -p sim --release --test playtest walling_city -- --ignored --nocapture
+#[test]
+#[ignore = "a measurement, not an assertion: run it with --nocapture"]
+fn what_a_walling_city_spends_its_days_on() {
+    // The three the strategy table uses: 31 is the seed where a wall works,
+    // and the other two are the ones where ordering one used to kill the city
+    // on day four of age one.
+    const SEEDS: [u64; 3] = [31, 1_000_003, 0xF100_D11E];
+    for seed in SEEDS {
+        for how in [Play::Dike, Play::Grow] {
+            println!();
+            println!("  seed {seed}, playing {}", how.name());
+            let r = play(Run::new(seed, how).watched());
+            println!(
+                "  ended after {} ages with {} alive: {} drowned, {} starved, {} otherwise",
+                r.ages,
+                r.alive.last().copied().unwrap_or(0),
+                r.drowned,
+                r.starved,
+                r.otherwise,
+            );
+        }
+    }
+    println!();
 }

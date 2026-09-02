@@ -280,7 +280,10 @@ fn builders_finish_what_haulers_supply() {
 }
 
 #[test]
-fn a_starving_citizen_drops_what_it_is_carrying_and_goes_to_eat() {
+fn a_starving_citizen_stops_what_it_is_doing_and_goes_to_eat() {
+    // Named for dropping the load until M13, which is not what happens any
+    // more and was never what this test checked: it asserts that somebody eats.
+    // `a_hungry_hauler_keeps_what_it_is_carrying` is the other half.
     let (mut w, mut nav) = a_working_city();
 
     // Run until somebody is both hungry and heading for the granary.
@@ -1468,4 +1471,304 @@ fn a_city_that_evacuated_is_told_its_people_are_still_standing_there() {
 
     // **And the city must be told**, which is the part that was missing and
     // which lives in `gui`: see `tutorial::tests::a_city_still_standing_where_it_was_sent_is_told`.
+}
+
+// ---- M13: why nobody has ever finished a wall ------------------------------
+//
+// Four playtests asked whether a dike is worth building and none could answer,
+// because no player has ever owned a finished one. `playtest.rs`'s
+// `what_a_walling_city_spends_its_days_on` watched the `dike` script day by day
+// and found three faults, none of which had been guessed at in three
+// milestones of handovers. These are the three, one test each.
+
+/// Dike sites near the hearth, ordered but **not** supplied. Returns their ids.
+fn unsupplied_wall(w: &mut World, me: PlayerId, want: usize) -> Vec<BuildingId> {
+    let (hx, hy) = w.map.hearth_sites[0];
+    let mut dikes = Vec::new();
+    for r in 5..40i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (x, y) = (hx + dx, hy + dy);
+                if w.can_place(me, Kind::Dike, Facing::EastWest, x, y).is_ok()
+                    && w.apply(
+                        me,
+                        &Command::Place {
+                            kind: Kind::Dike,
+                            facing: Facing::EastWest,
+                            x: x as u8,
+                            y: y as u8,
+                        },
+                    )
+                    .is_ok()
+                {
+                    dikes.push(w.buildings.last().unwrap().id);
+                    if dikes.len() == want {
+                        return dikes;
+                    }
+                }
+            }
+        }
+    }
+    panic!("nowhere for a wall on this seed");
+}
+
+/// Every stone the city can account for: at rest, in somebody's arms, or
+/// delivered to something. Nothing here quarries, so this may never fall.
+fn all_the_stone(w: &World, me: PlayerId) -> u16 {
+    w.treasury(me).stone
+        + w.in_hand(me).stone
+        + w.buildings.iter().filter(|b| b.owner == me).map(|b| b.delivered.stone).sum::<u16>()
+}
+
+#[test]
+fn a_hungry_hauler_keeps_what_it_is_carrying() {
+    // **Seven hundred and ten stone of seven hundred and twenty, in one day.**
+    //
+    // `Citizen::abandon` cleared `carrying`, and the hunger and exhaustion
+    // branches of `assign_errands` both called it, so every time a body
+    // overruled a delivery the load stopped existing. `jobs.rs` called that
+    // "the real cost of having left it too late" and nothing had ever put a
+    // number on it. The number is: on the day a starving city's granary first
+    // has food in it, every hauler in the city drops its load at once, and
+    // `what_a_walling_city_spends_its_days_on` watched the whole stone reserve
+    // of a city go that way between one day and the next.
+    //
+    // **What this arranges**: a wall to supply, then the exact moment — a
+    // citizen holding stone, made hungry with somewhere to eat. Waiting for
+    // hunger and a full load to coincide on their own is what the old version
+    // of this test did, and on this seed they never did.
+    let (mut w, mut nav) = a_working_city();
+    let me = PlayerId(0);
+    unsupplied_wall(&mut w, me, 6);
+
+    // Run until somebody is carrying stone to the wall.
+    let mut carrying = None;
+    for _ in 0..TICKS_PER_DAY {
+        w.tick(&mut nav, &[]);
+        carrying = w
+            .citizens
+            .iter()
+            .find(|c| c.owner == me && c.alive() && c.carrying.stone > 0)
+            .map(|c| c.id);
+        if carrying.is_some() {
+            break;
+        }
+    }
+    let who = carrying.expect("a day and nobody ever picked up a stone for the wall");
+    let load = w.citizens[who.0 as usize].carrying.stone;
+    let all = all_the_stone(&w, me);
+
+    // Somewhere to eat, and a stomach that says go now. Both are needed: the
+    // hunger branch does nothing at all when there is no food in the city, and
+    // that case is `somebody_both_hungry_and_tired_goes_to_one_of_them`.
+    let granary = w
+        .buildings
+        .iter()
+        .find(|b| b.owner == me && b.kind == Kind::Granary)
+        .map(|b| b.id)
+        .expect("no granary");
+    w.deliver_to(granary, Good::Food, 100);
+    w.citizens[who.0 as usize].food = 0;
+    w.tick(&mut nav, &[]);
+
+    assert_eq!(
+        w.citizens[who.0 as usize].carrying.stone, load,
+        "hunger took the stone out of somebody's arms"
+    );
+    assert_eq!(all_the_stone(&w, me), all, "stone left the game when somebody got hungry");
+
+    // And the delivery finishes. `find_haul` looks at the arms before anything
+    // else, which is what makes the interruption a delay rather than a loss.
+    for _ in 0..TICKS_PER_DAY {
+        w.tick(&mut nav, &[]);
+        if w.citizens[who.0 as usize].carrying.stone == 0 {
+            break;
+        }
+    }
+    assert_eq!(
+        w.citizens[who.0 as usize].carrying.stone, 0,
+        "a day after the meal and the load is still in its arms"
+    );
+    assert_eq!(all_the_stone(&w, me), all, "the load arrived somewhere that was not a building");
+}
+
+#[test]
+fn a_builder_at_a_site_with_no_stone_goes_and_gets_it() {
+    // **The whole wall, in one line of `work_at`.** `Building::build` returns
+    // false while anything is outstanding, and the site arm did not look: the
+    // citizen was set to `Working`, its errand stayed `ToWork`, `busy()` stayed
+    // true, and `find_work` never ran again. An assigned builder at an
+    // unsupplied site worked at nothing for the rest of the game — and since
+    // the hands it took were the city's haulers, nothing ever brought the stone
+    // that would have released it.
+    //
+    // In the `dike` script that was five of eight people standing at seven
+    // segments for four days at `0% done`, with ninety stone owed and six
+    // hundred in the store twenty cells away.
+    //
+    // **What this arranges**: a manned farm, a granary, six unsupplied
+    // segments, and *everybody who is not farming assigned to build*, so there
+    // is not one unassigned hauler in the city. Fed and rested every tick: this
+    // is a question about what people choose to do.
+    let (mut w, mut nav) = a_working_city();
+    let me = PlayerId(0);
+    let dikes = unsupplied_wall(&mut w, me, 6);
+
+    let free: Vec<sim::CitizenId> = w
+        .citizens
+        .iter()
+        .filter(|c| c.owner == me && c.alive() && c.job.is_none())
+        .map(|c| c.id)
+        .collect();
+    assert!(free.len() >= 2, "nobody spare to put on the wall");
+    // Spread over segments, because one segment takes `BUILDER_SLOTS` and no
+    // more — a whole city assigned to one dike is refused as `Full`, which is
+    // the rule doing its job.
+    for (n, who) in free.chunks(BUILDER_SLOTS).enumerate() {
+        w.apply(me, &Command::Assign { citizens: who.to_vec(), building: dikes[n] }).unwrap();
+    }
+
+    for _ in 0..TICKS_PER_DAY * 2 {
+        for c in &mut w.citizens {
+            c.food = NEED_FULL;
+            c.rest = NEED_FULL;
+        }
+        w.tick(&mut nav, &[]);
+    }
+
+    let standing = dikes.iter().filter(|id| w.buildings[id.0 as usize].standing_now()).count();
+    let delivered: u16 =
+        dikes.iter().map(|id| w.buildings[id.0 as usize].delivered.stone).sum();
+    println!("  after two days: {standing} of 6 standing, {delivered} stone delivered");
+    assert!(
+        delivered > 0,
+        "two days, a store full of stone, and the people assigned to the wall \
+         brought it none of it"
+    );
+    assert!(
+        standing > 0,
+        "two days and not one segment stands: {delivered} stone delivered"
+    );
+}
+
+#[test]
+fn a_city_that_employs_everybody_does_not_starve_beside_its_own_farm() {
+    // A farm fills a sixty-unit buffer and stops, a citizen can only eat at a
+    // granary, and a citizen with a job never hauls. So a city that employed
+    // everybody starved beside its own working farms — both M12.11 players hit
+    // it, and M12 answered it with a sentence in the panel telling them the
+    // shortage was haulers.
+    //
+    // The sentence is right and is not enough. Hunger outranks the job: that is
+    // this module's own first paragraph and design §3.2's order, and it cannot
+    // outrank the job only when somebody else has already done the carrying.
+    //
+    // **What this arranges**: three farms, every citizen a farmer, an empty
+    // granary — so there is no unassigned citizen anywhere and nobody can
+    // reach `find_haul` at all. The food exists, in the fields, sixty units at
+    // a time. Nothing touches anybody's stomach.
+    let (mut w, mut nav) = a_working_city();
+    let me = PlayerId(0);
+    let farms: Vec<BuildingId> = {
+        let mut all: Vec<BuildingId> = w
+            .buildings
+            .iter()
+            .filter(|b| b.owner == me && b.kind == Kind::Farm)
+            .map(|b| b.id)
+            .collect();
+        while all.len() < 3 {
+            all.push(build(&mut w, 0, Kind::Farm));
+        }
+        all
+    };
+    let spare: Vec<sim::CitizenId> = w
+        .citizens
+        .iter()
+        .filter(|c| c.owner == me && c.alive() && c.job.is_none())
+        .map(|c| c.id)
+        .collect();
+    let slots = Kind::Farm.slots_for(Job::Farmer);
+    for (n, who) in spare.chunks(slots).enumerate() {
+        w.apply(me, &Command::Assign { citizens: who.to_vec(), building: farms[n + 1] }).unwrap();
+    }
+    assert!(
+        w.citizens.iter().all(|c| c.owner != me || !c.alive() || c.job == Some(Job::Farmer)),
+        "somebody is still a hauler, which is the case this is not about"
+    );
+    assert_eq!(w.treasury(me).food, 0, "the granary should start empty");
+
+    let alive = |w: &World| w.citizens.iter().filter(|c| c.owner == me && c.alive()).count();
+    let at_the_start = alive(&w);
+    for _ in 0..TICKS_PER_DAY * 4 {
+        w.tick(&mut nav, &[]);
+    }
+
+    println!(
+        "  after four days: {} of {at_the_start} alive, {} food in the granary",
+        alive(&w),
+        w.treasury(me).food,
+    );
+    assert_eq!(
+        alive(&w),
+        at_the_start,
+        "somebody starved in a city of farmers with three working farms"
+    );
+    assert!(
+        w.treasury(me).food > 0,
+        "four days and not one unit of food ever reached the granary"
+    );
+}
+
+#[test]
+fn a_new_job_does_not_destroy_what_somebody_was_carrying() {
+    // `unassign_one` — which every `Assign` goes through, not only "back to
+    // hauling" — used to `abandon`, and `abandon` deletes the load. So
+    // "you four, build the wall" quietly burned twenty stone for every hauler
+    // that happened to be holding some, and the panel showed the stone gone
+    // with nothing to explain it. Measured at forty to fifty stone a run in
+    // `what_a_walling_city_spends_its_days_on`, against a supply of seven
+    // hundred and twenty that nothing in a run replaces.
+    //
+    // `MoveTo` still drops what it is carrying, and that stays: "get uphill"
+    // means drop it. This is about a change of job.
+    //
+    // **What this arranges**: a hauler mid-delivery, then a job.
+    let (mut w, mut nav) = a_working_city();
+    let me = PlayerId(0);
+    let dikes = unsupplied_wall(&mut w, me, 6);
+
+    let mut carrying = None;
+    for _ in 0..TICKS_PER_DAY {
+        w.tick(&mut nav, &[]);
+        carrying = w
+            .citizens
+            .iter()
+            .find(|c| c.owner == me && c.alive() && c.carrying.stone > 0)
+            .map(|c| c.id);
+        if carrying.is_some() {
+            break;
+        }
+    }
+    let who = carrying.expect("a day and nobody ever picked up a stone for the wall");
+    let all = all_the_stone(&w, me);
+
+    w.apply(me, &Command::Assign { citizens: vec![who], building: dikes[0] }).unwrap();
+    assert_eq!(all_the_stone(&w, me), all, "being given a job destroyed the load");
+
+    // And it arrives: `find_work` takes what is in the arms somewhere it is
+    // wanted before it starts anything new, whatever the new job is.
+    for _ in 0..TICKS_PER_DAY {
+        w.tick(&mut nav, &[]);
+        if w.citizens[who.0 as usize].carrying.stone == 0 {
+            break;
+        }
+    }
+    assert_eq!(
+        w.citizens[who.0 as usize].carrying.stone, 0,
+        "a day later and the new builder is still holding the load it was given a job over"
+    );
+    assert_eq!(all_the_stone(&w, me), all, "the load went somewhere that was not a building");
 }

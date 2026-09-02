@@ -6,9 +6,11 @@
 //! granary and the same load, because they walk the same lists the same way.
 //!
 //! The order of priorities is the design in one list: eat, sleep, then work.
-//! A citizen too hungry to stand does not finish the delivery first — it drops
-//! what it is carrying and goes, and losing that load is the real cost of
-//! having left it too late.
+//! A citizen too hungry to stand does not finish the delivery first — it goes,
+//! and comes back to the load afterwards. It used to *destroy* the load, which
+//! this note called "the real cost of having left it too late" until a
+//! measurement put a number on it: seven hundred and ten stone of seven
+//! hundred and twenty, in one day. See `Citizen::pause`.
 
 use crate::balance::*;
 use crate::building::{BuildState, BuildingId, Good, Goods, Kind};
@@ -37,10 +39,38 @@ impl World {
             // that cannot be answered must not veto the sleep that can.
             if self.citizens[i].hungry() && !self.heading_to_eat(i) {
                 if let Some(g) = self.nearest_food(i) {
-                    self.citizens[i].abandon();
+                    self.citizens[i].pause();
                     self.citizens[i].errand = Some(Errand::ToEat(g));
                     self.citizens[i].walk_to(Dest::Building(g));
                     continue;
+                }
+                // **Nowhere to eat, and food standing in a field.**
+                //
+                // A farm fills a small buffer and stops, a citizen can only eat
+                // at a granary, and an assigned farmer or builder never hauls —
+                // so a city that employed everybody starved beside its own
+                // working farm. Both M12.11 players hit it and so did the
+                // `dike` script: three farmers, five builders on the wall,
+                // nought in the granary, and five hundred units of food sitting
+                // in two farms while eight people died.
+                //
+                // M12 answered it with a sentence in the panel, which is right
+                // and is not enough. Hunger outranks the job — that is the list
+                // at the top of this function and design §3.2's order — and it
+                // cannot outrank it only when somebody else has already done the
+                // carrying. A hungry citizen with food in sight goes and gets
+                // it, whatever its job, and eats when it arrives.
+                if !self.heading_for_food(i) {
+                    let owner = self.citizens[i].owner;
+                    let (x, y) = self.citizens[i].pos.cell();
+                    if let Some((from, good, to)) =
+                        self.next_collection(owner, x, y, Some(Good::Food))
+                    {
+                        self.citizens[i].pause();
+                        self.citizens[i].errand = Some(Errand::Collect { from, good, to });
+                        self.citizens[i].walk_to(Dest::Building(from));
+                        continue;
+                    }
                 }
             }
             // **And not while it is already on its way to eat.**
@@ -70,7 +100,7 @@ impl World {
                 && !self.heading_to_eat(i)
             {
                 if let Some(bed) = self.bed_for(i) {
-                    self.citizens[i].abandon();
+                    self.citizens[i].pause();
                     self.citizens[i].errand = Some(Errand::ToSleep(bed));
                     self.citizens[i].walk_to(Dest::Building(bed));
                     continue;
@@ -150,6 +180,20 @@ impl World {
             || self.citizens[i].state == State::Eating
     }
 
+    /// Already on its way to fetch or deliver food.
+    ///
+    /// The guard on the hunger branch's second half. Without it a hungry
+    /// citizen re-decides to fetch food every tick, and `pause` puts it back to
+    /// the start of the walk each time — the gyrating fault of
+    /// `somebody_both_hungry_and_tired_goes_to_one_of_them`, in a third place.
+    fn heading_for_food(&self, i: usize) -> bool {
+        match self.citizens[i].errand {
+            Some(Errand::Collect { good: Good::Food, .. }) => true,
+            Some(Errand::Carry { .. }) => self.citizens[i].carrying.food > 0,
+            _ => false,
+        }
+    }
+
     fn heading_to_bed(&self, i: usize) -> bool {
         matches!(self.citizens[i].errand, Some(Errand::ToSleep(_)))
             || self.citizens[i].state == State::Sleeping
@@ -224,6 +268,15 @@ impl World {
             }
             return;
         }
+        // **What is in the arms goes somewhere it is wanted first, whatever
+        // the job is.** A farmer or a builder never reaches `find_haul`, so a
+        // citizen holding twenty stone when it was given a job would hold it
+        // for the rest of the game — which is why this is here rather than
+        // inside the `None` arm below, and why `unassign_one` can afford to
+        // keep the load.
+        if !self.citizens[i].carrying.is_empty() && self.deliver_what_you_hold(i) {
+            return;
+        }
         match self.citizens[i].job {
             // Everything that is not hauling: a producer stands at its
             // building, a builder walks to sites.
@@ -293,6 +346,25 @@ impl World {
         }
     }
 
+    /// Take whatever is in this citizen's arms somewhere that wants it.
+    ///
+    /// The first branch of `find_haul`, on its own, so that a citizen with a
+    /// job can use it: a site that still needs the load, or failing that a
+    /// store with room for it.
+    fn deliver_what_you_hold(&mut self, i: usize) -> bool {
+        let owner = self.citizens[i].owner;
+        let (x, y) = self.citizens[i].pos.cell();
+        let load = self.citizens[i].carrying;
+        match self.somewhere_for(owner, &load, x, y) {
+            Some(to) => {
+                self.citizens[i].errand = Some(Errand::Carry { to });
+                self.citizens[i].walk_to(Dest::Building(to));
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The nearest of this owner's sites with a builder's slot free and
     /// something to do, taken for one building's worth of work.
     ///
@@ -333,11 +405,20 @@ impl World {
 
     /// The next load worth moving, if there is one.
     ///
-    /// Construction first, then clearing producers. A city that hauls food
-    /// while its granary is a hole in the ground has its priorities wrong, and
-    /// so would a city whose farms back up because every hauler is on a
-    /// building site — which is why a full farm counts as construction's equal
-    /// rather than being checked only when nothing is being built.
+    /// **Construction first, then clearing producers, and that order is a
+    /// hazard.** A city that hauls food while its granary is a hole in the
+    /// ground has its priorities wrong, so construction has to come first — but
+    /// a construction site is unlimited demand. Order the fifteen dike segments
+    /// the drag tool draws and every free pair of hands in the city loops
+    /// between the store and the wall for as long as any segment wants a stone,
+    /// and the farms back up behind them.
+    ///
+    /// This comment used to claim a full farm was "construction's equal", which
+    /// the code has never done. What keeps a walling city alive is not a
+    /// priority here but the hunger branch of `assign_errands`: a citizen with
+    /// nothing to eat fetches food itself, whatever it was doing and whatever
+    /// its job. Nobody starves any more, and the wall goes up out of what is
+    /// left of the day — which is the trade a wall is supposed to be.
     fn find_haul(&mut self, i: usize) -> bool {
         let owner = self.citizens[i].owner;
         let (x, y) = self.citizens[i].pos.cell();
@@ -371,7 +452,7 @@ impl World {
             self.citizens[i].walk_to(Dest::Building(from));
             return true;
         }
-        if let Some((from, good, to)) = self.next_collection(owner, x, y) {
+        if let Some((from, good, to)) = self.next_collection(owner, x, y, None) {
             self.citizens[i].errand = Some(Errand::Collect { from, good, to });
             self.citizens[i].walk_to(Dest::Building(from));
             return true;
@@ -486,11 +567,16 @@ impl World {
     }
 
     /// Output waiting at a producer, and somewhere to put it.
+    ///
+    /// `only` narrows it to one good, which is how the starving city above
+    /// asks for the harvest and nothing else: a city under a day of food does
+    /// not want its haulers fetching wood.
     fn next_collection(
         &self,
         owner: PlayerId,
         x: i32,
         y: i32,
+        only: Option<Good>,
     ) -> Option<(BuildingId, Good, BuildingId)> {
         for src in &self.buildings {
             if src.owner != owner || !src.standing_now() {
@@ -499,6 +585,9 @@ impl World {
             let Some(good) = src.kind.produces() else {
                 continue;
             };
+            if only.is_some_and(|want| want != good) {
+                continue;
+            }
             if src.store.get(good) == 0 {
                 continue;
             }
@@ -602,6 +691,32 @@ impl World {
             // sent it. The work is the same work, and `build_at` is the only
             // thing that turns delivered materials into a building.
             (_, BuildState::Site) => {
+                // **A site that has not been supplied is not work, and standing
+                // at one is why nobody has ever finished a wall.**
+                //
+                // `Building::build` returns false while anything is
+                // outstanding, and this arm did not look: the citizen was set
+                // to `Working`, its errand stayed `ToWork`, `busy()` stayed
+                // true, and `find_work` never ran again. An assigned builder at
+                // an unsupplied site therefore worked at nothing for the rest
+                // of the game — and the hands it took were the city's haulers,
+                // so nothing ever brought the stone that would have released
+                // it. Measured in `what_a_walling_city_spends_its_days_on`:
+                // five of eight people stood at seven dike sites for four days
+                // at `0% done` with ninety stone owed and six hundred in the
+                // store, and the city starved around them.
+                //
+                // It lets go of the site rather than the job. `find_work` sends
+                // a Builder to the next site that *is* supplied, and failing
+                // that to `find_haul`, which fetches exactly what this site was
+                // waiting for — so a builder now supplies its own wall, which
+                // is what a player watching one would expect it to do.
+                if !self.buildings[at.0 as usize].ready_to_build() {
+                    self.citizens[i].errand = None;
+                    self.citizens[i].workplace = None;
+                    self.citizens[i].state = State::Idle;
+                    return;
+                }
                 // Half effort when exhausted, like walking.
                 let effort =
                     if self.citizens[i].tired() { BUILDER_EFFORT.max(2) / 2 } else { BUILDER_EFFORT };
