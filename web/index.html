@@ -3,7 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>FLOODLINE</title>
+<title>Floodline — Sam Gilson</title>
+<meta name="description" content="A multiplayer medieval city builder in which each age ends in a flood.">
+<link rel="canonical" href="https://sgilson7.github.io/floodline/">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Floodline">
+<meta property="og:description" content="A multiplayer medieval city builder in which each age ends in a flood.">
+<meta property="og:url" content="https://sgilson7.github.io/floodline/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Floodline">
+<meta name="twitter:description" content="A multiplayer medieval city builder in which each age ends in a flood.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "name": "Floodline",
+  "description": "A multiplayer medieval city builder in which each age ends in a flood.",
+  "url": "https://sgilson7.github.io/floodline/"
+}
+</script>
 <style>
   html, body {
     margin: 0; padding: 0; height: 100%; overflow: hidden;
@@ -19,16 +38,24 @@
     align-items: center; justify-content: center; gap: 14px;
     background: #08080c; z-index: 10;
   }
+  #loading h1.title { margin: 0; font-weight: 400; }
+  #loading .blurb { max-width: 46ch; margin: 0; text-align: center; font-size: 14px; line-height: 1.6; }
+  #loading .links { margin: 0; font-size: 13px; }
+  #loading .links a { color: #9fb9d8; }
   #loading .title { font-size: 26px; letter-spacing: 6px; color: #78aadc; }
   #loading .sub { font-size: 13px; color: #6a6a80; }
 </style>
 </head>
 <body>
   <div id="loading">
-    <div class="title">FLOODLINE</div>
-    <div class="sub">loading…</div>
+    <h1 class="title">Floodline</h1>
+    <p class="blurb">A multiplayer medieval city builder in which each age ends in a flood.</p>
+    <p class="links"><a href="/projects/floodline/">About Floodline</a>
+       &middot; <a href="/projects/">Tools and games</a></p>
+    <p class="sub" id="status">Loading Floodline…</p>
+    <noscript><p class="sub">This game requires JavaScript and WebAssembly.</p></noscript>
   </div>
-  <canvas id="glcanvas" tabindex="1"></canvas>
+  <canvas id="glcanvas" tabindex="1" aria-label="Floodline game"></canvas>
 
   <script>window.FLOODLINE_BUILD = "__BUILD__";</script>
   <!--
@@ -52,6 +79,19 @@
     load("floodline.wasm");
     // The shim swaps to the canvas once the module is up; give it a beat,
     // then clear the splash and hand it keyboard focus.
+    // A failed fetch of the module or a plugin leaves the splash up for ever
+    // with no account of why. The status line says what happened instead; the
+    // waiting state itself is unchanged.
+    (function () {
+      const fail = () => {
+        const canvas = document.getElementById("glcanvas");
+        if (canvas && canvas.width > 0) return;   // already running
+        const el = document.getElementById("status");
+        if (el) el.textContent = "The game could not load. Reload the page and try again.";
+      };
+      window.addEventListener("error", fail);
+      window.addEventListener("unhandledrejection", fail);
+    })();
     (function waitForStart() {
       const canvas = document.getElementById("glcanvas");
       if (canvas.width > 0 && canvas.height > 0) {
